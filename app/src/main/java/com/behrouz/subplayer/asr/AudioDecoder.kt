@@ -1,4 +1,4 @@
-package com.behrouz.subplayer
+package com.behrouz.subplayer.asr
 
 import android.content.Context
 import android.media.AudioFormat
@@ -15,7 +15,7 @@ import kotlin.math.roundToInt
 
 /**
  * Decodes the audio track of a video with Android's built-in MediaCodec and
- * streams it out as 16-bit little-endian mono PCM at [targetRate] Hz
+ * streams it out as 16-bit mono PCM samples at [targetRate] Hz
  * (Vosk needs 16 000 Hz mono). Nothing is written to disk.
  */
 object AudioDecoder {
@@ -25,8 +25,9 @@ object AudioDecoder {
         uri: Uri,
         targetRate: Int,
         checkCancelled: () -> Unit,
+        onDuration: (Long) -> Unit,
         onProgress: (Int) -> Unit,
-        sink: (ByteArray, Int) -> Unit
+        sink: (ShortArray) -> Unit
     ) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -45,6 +46,7 @@ object AudioDecoder {
 
             val mime = format.getString(MediaFormat.KEY_MIME)!!
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+            onDuration(durationUs)
             var srcRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
             var isFloat = false
@@ -96,10 +98,7 @@ object AudioDecoder {
                         ob.limit(info.offset + info.size)
                         val mono = toMono(ob.slice().order(ByteOrder.nativeOrder()), channels, isFloat)
                         val out = resampler.process(mono)
-                        if (out.isNotEmpty()) {
-                            val bytes = toBytes(out)
-                            sink(bytes, bytes.size)
-                        }
+                        if (out.isNotEmpty()) sink(out)
                         if (durationUs > 0) {
                             onProgress(((info.presentationTimeUs * 100) / durationUs).toInt().coerceIn(0, 99))
                         }
@@ -137,7 +136,7 @@ object AudioDecoder {
         }
     }
 
-    private fun toBytes(s: ShortArray): ByteArray {
+    fun toBytes(s: ShortArray): ByteArray {
         val b = ByteArray(s.size * 2)
         for (i in s.indices) {
             val v = s[i].toInt()

@@ -20,8 +20,10 @@ URL_A = "https://kaikki.org/dewiktionary/Deutsch/kaikki.org-dictionary-Deutsch.j
 URL_B = "https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl"
 URL_C = "https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl"
 
-MAX_SENSES = 8
+MAX_SENSES = 6
 MAX_EXAMPLES = 2
+MAX_EXAMPLE_CHARS = 170
+MAX_GLOSS_CHARS = 240
 MAX_EN = 8
 MAX_FA = 6
 
@@ -64,6 +66,29 @@ def en_keys(text):
     return [t] if t and len(t.split()) <= 3 else []
 
 
+EN_POS = {"noun": "noun", "verb": "verb", "adj": "adj", "adv": "adv", "num": "num",
+          "pron": "pron", "prep": "prep", "conj": "conj", "intj": "intj"}
+
+
+def via_keys(ent):
+    """The 2 main English meanings of a German entry, as (english word, part of speech)."""
+    pos = EN_POS.get(ent["pos"])
+    if not pos:
+        return []
+    cands = []
+    for g in ent.get("en_gloss", [])[:2]:
+        for part in g.split(";")[:2]:
+            for piece in part.split(",")[:1]:
+                cands += en_keys(piece)
+    for w in ent["en"][:2]:
+        cands += en_keys(w)
+    out = []
+    for c in cands:
+        if c not in out:
+            out.append(c)
+    return [(c, pos) for c in out[:2]]
+
+
 def main(out_path):
     entries = {}            # (lemma, pos) -> dict
     lookup = collections.defaultdict(set)   # key -> {(lemma,pos)}
@@ -86,6 +111,8 @@ def main(out_path):
                     if fo.get("word"):
                         form_of_A.append((word, fo["word"]))
             continue
+        if pos == "name" and not any(t.get("lang_code") == "en" for t in (e.get("translations") or [])):
+            continue   # surnames / small places: noise for a learner's dictionary
         key = (word, pos)
         ent = entries.get(key)
         if ent is None:
@@ -106,11 +133,13 @@ def main(out_path):
         for s in senses:
             if len(ent["senses"]) >= MAX_SENSES:
                 break
-            g = clean("; ".join(s.get("glosses", []) or []))
+            g = clean("; ".join(s.get("glosses", []) or []))[:MAX_GLOSS_CHARS]
             if not g:
                 continue
             ex = [clean(x.get("text", "")) for x in (s.get("examples") or [])]
-            ent["senses"].append({"de": g, "ex": [x for x in ex if x][:MAX_EXAMPLES]})
+            ex = [x for x in ex if x and len(x) <= MAX_EXAMPLE_CHARS]
+            ex.sort(key=len)
+            ent["senses"].append({"de": g, "ex": ex[:MAX_EXAMPLES]})
         for t in e.get("translations", []) or []:
             if t.get("lang_code") == "en":
                 ent["en"].append(t.get("word", ""))
@@ -160,6 +189,8 @@ def main(out_path):
         if not glosses:
             continue
         targets = [(word, pos)] if (word, pos) in entries else by_lemma.get(word, [])
+        if not targets and pos == "name":
+            continue
         if not targets:
             # word only in English Wiktionary: add a minimal entry
             key = (word, pos)
@@ -174,37 +205,37 @@ def main(out_path):
         for k in targets:
             ent = entries[k]
             ent.setdefault("en_gloss", [])
-            ent["en_gloss"].extend(glosses)
+            ent["en_gloss"].extend(g[:MAX_GLOSS_CHARS] for g in glosses)
             enriched += 1
     print("B entries read:", nB, "enriched:", enriched, flush=True)
 
-    # English keys we need Persian for
+    # English keys we need Persian for: only the 2 main English meanings, with part of speech
     need = set()
     for ent in entries.values():
-        if ent["fa"]:
-            continue
-        for w in ent["en"][:MAX_EN]:
-            need.update(en_keys(w))
-        for g in ent.get("en_gloss", [])[:3]:
-            for part in g.split(";"):
-                need.update(en_keys(part))
+        if not ent["fa"]:
+            need.update(k for k, _ in via_keys(ent))
     print("English keys needing Persian:", len(need), flush=True)
 
     # ---------------- C: English Wiktionary (English words -> Persian) ----------------
-    en2fa = {}
+    # Persian is taken only from the English word's first 3 meanings, per part of speech.
+    en2fa = {}   # (word, pos) -> [fa...]
     nC = 0
     for e in stream(URL_C):
         nC += 1
         w = (e.get("word") or "").lower()
         if w not in need:
             continue
-        fa = [t.get("word", "") for t in (e.get("translations") or [])
-              if (t.get("lang_code") or t.get("code")) == "fa"]
+        pos = e.get("pos", "")
+        fa = []
+        for s_i, sense in enumerate((e.get("senses") or [])[:3]):
+            fa += [t.get("word", "") for t in (sense.get("translations") or [])
+                   if (t.get("lang_code") or t.get("code")) == "fa"]
+        if not fa:  # older layout: translations at entry level, in sense order
+            fa = [t.get("word", "") for t in (e.get("translations") or [])
+                  if (t.get("lang_code") or t.get("code")) == "fa"][:4]
         if fa:
-            en2fa.setdefault(w, [])
-            en2fa[w].extend(fa)
-    print("C entries read:", nC, "English words with Persian:", len(en2fa), flush=True)
-
+            en2fa.setdefault((w, pos), []).extend(fa)
+    print("C entries read:", nC, "English (word,pos) with Persian:", len(en2fa), flush=True)
     # ---------------- write SQLite ----------------
     if os.path.exists(out_path):
         os.remove(out_path)
@@ -223,16 +254,11 @@ def main(out_path):
         fa = uniq(ent["fa"], MAX_FA)
         fa_via = []
         if not fa:
-            cand = []
-            for w in ent["en"][:MAX_EN]:
-                cand += en_keys(w)
-            for g in ent.get("en_gloss", [])[:3]:
-                for part in g.split(";"):
-                    cand += en_keys(part)
-            for c in cand:
-                for f in en2fa.get(c, [])[:3]:
-                    fa_via.append(f + "  (" + c + ")")
-            fa_via = uniq(fa_via, MAX_FA)
+            for key, epos in via_keys(ent):
+                got = en2fa.get((key, epos), [])
+                for f in got[:2]:
+                    fa_via.append(f + "  (" + key + ")")
+            fa_via = uniq(fa_via, 4)
         stats["entries"] += 1
         if ent["ipa"]: stats["ipa"] += 1
         if fa: stats["fa_direct"] += 1
