@@ -336,7 +336,7 @@ private fun ControlPanel(vm: AppViewModel, onToggleFullscreen: () -> Unit, onLoa
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 ActionButton(Icons.Subtitles, "Subtitles") { vm.sheet = Sheet.Generate }
-                ActionButton(Icons.FileOpen, "Load .srt", onLoadSrt)
+                ActionButton(Icons.FileOpen, "Load .srt", onClick = onLoadSrt)
                 ActionButton(Icons.Download, "Save clip") {
                     if (vm.pointA >= 0 && vm.pointB > vm.pointA) vm.sheet = Sheet.Export
                     else vm.message = "Set A and B first, then save the clip"
