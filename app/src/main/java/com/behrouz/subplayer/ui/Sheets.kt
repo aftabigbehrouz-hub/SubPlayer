@@ -69,11 +69,12 @@ import com.behrouz.subplayer.dict.Dictionary
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
-    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState()) {
+    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)
         ) {
+            SaveBar(vm, s.saved, s.cueStart >= 0 && vm.videoUri != null)
             when {
                 s.loading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -263,11 +264,12 @@ private fun QuickActions(vm: AppViewModel, s: Sheet.Word) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
-    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState()) {
+    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)
         ) {
+            SaveBar(vm, s.saved, s.cueStart >= 0 && vm.videoUri != null)
             Text(s.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = { vm.speak(s.text) }) {
@@ -324,7 +326,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GenerateSheet(vm: AppViewModel) {
-    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)) {
             Text("Make subtitles", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
@@ -426,3 +428,18 @@ private fun articleColor(a: String) = when (a) {
 
 /** Wiktionary examples start with a sense marker like "[1]" — remove it before speaking. */
 private fun cleanExample(s: String) = s.replace(Regex("""^\[\d+[a-z]?]\s*"""), "")
+
+
+val SheetBg = androidx.compose.ui.graphics.Color(0xFF14121F)
+
+/** ★ Save / Saved toggle shown at the top of word and phrase cards. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun SaveBar(vm: AppViewModel, saved: Boolean, possible: Boolean) {
+    if (!possible) return
+    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Explain(if (saved) "In My Words — it will come back for review" else "Save it to review later, with this video moment",
+            Modifier.weight(1f))
+        Pill(if (saved) "Saved" else "Save", active = saved, icon = if (saved) Icons.Star else Icons.StarOutline) { vm.saveFromSheet() }
+    }
+}

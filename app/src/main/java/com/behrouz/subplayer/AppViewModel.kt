@@ -25,6 +25,12 @@ import com.behrouz.subplayer.dict.Dictionary
 import com.behrouz.subplayer.dict.Speaker
 import com.behrouz.subplayer.dict.Translator
 import com.behrouz.subplayer.export.ClipExporter
+import com.behrouz.subplayer.licence.Licence
+import com.behrouz.subplayer.words.Recents
+import com.behrouz.subplayer.words.Reminder
+import com.behrouz.subplayer.words.SavedWord
+import com.behrouz.subplayer.words.Srs
+import com.behrouz.subplayer.words.WordStore
 import com.behrouz.subplayer.subs.Cue
 import com.behrouz.subplayer.subs.CueBuilder
 import com.behrouz.subplayer.subs.Srt
@@ -53,7 +59,10 @@ sealed class Sheet {
         val needDictionary: Boolean = false,
         val onlineEn: String? = null,
         val onlineFa: String? = null,
-        val onlineBusy: Boolean = false
+        val onlineBusy: Boolean = false,
+        val cueStart: Long = -1,
+        val cueEnd: Long = -1,
+        val saved: Boolean = false
     ) : Sheet()
 
     data class Phrase(
@@ -64,12 +73,21 @@ sealed class Sheet {
         val busy: Boolean = true,
         val error: String? = null,
         val service: String? = null,
-        val glosses: Map<String, String> = emptyMap()
+        val glosses: Map<String, String> = emptyMap(),
+        val sentence: String = "",
+        val cueStart: Long = -1,
+        val cueEnd: Long = -1,
+        val saved: Boolean = false
     ) : Sheet()
 
     object Generate : Sheet()
     object Export : Sheet()
+    object Help : Sheet()
+    object Settings : Sheet()
+    object Videos : Sheet()
 }
+
+enum class Screen { PLAYER, WORDS, REVIEW }
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -112,8 +130,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var job: Job? = null
     private var dictionary: Dictionary? = null
 
+    // ---- navigation / app state
+    var screen by mutableStateOf(Screen.PLAYER)
+    var controlsVisible by mutableStateOf(true)
+    private var lastInteraction = System.currentTimeMillis()
+
+    // ---- saved words + review
+    private val store = WordStore(app)
+    val recents = Recents(app)
+    var words by mutableStateOf<List<SavedWord>>(emptyList()); private set
+    var savedKeys by mutableStateOf<Set<String>>(emptySet()); private set
+    var dueCount by mutableIntStateOf(0); private set
+    var reviewQueue by mutableStateOf<List<SavedWord>>(emptyList()); private set
+    var reviewIndex by mutableIntStateOf(0); private set
+    var reviewRevealed by mutableStateOf(false); private set
+    var reviewDone by mutableIntStateOf(0); private set
+    var reviewGot by mutableIntStateOf(0); private set
+    var recentList by mutableStateOf<List<Recents.Item>>(emptyList()); private set
+
+    // ---- licence
+    var licence by mutableStateOf(Licence.current(app)); private set
+    val deviceCode: String = Licence.deviceCode(app)
+    var isOwner by mutableStateOf(Licence.ownerKey(app) != null); private set
+
+    // ---- first-run tour + reminder settings
+    private val uiPrefs = app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+    var showTour by mutableStateOf(!uiPrefs.getBoolean("tour_done", false))
+    var reminderOn by mutableStateOf(Reminder.enabled(app)); private set
+    var reminderHour by mutableIntStateOf(Reminder.hour(app)); private set
+
     init {
         if (!whisperSupported) genEngine = Engine.FAST
+        refreshWords()
+        recentList = recents.list()
         viewModelScope.launch {
             while (true) {
                 position = player.currentPosition
@@ -123,6 +172,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     player.seekTo(pointA); position = pointA
                 }
                 currentCue = CueBuilder.indexAt(cues, position)
+                if (playing && controlsVisible && System.currentTimeMillis() - lastInteraction > 3500) controlsVisible = false
+                if (playing && position / 1000 % 5 == 0L && position % 1000 < 60) rememberPosition()
                 delay(50)
             }
         }
@@ -132,7 +183,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- video
 
-    fun openVideo(uri: Uri) {
+    fun openVideo(uri: Uri, resume: Boolean = true) {
+        rememberPosition()
         videoUri = uri
         videoName = displayName(uri)
         clearAB()
@@ -146,10 +198,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 break
             }
         }
-        player.setMediaItem(MediaItem.fromUri(uri))
+        val startAt = if (resume) recents.get(uri.toString())?.positionMs?.takeIf { it > 3000 } ?: 0L else 0L
+        player.setMediaItem(MediaItem.fromUri(uri), startAt)
         player.prepare()
         player.playWhenReady = true
+        recents.put(Recents.Item(uri.toString(), videoName, startAt, 0, System.currentTimeMillis()))
+        recentList = recents.list()
+        screen = Screen.PLAYER
+        if (startAt > 0) message = "Continuing from ${com.behrouz.subplayer.ui.fmt(startAt)}"
     }
+
+    /** Stores where the user is in the current video (for "continue watching"). */
+    fun rememberPosition() {
+        val u = videoUri ?: return
+        val d = player.duration.coerceAtLeast(0)
+        val p = player.currentPosition
+        recents.put(Recents.Item(u.toString(), videoName, if (d > 0 && p > d - 5000) 0 else p, d, System.currentTimeMillis()))
+        recentList = recents.list()
+    }
+
+    fun openRecent(item: Recents.Item) {
+        val uri = Uri.parse(item.uri)
+        if (!canRead(uri)) {
+            message = "That video can no longer be opened (moved or deleted?). Open it again with the folder button."
+            recents.remove(item.uri); recentList = recents.list()
+            return
+        }
+        sheet = null
+        openVideo(uri)
+    }
+
+    private fun canRead(uri: Uri): Boolean = try {
+        ctx.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+    } catch (_: Exception) {
+        false
+    }
+
+    fun touch() { lastInteraction = System.currentTimeMillis(); controlsVisible = true }
 
     fun togglePlay() {
         if (player.isPlaying) player.pause() else {
@@ -210,10 +295,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             phraseMode = false
             val a = minOf(selStart, selEnd); val b = maxOf(selStart, selEnd)
             selStart = a; selEnd = b
-            if (a == b) openWord(words[a], cue.text) else openPhrase(words.subList(a, b + 1))
+            if (a == b) openWord(words[a], cue.text, cue.startMs, cue.endMs) else openPhrase(words.subList(a, b + 1), cue.text, cue.startMs, cue.endMs)
         } else {
             selCue = cueIndex; selStart = wordIndex; selEnd = wordIndex; phraseMode = false
-            openWord(words[wordIndex], cue.text)
+            openWord(words[wordIndex], cue.text, cue.startMs, cue.endMs)
         }
     }
 
@@ -228,7 +313,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         player.pause()
         val w = tokens(cue.text)
         selCue = cueIndex; selStart = 0; selEnd = w.size - 1; phraseMode = false
-        openPhrase(w)
+        openPhrase(w, cue.text, cue.startMs, cue.endMs)
     }
 
     fun clearSelection() { selCue = -1; selStart = -1; selEnd = -1; phraseMode = false }
@@ -238,14 +323,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         clearSelection()
     }
 
-    fun openWord(raw: String, sentence: String) {
+    fun openWord(raw: String, sentence: String, cueStart: Long = -1, cueEnd: Long = -1) {
         val word = Dictionary.normalize(raw)
         if (word.isEmpty()) return
-        sheet = Sheet.Word(word, sentence)
+        val prev = sheet
+        val (cs, ce, sent) = if (cueStart >= 0) Triple(cueStart, cueEnd, sentence) else when (prev) {
+            is Sheet.Word -> Triple(prev.cueStart, prev.cueEnd, prev.sentence)
+            is Sheet.Phrase -> Triple(prev.cueStart, prev.cueEnd, prev.sentence)
+            else -> Triple(-1L, -1L, sentence)
+        }
+        sheet = Sheet.Word(word, sent, cueStart = cs, cueEnd = ce, saved = isSaved(word, cs))
         viewModelScope.launch {
             val d = dictionaryOrNull()
             if (d == null) {
-                update<Sheet.Word> { it.copy(loading = false, needDictionary = true) }
+                update<Sheet.Word> { if (it.word == word) it.copy(loading = false, needDictionary = true) else it }
                 return@launch
             }
             val res = withContext(Dispatchers.IO) { runCatching { d.lookup(word) }.getOrDefault(emptyList()) }
@@ -263,10 +354,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun openPhrase(words: List<String>) {
+    private fun openPhrase(words: List<String>, sentence: String, cueStart: Long, cueEnd: Long) {
         val text = words.joinToString(" ")
         val clean = words.map { Dictionary.normalize(it) }.filter { it.isNotEmpty() }
-        sheet = Sheet.Phrase(text, clean)
+        sheet = Sheet.Phrase(text, clean, sentence = sentence, cueStart = cueStart, cueEnd = cueEnd,
+            saved = isSaved(text, cueStart))
         viewModelScope.launch {
             // word-by-word glosses from the offline dictionary
             dictionaryOrNull()?.let { d ->
@@ -411,6 +503,148 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun assetReady(a: Assets.Asset) = Downloader.isReady(ctx, a)
 
+
+    // ------------------------------------------------------ saved words
+
+    private fun key(text: String) = Dictionary.normalize(text).lowercase()
+
+    private fun isSaved(text: String, cueStart: Long): Boolean {
+        val u = videoUri?.toString() ?: return false
+        return store.find(Dictionary.normalize(text), u, cueStart) != null
+    }
+
+    fun refreshWords() {
+        val all = store.all()
+        words = all
+        savedKeys = all.map { key(it.text) }.toSet()
+        dueCount = store.dueCount(System.currentTimeMillis())
+    }
+
+    /** Saves the word/phrase in the open card, with its sentence and video moment. */
+    fun saveFromSheet() {
+        val u = videoUri ?: run { message = "Open the video first"; return }
+        val now = System.currentTimeMillis()
+        val w: SavedWord = when (val s = sheet) {
+            is Sheet.Word -> {
+                val e = s.entries.firstOrNull()
+                SavedWord(
+                    text = s.word, lemma = e?.lemma ?: s.word, article = e?.article ?: "", ipa = e?.ipa ?: "",
+                    english = e?.english?.take(2)?.joinToString("; ") ?: s.onlineEn.orEmpty(),
+                    persian = (e?.persian?.takeIf { it.isNotEmpty() } ?: e?.persianViaEnglish)?.take(3)?.joinToString("، ")
+                        ?: s.onlineFa.orEmpty(),
+                    sentence = s.sentence, videoUri = u.toString(), videoName = videoName,
+                    startMs = s.cueStart.coerceAtLeast(0), endMs = maxOf(s.cueEnd, s.cueStart + 2000),
+                    created = now, due = now
+                )
+            }
+            is Sheet.Phrase -> SavedWord(
+                text = s.text, lemma = s.text, english = s.en.orEmpty(), persian = s.fa.orEmpty(),
+                sentence = s.sentence, videoUri = u.toString(), videoName = videoName,
+                startMs = s.cueStart.coerceAtLeast(0), endMs = maxOf(s.cueEnd, s.cueStart + 2000),
+                created = now, due = now
+            )
+            else -> return
+        }
+        val existing = store.find(w.text, w.videoUri, w.startMs)
+        if (existing != null) {
+            store.delete(existing.id)
+            message = "Removed from My Words"
+        } else {
+            store.insert(w)
+            message = "★ Saved to My Words — it will come up for review"
+        }
+        refreshWords()
+        when (val s = sheet) {
+            is Sheet.Word -> sheet = s.copy(saved = existing == null)
+            is Sheet.Phrase -> sheet = s.copy(saved = existing == null)
+            else -> {}
+        }
+    }
+
+    fun isKnownWord(token: String) = key(token) in savedKeys
+
+    fun deleteWord(w: SavedWord) { store.delete(w.id); refreshWords() }
+
+    /** Opens the word's video (if needed) and loops the subtitle line it came from. */
+    fun playClip(w: SavedWord, stayOnScreen: Boolean = true) {
+        val uri = Uri.parse(w.videoUri)
+        if (videoUri?.toString() != w.videoUri) {
+            if (!canRead(uri)) { message = "The video \"${w.videoName}\" can't be opened any more. Open it once with the folder button."; return }
+            val keep = screen
+            openVideo(uri, resume = false)
+            if (stayOnScreen) screen = keep
+        }
+        pointA = (w.startMs - 200).coerceAtLeast(0)
+        pointB = w.endMs + 300
+        player.seekTo(pointA)
+        player.play()
+    }
+
+    fun startReview() {
+        val q = store.due(System.currentTimeMillis()).ifEmpty { store.all().sortedBy { it.due }.take(20) }
+        if (q.isEmpty()) { message = "Save some words first: pause, tap a word, then ★ Save"; return }
+        reviewQueue = q; reviewIndex = 0; reviewRevealed = false; reviewDone = 0; reviewGot = 0
+        screen = Screen.REVIEW
+    }
+
+    fun revealAnswer() { reviewRevealed = true }
+
+    fun answer(gotIt: Boolean) {
+        val w = reviewQueue.getOrNull(reviewIndex) ?: return
+        val updated = Srs.review(w, gotIt, System.currentTimeMillis())
+        store.update(updated)
+        reviewDone++
+        if (gotIt) reviewGot++
+        // "Again" puts the word back at the end of this session
+        if (!gotIt) reviewQueue = reviewQueue + updated
+        reviewIndex++
+        reviewRevealed = false
+        clearAB()
+        player.pause()
+        refreshWords()
+    }
+
+    fun endReview() { clearAB(); player.pause(); screen = Screen.WORDS }
+
+    /** Set when the reminder needs the notification permission first (the activity asks for it). */
+    var pendingReminder by mutableStateOf<Pair<Boolean, Int>?>(null)
+
+    fun requestReminder(on: Boolean, hour: Int) {
+        if (on && !Reminder.canNotify(ctx)) pendingReminder = on to hour else setReminder(on, hour)
+    }
+
+    fun setReminder(on: Boolean, hour: Int) {
+        Reminder.set(ctx, on, hour)
+        reminderOn = on; reminderHour = hour
+        if (on) message = "Daily reminder at %02d:00".format(hour)
+    }
+
+    fun finishTour() { showTour = false; uiPrefs.edit().putBoolean("tour_done", true).apply() }
+
+    // ---------------------------------------------------------- licence
+
+    fun activate(code: String): Boolean {
+        val h = Licence.activate(ctx, code)
+        if (h != null) { licence = h; message = "Activated for ${h.name}" }
+        return h != null
+    }
+
+    fun becomeOwner(privateKey: String, name: String): Boolean {
+        val h = Licence.becomeOwner(ctx, privateKey, name)
+        if (h != null) { licence = h; isOwner = true; message = "Owner tools unlocked on this phone" }
+        return h != null
+    }
+
+    fun createActivationCode(device: String, buyer: String): String? {
+        val key = Licence.ownerKey(ctx) ?: return null
+        val d = device.trim().uppercase()
+        if (!Regex("[A-Z2-7]{5}-[A-Z2-7]{5}").matches(d)) { message = "Device code looks wrong (format XXXXX-XXXXX)"; return null }
+        if (buyer.isBlank()) { message = "Enter the buyer's name"; return null }
+        return Licence.create(key, d, buyer)
+    }
+
+    fun forgetOwnerKey() { Licence.forgetOwnerKey(ctx); isOwner = false; message = "Owner key removed from this phone" }
+
     // --------------------------------------------------------- export
 
     fun export(burn: Boolean) {
@@ -470,6 +704,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun langName(l: String) = if (l == "en") "English" else "German"
 
     override fun onCleared() {
+        rememberPosition()
+        store.close()
         job?.cancel()
         player.release()
         speaker.shutdown()

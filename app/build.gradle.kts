@@ -11,8 +11,8 @@ android {
         applicationId = "com.behrouz.subplayer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "2.0.1"
+        versionCode = 4
+        versionName = "2.1"
 
         // 64-bit ARM phones (practically every phone from the last ~7 years)
         ndk { abiFilters += listOf("arm64-v8a") }
@@ -90,6 +90,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("com.google.android.material:material:1.12.0")   // window theme only
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")   // daily review reminder
 
     // Video: playback + clip export (Media3)
     implementation("androidx.media3:media3-exoplayer:1.4.1")

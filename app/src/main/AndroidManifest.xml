@@ -3,6 +3,8 @@
 
     <!-- Needed only to download the speech model once -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Daily review reminder -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
