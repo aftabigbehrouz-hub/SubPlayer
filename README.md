@@ -53,7 +53,7 @@ site as a fallback. The app checks every file's SHA‑256 fingerprint and refuse
 | Clip export | ✓ | – |
 
 **About Persian:** about 4,400 words have a Persian translation written for them in German Wiktionary; about
-17,000 more get Persian through their main English meaning (shown as *via English*, with the English word
+16,400 more get Persian through their main English meaning (shown as *via English*, with the English word
 in brackets so you can judge it). Rare words may have English only.
 
 ---

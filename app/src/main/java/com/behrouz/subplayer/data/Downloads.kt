@@ -55,10 +55,10 @@ object Assets {
         "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin")
     val DICT_DE = Asset(
         "dict-de", "German dictionary", "dict-de-v1.zip", DICT_MB,
-        "SHA_DICT", null, unzipInto = "dict", result = "dict/dict.db")
+        "7991bd05f238b6697aa6eddc4a9ec710e537545cb6a2e605196370a6344babc7", null, unzipInto = "dict", result = "dict/dict.db")
 }
 
-private const val DICT_MB = 0 // replaced with the real size at build time
+private const val DICT_MB = 38 // dict-de-v1.zip = 37 909 522 bytes
 
 object Downloader {
 
