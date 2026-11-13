@@ -1,0 +1,12 @@
+src 48000 Hz, 10.000 s -> 160000 samples @16k (expected ~160000, diff 0)
+src 44100 Hz, 10.000 s -> 160000 samples @16k (expected ~160000, diff 0)
+src 16000 Hz, 10.000 s -> 159999 samples @16k (expected ~160000, diff -1)
+src 22050 Hz, 10.000 s -> 160000 samples @16k (expected ~160000, diff 0)
+1
+00:00:00,500 --> 00:00:01,800
+Hallo wie geht's
+
+2
+00:00:03,000 --> 00:00:05,100
+Mir geht es gut
+
