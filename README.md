@@ -1,4 +1,4 @@
-# SubPlayer 2.2 — learn German with your own videos
+# SubPlayer 2.3 — learn German with your own videos
 
 - **Subtitles made on your phone, offline:** Fast (Vosk), Accurate (Whisper Base) or Best (Whisper Small).
   Whisper adds punctuation and correct German capitalisation.
@@ -14,6 +14,16 @@
   sentence, plays the moment in the video, then reveals the meaning; *Got it* / *Again* schedules the next review
   (1 → 2 → 4 → 7 → 15 → 30 → 60 days, or 10 minutes). Each word shows how many times it was reviewed.
   Optional daily reminder. Saved words glow gold in the subtitles.
+- **Learn more:** every word card and saved word has **ChatGPT** and **Grok** (they open with a ready question asking
+  for the meaning, forms and **3 Beispielsätze with English and Persian**), **DWDS** and **dict.cc**. Copy the answer,
+  tap **＋ Add sentences**, and the sentences join the word (lines like `DE: … | EN: … | FA: …` keep their translations).
+  Review shows a different sentence each time.
+- **Practice (My Words ▸ Practice):** *Fill the gap* (your sentences with the word missing — choose or type),
+  *Dictation* (hear the video line, type it, each word marked right/wrong), *der · die · das* for saved nouns.
+  Daily 🔥 streak.
+- **Listening modes:** *Pause each line* (stops after every subtitle so you can read and tap) and *🎙 Shadowing*
+  (plays the line, pauses for you to repeat it aloud, plays it again).
+- **Subtitle file:** save the subtitles to *Download/SubPlayer/…srt* or share them (Telegram, e-mail …); load .srt/.vtt.
 - **Full screen:** button or just turn the phone sideways; tap = show/hide controls, double-tap left/right = ±5 s.
 - **Videos:** folder icon opens another video at any time; the clock icon lists recent videos and resumes them.
 - **Free trial:** 10 days with everything unlocked, then an activation code is needed (see *Selling SubPlayer*).
@@ -81,7 +91,8 @@ in brackets so you can judge it). Rare words may have English only.
   entries, 183 924 with IPA, 138 271 with examples, 129 149 with English. The build log tests 32 everyday words.
 - **Clip export** uses Media3 Transformer: the clip is cut from A to B and each subtitle is drawn as an image
   on the frames it belongs to.
-- **Checks on every build:** 14 unit tests — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
+- **Checks on every build:** 22 unit tests — sentence parsing (AI answers, tables, plain lines), gap creation for
+  inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
 ## Selling SubPlayer — 10-day trial + activation codes
