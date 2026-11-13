@@ -64,3 +64,35 @@ class SubtitlesTest {
         assertTrue(rows.all { it.length <= 42 })
     }
 }
+
+class SentenceTest {
+    private val cues = listOf(
+        Cue(0, 2000, "Ich bin heute früh"),
+        Cue(2100, 4000, "aufgestanden, weil ich"),
+        Cue(4100, 6000, "zum Bahnhof muss."),
+        Cue(6500, 8000, "Der Zug fährt um acht."),
+        Cue(12000, 14000, "Danach"),          // long pause before: separate
+        Cue(14100, 15000, "gehen wir essen.")
+    )
+
+    @Test fun joinsLinesIntoTheSentence() {
+        assertEquals(0..2, CueBuilder.sentenceRange(cues, 1))
+        assertEquals("Ich bin heute früh aufgestanden, weil ich zum Bahnhof muss.", CueBuilder.sentenceText(cues, 0..2))
+        assertEquals(3..3, CueBuilder.sentenceRange(cues, 3))
+        assertEquals(4..5, CueBuilder.sentenceRange(cues, 5))
+    }
+
+    @Test fun noJoiningWithoutPunctuation() {
+        val vosk = listOf(Cue(0, 1000, "ich bin heute"), Cue(1100, 2000, "früh aufgestanden"))
+        assertEquals(1..1, CueBuilder.sentenceRange(vosk, 1))
+    }
+
+    @Test fun splitsLongOnlineSegments() {
+        val long = Cue(0, 10_000, "Das ist ein sehr langer Satz, der von der Online-Erkennung kommt und viel zu lang für eine Zeile ist. Und hier beginnt der nächste Satz mit mehr Worten.")
+        val parts = CueBuilder.splitLong(listOf(long))
+        assertTrue(parts.size >= 2)
+        assertTrue(parts.all { it.text.replace("\n", " ").length <= 84 })
+        assertEquals(0L, parts.first().startMs)
+        for (k in 0 until parts.size - 1) assertTrue(parts[k].endMs <= parts[k + 1].startMs)
+    }
+}

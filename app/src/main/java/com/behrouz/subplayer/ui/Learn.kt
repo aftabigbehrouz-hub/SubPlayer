@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -92,6 +93,54 @@ fun AddSentencesSheet(vm: AppViewModel, s: Sheet.AddSentences) {
             GlowButton("Add ${preview.size} to this word", Modifier.fillMaxWidth(), icon = Icons.Check, enabled = preview.isNotEmpty()) {
                 vm.addSentences(s.wordId, text)
             }
+        }
+    }
+}
+
+/** Paste a video link: Tagesschau page or a direct .mp4 / .webm link. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LinkSheet(vm: AppViewModel, s: Sheet.Link) {
+    var text by remember(s) { mutableStateOf(s.initial) }
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, containerColor = SheetBg, contentColor = Light) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().imePadding().padding(bottom = 24.dp)) {
+            NeonTitle("Video link", 24.sp)
+            Explain("Paste a Tagesschau video page (or another page that offers an MP4) or a direct .mp4/.webm link. " +
+                "SubPlayer downloads the video to Movies/SubPlayer, opens it, and you can make subtitles. " +
+                "Tip: in the Tagesschau app or a browser, Share ▸ SubPlayer does the same.", Modifier.padding(vertical = 8.dp))
+            GlassField(text, { text = it }, "https://www.tagesschau.de/…", singleLine = false)
+            Row(Modifier.padding(top = 8.dp)) { Pill("Paste from clipboard") { text = vm.clipboardText() } }
+            Spacer(Modifier.height(12.dp))
+            GlowButton("Download & open", Modifier.fillMaxWidth(), icon = Icons.Download, enabled = text.contains("http")) { vm.importLink(text) }
+            Explain("YouTube, Instagram, TikTok and streaming services can't be downloaded — their terms don't allow it.",
+                Modifier.padding(top = 10.dp))
+        }
+    }
+}
+
+/** Provider + API key for online transcription. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun OnlineSettings(vm: AppViewModel) {
+    var key by remember(vm.onlineProvider) { mutableStateOf(vm.onlineKey) }
+    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
+        Text("Online transcription", color = Light, fontWeight = FontWeight.Bold)
+        Explain("Fastest and most accurate (Whisper large-v3 on the provider's servers): a 20-minute video takes about a minute. " +
+            "Needs internet and your own API key — Groq has a free tier. The audio is sent to the provider; " +
+            "from some countries a VPN is needed.", Modifier.padding(vertical = 6.dp))
+        Row {
+            com.behrouz.subplayer.asr.OnlineEngine.Provider.values().forEach { p ->
+                Pill(p.title.substringBefore(" ·"), active = vm.onlineProvider == p) { vm.switchProvider(p) }
+                Spacer(Modifier.width(8.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        GlassField(key, { key = it }, "API key (${vm.onlineProvider.title.substringBefore(" ·")})")
+        Row(Modifier.padding(top = 8.dp)) {
+            Pill("Save key", active = key.isNotBlank() && key != vm.onlineKey) { vm.setOnline(vm.onlineProvider, key); vm.message = "API key saved on this phone" }
+            Spacer(Modifier.width(8.dp))
+            Pill("Get a key ↗") { vm.openUrl(vm.onlineProvider.keyPage) }
         }
     }
 }

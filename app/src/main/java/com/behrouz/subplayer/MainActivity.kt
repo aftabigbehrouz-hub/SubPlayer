@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(i: Intent?) {
         if (i == null) return
         if (i.action == Intent.ACTION_VIEW) i.data?.let { vm.openVideo(it) }
+        if (i.action == Intent.ACTION_SEND) vm.handleShared(i)
         if (i.getStringExtra("open") == "review" && !vm.trialEnded) vm.startReview()
     }
 

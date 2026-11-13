@@ -17,7 +17,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.behrouz.subplayer.asr.OnlineEngine
 import com.behrouz.subplayer.asr.VoskEngine
+import com.behrouz.subplayer.net.AppLinks
+import com.behrouz.subplayer.net.LinkImporter
 import com.behrouz.subplayer.asr.WhisperEngine
 import com.behrouz.subplayer.data.Assets
 import com.behrouz.subplayer.data.Downloader
@@ -50,7 +53,8 @@ import java.io.File
 enum class Engine(val title: String, val detail: String) {
     FAST("Fast", "Vosk · quick, lower accuracy, no punctuation"),
     ACCURATE("Accurate", "Whisper Base · ~57 MB · usually faster than the video"),
-    BEST("Best", "Whisper Small · ~182 MB · takes about as long as the video")
+    BEST("Best", "Whisper Small · ~182 MB · takes about as long as the video"),
+    ONLINE("Online", "Whisper large-v3 · fastest & most accurate · needs internet and an API key")
 }
 
 data class Task(val title: String, val message: String, val progress: Int)   // progress -1 = busy
@@ -89,6 +93,7 @@ sealed class Sheet {
     object Export : Sheet()
     data class AddSentences(val wordId: Long, val title: String, val initial: String) : Sheet()
     object SubFile : Sheet()
+    data class Link(val initial: String) : Sheet()
     object Help : Sheet()
     object Settings : Sheet()
     object Videos : Sheet()
@@ -202,6 +207,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var showTour by mutableStateOf(!uiPrefs.getBoolean("tour_done", false))
     var reminderOn by mutableStateOf(Reminder.enabled(app)); private set
     var reminderHour by mutableIntStateOf(Reminder.hour(app)); private set
+    var onlineProvider by mutableStateOf(runCatching { OnlineEngine.Provider.valueOf(uiPrefs.getString("online_provider", "GROQ")!!) }
+        .getOrDefault(OnlineEngine.Provider.GROQ)); private set
+    var onlineKey by mutableStateOf(uiPrefs.getString("online_key_" + onlineProvider.name, "") ?: ""); private set
 
     init {
         if (!whisperSupported) genEngine = Engine.FAST
@@ -362,10 +370,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             phraseMode = false
             val a = minOf(selStart, selEnd); val b = maxOf(selStart, selEnd)
             selStart = a; selEnd = b
-            if (a == b) openWord(words[a], cue.text, cue.startMs, cue.endMs) else openPhrase(words.subList(a, b + 1), cue.text, cue.startMs, cue.endMs)
+            val (sent, cs, ce) = sentenceAround(cueIndex)
+            if (a == b) openWord(words[a], sent, cs, ce) else openPhrase(words.subList(a, b + 1), sent, cs, ce)
         } else {
             selCue = cueIndex; selStart = wordIndex; selEnd = wordIndex; phraseMode = false
-            openWord(words[wordIndex], cue.text, cue.startMs, cue.endMs)
+            val (sent, cs, ce) = sentenceAround(cueIndex)
+            openWord(words[wordIndex], sent, cs, ce)
         }
     }
 
@@ -380,7 +390,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         player.pause()
         val w = tokens(cue.text)
         selCue = cueIndex; selStart = 0; selEnd = w.size - 1; phraseMode = false
-        openPhrase(w, cue.text, cue.startMs, cue.endMs)
+        val (sent, cs, ce) = sentenceAround(cueIndex)
+        openPhrase(tokens(sent), sent, cs, ce)     // the complete sentence, even across lines
     }
 
     fun clearSelection() { selCue = -1; selStart = -1; selEnd = -1; phraseMode = false }
@@ -537,6 +548,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         val model = dl(if (lang == "de") Assets.VOSK_DE else Assets.VOSK_EN)()
                         task = Task(title, "Transcribing…", 0)
                         VoskEngine.transcribe(ctx, uri, model) { p -> ui { task = Task(title, "Transcribing… $p%", p) } }
+                    }
+                    Engine.ONLINE -> {
+                        if (onlineKey.isBlank()) throw IllegalStateException("Add your API key first: Settings › Online transcription")
+                        OnlineEngine.transcribe(ctx, uri, onlineProvider, onlineKey, lang) { p, msg ->
+                            ui { task = Task(title, "$msg $p%", p) }
+                        }
                     }
                     Engine.ACCURATE, Engine.BEST -> {
                         val model = dl(if (engine == Engine.BEST) Assets.WHISPER_SMALL else Assets.WHISPER_BASE)()
@@ -738,9 +755,87 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+
+    // ------------------------------------------------------ complete sentences
+
+    /** The full sentence around a subtitle line (joined across lines), with its start and end time. */
+    fun sentenceAround(cueIndex: Int): Triple<String, Long, Long> {
+        val r = CueBuilder.sentenceRange(cues, cueIndex)
+        return Triple(CueBuilder.sentenceText(cues, r), cues[r.first].startMs, cues[r.last].endMs)
+    }
+
+    /** From a word card: translate the complete sentence it came from. */
+    fun openSentenceOfSheet() {
+        val s = sheet as? Sheet.Word ?: return
+        if (s.sentence.isBlank()) return
+        openPhrase(tokens(s.sentence), s.sentence, s.cueStart, s.cueEnd)
+    }
+
+    // ------------------------------------------------------ links & sharing
+
+    fun openLinkSheet() {
+        val clip = clipboardText().trim()
+        sheet = Sheet.Link(if (clip.startsWith("http")) clip else "")
+    }
+
+    /** Downloads the video behind a link (Tagesschau page or direct .mp4) and opens it. */
+    fun importLink(raw: String) {
+        val url = Regex("""https?://\S+""").find(raw)?.value ?: run { message = "No web link found"; return }
+        LinkImporter.refusedReason(url)?.let { message = it; return }
+        if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        sheet = null
+        job = viewModelScope.launch {
+            task = Task("Video link", "Looking for the video…", -1)
+            try {
+                val found = LinkImporter.resolve(url)
+                task = Task("Downloading", found.title, 0)
+                val uri = LinkImporter.download(ctx, found, { }) { p, bytes ->
+                    ui { task = Task("Downloading", "${found.title} · ${bytes / 1_048_576} MB" + if (p >= 0) " · $p%" else "", p) }
+                }
+                openVideo(uri, resume = false)
+                message = "Saved to Movies/SubPlayer — tap Subtitles to transcribe it"
+                sheet = Sheet.Generate
+            } catch (e: CancellationException) {
+                message = "Cancelled"
+            } catch (e: Throwable) {
+                message = "Link failed — " + describe(e)
+            } finally {
+                task = null
+            }
+        }
+    }
+
+    /** Something was shared to SubPlayer: a video file or text containing a link. */
+    fun handleShared(i: Intent) {
+        val stream = if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                     else @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        if (stream != null && (i.type ?: "").startsWith("video")) { openVideo(stream); return }
+        val text = i.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        if (Regex("""https?://\S+""").containsMatchIn(text)) sheet = Sheet.Link(text)
+    }
+
+    // ------------------------------------------------------ online transcription settings
+
+    fun setOnline(provider: OnlineEngine.Provider, key: String) {
+        onlineProvider = provider
+        onlineKey = key.trim()
+        uiPrefs.edit().putString("online_provider", provider.name).putString("online_key_" + provider.name, onlineKey).apply()
+    }
+
+    fun switchProvider(p: OnlineEngine.Provider) {
+        onlineProvider = p
+        onlineKey = uiPrefs.getString("online_key_" + p.name, "") ?: ""
+        uiPrefs.edit().putString("online_provider", p.name).apply()
+    }
+
+    fun openUrl(url: String) {
+        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { message = "No browser found" }
+    }
+
     // ------------------------------------------------------ learn more
 
-    enum class Source { CHATGPT, GROK, DWDS, DICTCC }
+    enum class Source { CHATGPT, GROK, DWDS, DICTCC, OTHER }
 
     private fun aiPrompt(word: String, sentence: String) =
         "Explain the German word „$word“" + (if (sentence.isNotBlank()) " as used in: „${sentence.replace('\n', ' ')}“" else "") + ".\n" +
@@ -752,11 +847,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens ChatGPT / Grok with a ready question, or DWDS / dict.cc for the word. */
     fun learnMore(source: Source, word: String, sentence: String) {
         val w = word.trim()
+        // installed apps first
+        when (source) {
+            Source.CHATGPT, Source.GROK -> {
+                val pkg = if (source == Source.CHATGPT) AppLinks.CHATGPT else AppLinks.GROK
+                if (AppLinks.installed(ctx, pkg) && AppLinks.sendText(ctx, pkg, aiPrompt(w, sentence))) {
+                    android.widget.Toast.makeText(ctx, "Question placed in the app — tap send. Then copy the 3 sentences back " +
+                        "and tap “Add sentences”.", android.widget.Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+            Source.DICTCC -> {
+                val pkg = AppLinks.DICTCC.firstOrNull { AppLinks.installed(ctx, it) }
+                if (pkg != null && (AppLinks.lookUp(ctx, pkg, w) || AppLinks.sendText(ctx, pkg, w))) return
+            }
+            Source.OTHER -> {
+                if (!AppLinks.lookUp(ctx, null, w)) AppLinks.sendText(ctx, null, w)
+                return
+            }
+            Source.DWDS -> {}
+        }
         val url = when (source) {
             Source.CHATGPT -> "https://chatgpt.com/?q=" + Uri.encode(aiPrompt(w, sentence))
             Source.GROK -> "https://grok.com/?q=" + Uri.encode(aiPrompt(w, sentence))
             Source.DWDS -> "https://www.dwds.de/wb/" + Uri.encode(w)
             Source.DICTCC -> "https://www.dict.cc/?s=" + Uri.encode(w)
+            Source.OTHER -> return
         }
         if (source == Source.CHATGPT || source == Source.GROK) {
             val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

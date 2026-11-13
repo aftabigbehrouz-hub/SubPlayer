@@ -202,6 +202,8 @@ fun VideosSheet(vm: AppViewModel, onOpenVideo: () -> Unit) {
             NeonTitle("Videos", 24.sp)
             Explain("Recently opened videos continue where you stopped.", Modifier.padding(bottom = 12.dp))
             GlowButton("Open another video", Modifier.fillMaxWidth(), icon = Icons.Folder) { vm.sheet = null; onOpenVideo() }
+            Spacer(Modifier.height(8.dp))
+            Pill("Paste a video link", icon = Icons.Download) { vm.openLinkSheet() }
             Spacer(Modifier.height(12.dp))
             if (vm.recentList.isEmpty()) Explain("No recent videos yet.")
             vm.recentList.forEach { RecentRow(vm, it) }
@@ -237,6 +239,8 @@ fun SettingsSheet(vm: AppViewModel) {
                 OwnerTools(vm, ctx)
             }
 
+            Spacer(Modifier.height(12.dp))
+            OnlineSettings(vm)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("About", color = W, fontWeight = FontWeight.Bold)

@@ -136,6 +136,50 @@ object CueBuilder {
         return t
     }
 
+    /** Splits long segments (online Whisper returns up to ~30 s) into ≤84-character lines, timed by length. */
+    fun splitLong(cues: List<Cue>, maxChars: Int = 84): List<Cue> = polish(cues.flatMap { c ->
+        val t = c.text.replace('\n', ' ').trim()
+        if (t.length <= maxChars) listOf(c.copy(text = wrap(t))) else {
+            val words = t.split(' ')
+            val parts = ArrayList<String>(); var cur = StringBuilder()
+            for (w in words) {
+                if (cur.isNotEmpty() && cur.length + 1 + w.length > maxChars) { parts.add(cur.toString()); cur = StringBuilder() }
+                if (cur.isNotEmpty()) cur.append(' ')
+                cur.append(w)
+                // prefer to break after a sentence end
+                if (cur.length > maxChars / 2 && (w.endsWith('.') || w.endsWith('?') || w.endsWith('!'))) { parts.add(cur.toString()); cur = StringBuilder() }
+            }
+            if (cur.isNotEmpty()) parts.add(cur.toString())
+            val total = parts.sumOf { it.length }.coerceAtLeast(1)
+            var tStart = c.startMs
+            parts.map { part ->
+                val dur = (c.endMs - c.startMs) * part.length / total
+                Cue(tStart, tStart + dur, wrap(part)).also { tStart += dur }
+            }
+        }
+    })
+
+    private fun endsSentence(text: String) = text.trimEnd().trimEnd('"', '“', '”', '»', '«', '\'', ')').let {
+        it.endsWith('.') || it.endsWith('!') || it.endsWith('?') || it.endsWith('…') || it.endsWith(':')
+    }
+
+    /** True if the subtitles have punctuation at all (Vosk subtitles don't, so lines can't be joined into sentences). */
+    fun hasPunctuation(cues: List<Cue>): Boolean { val n = cues.count { endsSentence(it.text) }; return n > 0 && n * 5 >= cues.size }
+
+    /**
+     * The lines that make up the complete sentence around line [i]: neighbouring lines are joined while
+     * the sentence hasn't ended and the pause between lines is short (at most 4 lines).
+     */
+    fun sentenceRange(cues: List<Cue>, i: Int, maxLines: Int = 4, maxGapMs: Long = 1500): IntRange {
+        if (i !in cues.indices || !hasPunctuation(cues)) return i..i
+        var a = i; var b = i
+        while (a > 0 && b - a + 1 < maxLines && !endsSentence(cues[a - 1].text) && cues[a].startMs - cues[a - 1].endMs <= maxGapMs) a--
+        while (b < cues.size - 1 && b - a + 1 < maxLines && !endsSentence(cues[b].text) && cues[b + 1].startMs - cues[b].endMs <= maxGapMs) b++
+        return a..b
+    }
+
+    fun sentenceText(cues: List<Cue>, r: IntRange) = r.joinToString(" ") { cues[it].text.replace('\n', ' ').trim() }
+
     /** Index of the cue showing at [posMs], or -1 (binary search; cues sorted by start). */
     fun indexAt(cues: List<Cue>, posMs: Long): Int {
         var lo = 0

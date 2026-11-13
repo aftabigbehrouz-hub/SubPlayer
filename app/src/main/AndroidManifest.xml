@@ -6,6 +6,26 @@
     <!-- Daily review reminder -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Which learning apps are installed (Android 11+ needs this list) -->
+    <queries>
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="ai.x.grok" />
+        <package android:name="cc.dict.dictcc" />
+        <package android:name="cc.dict.dictccplus" />
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
@@ -38,6 +58,17 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
+            </intent-filter>
+            <!-- Share a video or a link (e.g. from the Tagesschau app or a browser) to SubPlayer -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
     </application>

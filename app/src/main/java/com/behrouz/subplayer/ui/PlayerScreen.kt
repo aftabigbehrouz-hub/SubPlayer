@@ -133,6 +133,7 @@ fun PlayerScreen(
         Sheet.Settings -> SettingsSheet(vm)
         Sheet.Videos -> VideosSheet(vm, onOpenVideo)
         Sheet.SubFile -> SubFileSheet(vm, onLoadSrt)
+        is Sheet.Link -> LinkSheet(vm, s)
         is Sheet.AddSentences -> AddSentencesSheet(vm, s)
         null -> {}
     }
@@ -213,6 +214,8 @@ private fun Home(vm: AppViewModel, onOpenVideo: () -> Unit, modifier: Modifier) 
                 Modifier.padding(horizontal = 4.dp))
             Spacer(Modifier.height(18.dp))
             GlowButton("Open a video", icon = Icons.Folder, onClick = onOpenVideo)
+            Spacer(Modifier.height(10.dp))
+            Pill("Paste a video link (Tagesschau, .mp4 …)", icon = Icons.Download) { vm.openLinkSheet() }
         }
 
         if (vm.words.isNotEmpty()) {

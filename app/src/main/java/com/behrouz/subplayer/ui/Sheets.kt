@@ -86,6 +86,13 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
                     EntryView(vm, e)
                 }
             }
+            if (!s.loading && s.sentence.isNotBlank()) {
+                Section("In the video")
+                Text(s.sentence, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+                Row(Modifier.padding(top = 6.dp)) {
+                    Pill("Translate whole sentence") { vm.openSentenceOfSheet() }
+                }
+            }
             if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence)
             Spacer(Modifier.height(10.dp))
             Text(
@@ -346,13 +353,13 @@ fun GenerateSheet(vm: AppViewModel) {
             }
             Section("Quality")
             Engine.values().forEach { e ->
-                val enabled = e == Engine.FAST || vm.whisperSupported
+                val enabled = e == Engine.FAST || e == Engine.ONLINE || vm.whisperSupported
                 val asset = when (e) {
                     Engine.FAST -> if (vm.genLang == "de") Assets.VOSK_DE else Assets.VOSK_EN
                     Engine.ACCURATE -> Assets.WHISPER_BASE
-                    Engine.BEST -> Assets.WHISPER_SMALL
+                    Engine.BEST, Engine.ONLINE -> Assets.WHISPER_SMALL
                 }
-                val ready = vm.assetReady(asset)
+                val ready = if (e == Engine.ONLINE) vm.onlineKey.isNotBlank() else vm.assetReady(asset)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = if (vm.genEngine == e) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -370,15 +377,20 @@ fun GenerateSheet(vm: AppViewModel) {
                             )
                         }
                         Text(
-                            if (ready) "✓ ready" else "${asset.sizeMb} MB",
+                            if (e == Engine.ONLINE) (if (ready) "✓ key set" else "needs key") else if (ready) "✓ ready" else "${asset.sizeMb} MB",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline
                         )
                     }
                 }
             }
+            if (vm.genEngine == Engine.ONLINE) {
+                Spacer(Modifier.height(8.dp))
+                OnlineSettings(vm)
+            }
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { vm.generate() }, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.generate() }, modifier = Modifier.fillMaxWidth(),
+                enabled = vm.genEngine != Engine.ONLINE || vm.onlineKey.isNotBlank()) {
                 Icon(Icons.Subtitles, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Start")
             }
         }
@@ -453,14 +465,16 @@ private fun SaveBar(vm: AppViewModel, saved: Boolean, possible: Boolean) {
 @Composable
 fun LearnMore(vm: AppViewModel, word: String, sentence: String) {
     Section("Learn more · add sentences")
-    Explain("ChatGPT and Grok open with a ready question: meaning, forms and 3 Beispielsätze with English and Persian. " +
-        "Copy their answer, come back and tap ＋ Add sentences — they join this word for review and practice.")
+    Explain("ChatGPT and Grok (app if installed, otherwise the website) get a ready question: meaning, forms and " +
+        "3 Beispielsätze with English and Persian. dict.cc opens its app if installed; “Other app…” lists every dictionary " +
+        "or translator on your phone. Copy an answer, come back and tap ＋ Add sentences.")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(top = 8.dp)) {
         Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, word, sentence) }
         Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence) }
         Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence) }
         Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, word, sentence) }
+        Pill("Other app…") { vm.learnMore(AppViewModel.Source.OTHER, word, sentence) }
         Pill("＋ Add sentences", active = true) { vm.ensureSavedFromSheet()?.let { vm.openAddSentences(it) } }
     }
 }
