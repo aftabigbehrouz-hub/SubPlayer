@@ -1,0 +1,46 @@
+name: Probe data sources
+on:
+  push:
+    paths: ['.github/workflows/probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: kaikki dewiktionary links
+        run: |
+          curl -sL https://kaikki.org/dewiktionary/rawdata.html | grep -oE 'href="[^"]+"' | head -60
+          echo ----
+          curl -sL https://kaikki.org/dewiktionary/Deutsch/index.html | grep -oE 'href="[^"]+\.(jsonl|json|gz)[^"]*"' | head -20
+          echo ----
+          curl -sL https://kaikki.org/dictionary/German/index.html | grep -oE 'href="[^"]+\.(jsonl|json|gz)[^"]*"' | head -20
+      - name: sample German entries (de edition)
+        run: |
+          URL=$(curl -sL https://kaikki.org/dewiktionary/Deutsch/index.html | grep -oE 'href="[^"]+\.jsonl[^"]*"' | head -1 | sed 's/href="//;s/"$//')
+          echo "URL=$URL"
+          case "$URL" in http*) ;; *) URL="https://kaikki.org/dewiktionary/Deutsch/$URL";; esac
+          curl -sL "$URL" -o de.jsonl; ls -la de.jsonl; wc -l de.jsonl
+          python3 - <<'PY'
+          import json, collections
+          n=0; fa=0; en=0; ipa=0; ex=0; keys=collections.Counter(); forms=0
+          shown=0
+          with open('de.jsonl', encoding='utf-8') as f:
+              for line in f:
+                  e=json.loads(line); n+=1; keys.update(e.keys())
+                  tr=e.get('translations',[])
+                  if any(t.get('lang_code')=='fa' for t in tr): fa+=1
+                  if any(t.get('lang_code')=='en' for t in tr): en+=1
+                  if any('ipa' in s for s in e.get('sounds',[])): ipa+=1
+                  if any(s.get('examples') for s in e.get('senses',[])): ex+=1
+                  if e.get('forms'): forms+=1
+                  if e.get('word') in ('Haus','gehen','ging','schön') and shown<4:
+                      shown+=1; print(json.dumps(e, ensure_ascii=False)[:3500]); print('=====')
+          print('entries',n,'with fa',fa,'with en',en,'ipa',ipa,'examples',ex,'forms',forms)
+          print(keys.most_common(40))
+          PY
+      - name: model URLs reachable
+        run: |
+          for u in https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip; do
+            echo "$u $(curl -sIL -o /dev/null -w '%{http_code} %{size_download}' $u) $(curl -sIL $u | grep -i '^content-length' | tail -1)"
+          done
