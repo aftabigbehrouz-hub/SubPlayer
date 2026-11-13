@@ -76,17 +76,18 @@ def via_keys(ent):
     if not pos:
         return []
     cands = []
-    for g in ent.get("en_gloss", [])[:2]:
-        for part in g.split(";")[:2]:
+    # German Wiktionary's translation table lists the main meaning first (Zug -> train)
+    for w in ent["en"][:3]:
+        cands += en_keys(w)
+    for g in ent.get("en_gloss", [])[:1]:
+        for part in g.split(";")[:1]:
             for piece in part.split(",")[:1]:
                 cands += en_keys(piece)
-    for w in ent["en"][:2]:
-        cands += en_keys(w)
     out = []
     for c in cands:
         if c not in out:
             out.append(c)
-    return [(c, pos) for c in out[:2]]
+    return [(c, pos) for c in out[:3]]
 
 
 def main(out_path):

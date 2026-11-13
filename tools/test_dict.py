@@ -2,7 +2,7 @@
 """Checks the built dictionary with real subtitle-style words (run in CI, output in the log)."""
 import json, sqlite3, sys
 
-WORDS = ["Wohnung", "fahren", "Zug", "Arbeit", "lernen", "Haus", "Häuser", "ging", "gegangen", "schöne", "gemacht", "ist", "hat", "Hause",
+WORDS = ["Bahnhof", "Zeit", "Frage", "Wohnung", "fahren", "Zug", "Arbeit", "lernen", "Haus", "Häuser", "ging", "gegangen", "schöne", "gemacht", "ist", "hat", "Hause",
          "aufgestanden", "Mädchen", "trotzdem", "Bahnhof", "eigentlich", "Wohnung", "gesagt",
          "kannst", "Fenster", "fährt", "Kindern", "besser", "Entschuldigung", "Brot", "schnell"]
 
