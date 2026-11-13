@@ -58,7 +58,19 @@ object AudioDecoder {
                 throw IllegalStateException("This phone cannot decode the audio format ($mime).")
             }
             codec = c
-            c.configure(format, null, null, 0)
+            // Some phones' decoders offer input buffers smaller than the file's largest audio
+            // chunk, and Android then fails with a bare IllegalArgumentException. Ask for
+            // buffers big enough for any chunk in the file.
+            val wanted = maxOf(
+                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) else 0,
+                512 * 1024
+            )
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, wanted)
+            try {
+                c.configure(format, null, null, 0)
+            } catch (e: Exception) {
+                throw IllegalStateException("The phone's audio decoder rejected this file's audio ($mime): ${e.message ?: e.javaClass.simpleName}", e)
+            }
             c.start()
 
             val info = MediaCodec.BufferInfo()
@@ -72,7 +84,14 @@ object AudioDecoder {
                     val inIdx = c.dequeueInputBuffer(10_000)
                     if (inIdx >= 0) {
                         val buf = c.getInputBuffer(inIdx)!!
-                        val size = extractor.readSampleData(buf, 0)
+                        buf.clear()
+                        val size = try {
+                            extractor.readSampleData(buf, 0)
+                        } catch (e: IllegalArgumentException) {
+                            throw IllegalStateException(
+                                "Audio chunk larger than the decoder's buffer (${buf.capacity()} bytes) at " +
+                                    "${extractor.sampleTime / 1_000_000}s of the video", e)
+                        }
                         if (size < 0) {
                             c.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
@@ -94,8 +113,9 @@ object AudioDecoder {
                 } else if (outIdx >= 0) {
                     if (info.size > 0) {
                         val ob = c.getOutputBuffer(outIdx)!!
-                        ob.position(info.offset)
+                        ob.clear()
                         ob.limit(info.offset + info.size)
+                        ob.position(info.offset)
                         val mono = toMono(ob.slice().order(ByteOrder.nativeOrder()), channels, isFloat)
                         val out = resampler.process(mono)
                         if (out.isNotEmpty()) sink(out)

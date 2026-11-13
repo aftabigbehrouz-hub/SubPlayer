@@ -312,7 +312,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Exception) {
-                message = e.message ?: "Download failed"
+                message = "Download failed — " + describe(e)
             } finally {
                 task = null
             }
@@ -402,7 +402,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Throwable) {
-                message = "Error: ${e.message ?: e.javaClass.simpleName}"
+                message = "Subtitles failed — " + describe(e)
             } finally {
                 task = null
             }
@@ -429,7 +429,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Throwable) {
-                message = e.message ?: "Export failed"
+                message = "Saving the clip failed — " + describe(e)
             } finally {
                 task = null
             }
@@ -437,6 +437,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --------------------------------------------------------- helpers
+
+    /** Readable error: what went wrong, the underlying cause, and where in the app. */
+    private fun describe(e: Throwable): String {
+        android.util.Log.e("SubPlayer", "task failed", e)
+        val root = generateSequence(e) { it.cause }.last()
+        val where = e.stackTrace.firstOrNull { it.className.startsWith("com.behrouz") }
+            ?: root.stackTrace.firstOrNull { it.className.startsWith("com.behrouz") }
+        val main = e.message ?: e.javaClass.simpleName
+        val cause = if (root !== e) " · cause: ${root.javaClass.simpleName}${root.message?.let { ": $it" } ?: ""}" else ""
+        val at = where?.let { " · at ${it.fileName}:${it.lineNumber}" } ?: ""
+        return main + cause + at
+    }
 
     fun tokens(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotBlank() }
 

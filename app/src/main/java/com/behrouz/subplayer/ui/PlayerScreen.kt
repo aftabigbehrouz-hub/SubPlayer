@@ -76,7 +76,12 @@ fun PlayerScreen(
 ) {
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
-        vm.message?.let { snack.showSnackbar(it); vm.message = null }
+        vm.message?.let {
+            val long = it.length > 60
+            snack.showSnackbar(it, withDismissAction = long,
+                duration = if (long) androidx.compose.material3.SnackbarDuration.Long else androidx.compose.material3.SnackbarDuration.Short)
+            vm.message = null
+        }
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
