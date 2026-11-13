@@ -2,7 +2,11 @@ name: Build APK
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,11 +18,34 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v3
-      - name: Build debug APK
+      - name: Build APK
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk SubPlayer.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: SubPlayer-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: SubPlayer.apk
+
+      # Latest APK always downloadable from the repo's Releases page
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest SubPlayer.apk --title "SubPlayer (latest build)" \
+            --notes "Built from ${GITHUB_SHA::7}. Download SubPlayer.apk and open it on your phone."
+
+      # Copy of the APK on the 'apk' branch
+      - name: Store APK on apk branch
+        run: |
+          mkdir /tmp/out && cp SubPlayer.apk /tmp/out/
+          cd /tmp/out
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add SubPlayer.apk
+          git commit -qm "APK from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk
