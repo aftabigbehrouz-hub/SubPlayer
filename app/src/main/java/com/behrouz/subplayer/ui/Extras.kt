@@ -86,6 +86,21 @@ private val HELP = listOf(
             "Saved words glow gold in subtitles. My Words (★ top bar) shows how many times you reviewed each word and " +
             "when it is due. Review plays the moment in the video, then you answer: “Got it” = next review later " +
             "(1, 2, 4, 7, 15, 30, 60 days), “Again” = back in 10 minutes. Turn on the daily reminder to be notified."),
+    HelpItem(Icons.Copy, "Learn more & more sentences",
+        "In any word card or in My Words: ChatGPT and Grok open with a ready question (meaning, forms, 3 Beispielsätze " +
+            "with English and Persian); DWDS and dict.cc open the word. Copy the answer and tap ＋ Add sentences — " +
+            "the app reads lines like “DE: … | EN: … | FA: …”. Review then shows a different sentence each time."),
+    HelpItem(Icons.School, "Practice",
+        "My Words ▸ Practice: Fill the gap (your sentences with the word missing), Dictation (hear the video line, type it, " +
+            "every word is checked) and der·die·das for your nouns. Up to 10 questions, weakest words first; " +
+            "every answer counts towards your daily 🔥 streak."),
+    HelpItem(Icons.Volume, "Pause each line & Shadowing",
+        "Pause each line stops the video after every subtitle so you can read and tap words, then ▶ to go on. " +
+            "Shadowing plays the line, pauses long enough for you to repeat it aloud, and plays it again — " +
+            "the best way to train pronunciation and rhythm."),
+    HelpItem(Icons.FileOpen, "Subtitle file",
+        "Subtitle file ▸ Save to Download folder (Download/SubPlayer/…srt) or Share it to Telegram, e-mail or Drive. " +
+            "Load an .srt/.vtt file you already have from the same menu."),
     HelpItem(Icons.Repeat, "Repeat like VLC",
         "A = start of the loop, B = end; it repeats until you press ✕. “Loop line” repeats the current subtitle. " +
             "⏮ ⏭ jump to the previous / next line; 1× ▸ 0.75× ▸ 0.5× slows the speech without changing the voice pitch."),
@@ -104,7 +119,7 @@ private val HELP = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HelpSheet(vm: AppViewModel) {
-    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp)) {
             NeonTitle("How SubPlayer works", 24.sp)
             Explain("Everything in one place. You can replay the intro tour at the bottom.", Modifier.padding(bottom = 12.dp))
@@ -182,7 +197,7 @@ fun Tour(vm: AppViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideosSheet(vm: AppViewModel, onOpenVideo: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp)) {
             NeonTitle("Videos", 24.sp)
             Explain("Recently opened videos continue where you stopped.", Modifier.padding(bottom = 12.dp))
@@ -201,7 +216,7 @@ fun VideosSheet(vm: AppViewModel, onOpenVideo: () -> Unit) {
 @Composable
 fun SettingsSheet(vm: AppViewModel) {
     val ctx = LocalContext.current
-    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().imePadding().padding(bottom = 24.dp)) {
             NeonTitle("Settings", 24.sp)
             Spacer(Modifier.height(10.dp))

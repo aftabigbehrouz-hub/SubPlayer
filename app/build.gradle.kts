@@ -11,8 +11,8 @@ android {
         applicationId = "com.behrouz.subplayer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5
-        versionName = "2.2"
+        versionCode = 6
+        versionName = "2.3"
 
         // 64-bit ARM phones (practically every phone from the last ~7 years)
         ndk { abiFilters += listOf("arm64-v8a") }

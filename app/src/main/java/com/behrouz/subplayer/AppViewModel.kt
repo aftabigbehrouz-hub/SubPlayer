@@ -26,7 +26,12 @@ import com.behrouz.subplayer.dict.Speaker
 import com.behrouz.subplayer.dict.Translator
 import com.behrouz.subplayer.export.ClipExporter
 import com.behrouz.subplayer.licence.Licence
+import com.behrouz.subplayer.words.Cloze
+import com.behrouz.subplayer.words.Example
+import com.behrouz.subplayer.words.Practice
+import com.behrouz.subplayer.words.Progress
 import com.behrouz.subplayer.words.Recents
+import com.behrouz.subplayer.words.Sentences
 import com.behrouz.subplayer.words.Reminder
 import com.behrouz.subplayer.words.SavedWord
 import com.behrouz.subplayer.words.Srs
@@ -82,12 +87,29 @@ sealed class Sheet {
 
     object Generate : Sheet()
     object Export : Sheet()
+    data class AddSentences(val wordId: Long, val title: String, val initial: String) : Sheet()
+    object SubFile : Sheet()
     object Help : Sheet()
     object Settings : Sheet()
     object Videos : Sheet()
 }
 
-enum class Screen { PLAYER, WORDS, REVIEW }
+enum class Screen { PLAYER, WORDS, REVIEW, PRACTICE }
+
+enum class PracticeMode(val title: String, val explain: String) {
+    GAPS("Fill the gap", "A sentence with one of your words missing. Choose or type it."),
+    DICTATION("Dictation", "Hear the line from the video and type what you hear. Every word is checked."),
+    ARTICLES("der · die · das", "Your saved nouns: pick the right article.")
+}
+
+sealed class Question {
+    data class Gap(val cloze: Cloze, val choices: List<String>) : Question()
+    data class Dictation(val word: SavedWord) : Question()
+    data class Article(val word: SavedWord) : Question()
+}
+
+/** Result of the current practice answer (null = not answered yet). */
+data class Feedback(val correct: Boolean, val detail: String, val marks: List<Practice.Mark> = emptyList())
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -147,6 +169,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var reviewDone by mutableIntStateOf(0); private set
     var reviewGot by mutableIntStateOf(0); private set
     var recentList by mutableStateOf<List<Recents.Item>>(emptyList()); private set
+    var wordExamples by mutableStateOf<Map<Long, List<Example>>>(emptyMap()); private set
+
+    // ---- practice
+    private val progress = Progress(app)
+    var streak by mutableIntStateOf(progress.streak); private set
+    var todayCount by mutableIntStateOf(progress.todayCount); private set
+    var practiceMode by mutableStateOf<PracticeMode?>(null); private set
+    var questions by mutableStateOf<List<Question>>(emptyList()); private set
+    var qIndex by mutableIntStateOf(0); private set
+    var feedback by mutableStateOf<Feedback?>(null); private set
+    var practiceScore by mutableIntStateOf(0); private set
+
+    // ---- listening modes
+    var autoPause by mutableStateOf(false)
+    var shadowing by mutableStateOf(false)
+    var shadowWaiting by mutableStateOf(false); private set
+    var heldCue by mutableIntStateOf(-1); private set
+    private var shadowResumeAt = 0L
+    private var lastCueIdx = -1
 
     // ---- licence
     var licence by mutableStateOf(Licence.current(app)); private set
@@ -175,10 +216,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 position = player.currentPosition
                 duration = player.duration.coerceAtLeast(0)
                 playing = player.isPlaying
-                if (pointA >= 0 && pointB > pointA && position >= pointB) {
-                    player.seekTo(pointA); position = pointA
+                val nowMs = System.currentTimeMillis()
+                // Shadowing: after the loop end, pause so the learner can repeat, then replay
+                if (shadowResumeAt > 0 && nowMs >= shadowResumeAt) {
+                    shadowResumeAt = 0; shadowWaiting = false
+                    if (pointA >= 0) { player.seekTo(pointA); player.play() }
                 }
-                currentCue = CueBuilder.indexAt(cues, position)
+                if (pointA >= 0 && pointB > pointA && position >= pointB && shadowResumeAt == 0L) {
+                    if (shadowing) {
+                        player.pause(); player.seekTo(pointA); position = pointA
+                        shadowResumeAt = nowMs + ((pointB - pointA) * 1.2).toLong() + 600
+                        shadowWaiting = true
+                    } else {
+                        player.seekTo(pointA); position = pointA
+                    }
+                }
+                val idx = CueBuilder.indexAt(cues, position)
+                // Pause after each line (keeps the finished line on screen to read and tap)
+                if (autoPause && playing && pointB < 0 && lastCueIdx >= 0 && idx != lastCueIdx) {
+                    player.pause(); playing = false; heldCue = lastCueIdx
+                }
+                if (playing && idx >= 0) heldCue = -1
+                lastCueIdx = idx
+                currentCue = idx
                 if (playing && controlsVisible && System.currentTimeMillis() - lastInteraction > 3500) controlsVisible = false
                 if (playing && position / 1000 % 5 == 0L && position % 1000 < 60) rememberPosition()
                 delay(50)
@@ -289,7 +349,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         player.seekTo(pointA); player.play()
     }
 
-    fun clearAB() { pointA = -1; pointB = -1 }
+    fun clearAB() { pointA = -1; pointB = -1; shadowResumeAt = 0; shadowWaiting = false }
 
     // ---------------------------------------------------- word selection
 
@@ -524,6 +584,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val all = store.all()
         words = all
         savedKeys = all.map { key(it.text) }.toSet()
+        wordExamples = store.allExamples()
         dueCount = store.dueCount(System.currentTimeMillis())
     }
 
@@ -600,6 +661,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w = reviewQueue.getOrNull(reviewIndex) ?: return
         val updated = Srs.review(w, gotIt, System.currentTimeMillis())
         store.update(updated)
+        recordProgress()
         reviewDone++
         if (gotIt) reviewGot++
         // "Again" puts the word back at the end of this session
@@ -627,6 +689,222 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun finishTour() { showTour = false; uiPrefs.edit().putBoolean("tour_done", true).apply() }
+
+
+    // ------------------------------------------------------ subtitle file
+
+    private fun srtName() = displayName(videoUri ?: Uri.EMPTY).substringBeforeLast('.')
+        .replace(Regex("[^\\p{L}\\p{N}._-]+"), "_").take(60) + ".$cueLang.srt"
+
+    /** Saves the current subtitles as an .srt file in Download/SubPlayer. */
+    fun exportSrt() {
+        if (cues.isEmpty()) { message = "No subtitles to save yet"; return }
+        val name = srtName()
+        val bytes = Srt.write(cues).toByteArray(Charsets.UTF_8)
+        try {
+            val where = if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/x-subrip")
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/SubPlayer")
+                }
+                val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw java.io.IOException("could not create the file")
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: throw java.io.IOException("could not write")
+                "Download/SubPlayer/$name"
+            } else {
+                val dir = File(ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "SubPlayer").apply { mkdirs() }
+                File(dir, name).writeBytes(bytes)
+                File(dir, name).absolutePath
+            }
+            message = "Saved to $where"
+        } catch (e: Exception) {
+            message = "Could not save — " + describe(e)
+        }
+    }
+
+    /** Shares the current subtitles as an .srt file (Telegram, e-mail, Drive …). */
+    fun shareSrt() {
+        if (cues.isEmpty()) { message = "No subtitles to share yet"; return }
+        try {
+            val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
+            val f = File(dir, srtName()); f.writeText(Srt.write(cues))
+            val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+            val send = Intent(Intent.ACTION_SEND).setType("application/x-subrip").putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ctx.startActivity(Intent.createChooser(send, "Share subtitles").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: Exception) {
+            message = "Could not share — " + describe(e)
+        }
+    }
+
+    // ------------------------------------------------------ learn more
+
+    enum class Source { CHATGPT, GROK, DWDS, DICTCC }
+
+    private fun aiPrompt(word: String, sentence: String) =
+        "Explain the German word „$word“" + (if (sentence.isNotBlank()) " as used in: „${sentence.replace('\n', ' ')}“" else "") + ".\n" +
+            "1) Meaning in English and in Persian.\n" +
+            "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt.\n" +
+            "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\n" +
+            "DE: … | EN: … | FA: …"
+
+    /** Opens ChatGPT / Grok with a ready question, or DWDS / dict.cc for the word. */
+    fun learnMore(source: Source, word: String, sentence: String) {
+        val w = word.trim()
+        val url = when (source) {
+            Source.CHATGPT -> "https://chatgpt.com/?q=" + Uri.encode(aiPrompt(w, sentence))
+            Source.GROK -> "https://grok.com/?q=" + Uri.encode(aiPrompt(w, sentence))
+            Source.DWDS -> "https://www.dwds.de/wb/" + Uri.encode(w)
+            Source.DICTCC -> "https://www.dict.cc/?s=" + Uri.encode(w)
+        }
+        if (source == Source.CHATGPT || source == Source.GROK) {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", aiPrompt(w, sentence)))
+            android.widget.Toast.makeText(ctx, "Question copied too — paste it if the chat opens empty. " +
+                "Then copy the 3 sentences back and tap “Add sentences”.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        runCatching {
+            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { message = "No browser or app found to open it" }
+    }
+
+    fun clipboardText(): String {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        return cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+    }
+
+    /** Makes sure the word in the open card is saved (without toggling) and returns it. */
+    fun ensureSavedFromSheet(): SavedWord? {
+        val u = videoUri?.toString() ?: run { message = "Open the video first"; return null }
+        val (text, start) = when (val s = sheet) {
+            is Sheet.Word -> s.word to s.cueStart.coerceAtLeast(0)
+            is Sheet.Phrase -> s.text to s.cueStart.coerceAtLeast(0)
+            else -> return null
+        }
+        store.find(Dictionary.normalize(text), u, start)?.let { return it }
+        saveFromSheet()
+        return store.find(Dictionary.normalize(text), u, start)
+    }
+
+    fun openAddSentences(w: SavedWord) {
+        sheet = Sheet.AddSentences(w.id, w.text, clipboardText())
+    }
+
+    fun previewSentences(raw: String) = Sentences.parse(raw)
+
+    fun addSentences(wordId: Long, raw: String) {
+        val list = Sentences.parse(raw)
+        if (list.isEmpty()) { message = "No sentences found. Each line should look like: DE: … | EN: … | FA: …"; return }
+        val n = store.addExamples(wordId, list)
+        refreshWords()
+        sheet = null
+        message = if (n == 0) "Those sentences are already saved" else "$n sentence${if (n == 1) "" else "s"} added — they'll appear in review and practice"
+    }
+
+    fun deleteExample(e: Example) { store.deleteExample(e.id); refreshWords() }
+
+    /** All sentences for a word: the video line first, then added examples (sentence, en, fa). */
+    fun sentencesOf(w: SavedWord): List<Example> =
+        listOf(Example(wordId = w.id, de = w.sentence.replace('\n', ' '), en = "", fa = "")) + (wordExamples[w.id] ?: emptyList())
+
+    // ------------------------------------------------------ practice
+
+    private fun recordProgress() {
+        progress.record(); streak = progress.streak; todayCount = progress.todayCount
+    }
+
+    fun openPractice() { practiceMode = null; feedback = null; screen = Screen.PRACTICE }
+
+    fun available(mode: PracticeMode): Int = when (mode) {
+        PracticeMode.GAPS -> words.count { w -> sentencesOf(w).any { Practice.cloze(w, it.de) != null } }
+        PracticeMode.DICTATION -> words.count { it.sentence.isNotBlank() && it.endMs > it.startMs }
+        PracticeMode.ARTICLES -> words.count { it.article in setOf("der", "die", "das") }
+    }
+
+    fun startPractice(mode: PracticeMode) {
+        val rnd = kotlin.random.Random(System.currentTimeMillis())
+        // weakest and most overdue words first, then a little randomness
+        val pool = words.sortedWith(compareBy<SavedWord> { it.box }.thenBy { it.due }).take(30).shuffled(rnd)
+        val qs: List<Question> = when (mode) {
+            PracticeMode.GAPS -> pool.mapNotNull { w ->
+                val opts = sentencesOf(w).shuffled(rnd)
+                opts.firstNotNullOfOrNull { e -> Practice.cloze(w, e.de, e.en.ifEmpty { w.english }, e.fa.ifEmpty { w.persian }) }
+                    ?.let { c -> Question.Gap(c, Practice.choices(c.answer, words.map { it.text }, rnd)) }
+            }
+            PracticeMode.DICTATION -> pool.filter { it.sentence.isNotBlank() }.map { Question.Dictation(it) }
+            PracticeMode.ARTICLES -> pool.filter { it.article in setOf("der", "die", "das") }.map { Question.Article(it) }
+        }.take(10)
+        if (qs.isEmpty()) {
+            message = when (mode) {
+                PracticeMode.ARTICLES -> "Save some nouns first (their article comes from the dictionary)"
+                else -> "Save some words first: pause, tap a word, ★ Save"
+            }
+            return
+        }
+        questions = qs; qIndex = 0; feedback = null; practiceScore = 0; practiceMode = mode
+        prepareQuestion()
+    }
+
+    private fun prepareQuestion() {
+        clearAB()
+        when (val q = questions.getOrNull(qIndex)) {
+            is Question.Dictation -> playClip(q.word)
+            else -> player.pause()
+        }
+    }
+
+    fun answerText(input: String) {
+        if (feedback != null) return
+        when (val q = questions.getOrNull(qIndex)) {
+            is Question.Gap -> {
+                val ok = Practice.same(input, q.cloze.answer)
+                if (ok) practiceScore++
+                feedback = Feedback(ok, if (ok) "Richtig!" else "It was: ${q.cloze.answer}")
+                recordProgress()
+            }
+            is Question.Article -> {
+                val ok = input == q.word.article
+                if (ok) practiceScore++
+                feedback = Feedback(ok, "${q.word.article} ${q.word.lemma}")
+                recordProgress()
+            }
+            is Question.Dictation -> {
+                val (marks, score) = Practice.dictation(q.word.sentence.replace('\n', ' '), input)
+                val ok = score >= 80
+                if (ok) practiceScore++
+                feedback = Feedback(ok, "$score% of the words correct", marks)
+                recordProgress()
+            }
+            null -> {}
+        }
+    }
+
+    fun nextQuestion() {
+        feedback = null
+        qIndex++
+        if (qIndex < questions.size) prepareQuestion() else { clearAB(); player.pause() }
+    }
+
+    fun endPractice() { clearAB(); player.pause(); practiceMode = null; feedback = null }
+
+    fun replayDictation() {
+        (questions.getOrNull(qIndex) as? Question.Dictation)?.let { playClip(it.word) }
+    }
+
+    fun toggleShadowing() {
+        shadowing = !shadowing
+        if (shadowing) {
+            autoPause = false
+            if (pointA < 0 || pointB <= pointA) loopLine()
+            message = "Shadowing: listen, then repeat aloud in the pause"
+        } else { shadowResumeAt = 0; shadowWaiting = false }
+    }
+
+    fun toggleAutoPause() {
+        autoPause = !autoPause
+        if (autoPause) { shadowing = false; clearAB(); message = "Pauses after every line — tap words, then ▶ to go on" }
+    }
 
     // ---------------------------------------------------------- licence
 

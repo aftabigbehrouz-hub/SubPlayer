@@ -63,7 +63,7 @@ object Srs {
     fun strength(w: SavedWord) = w.box / (INTERVAL_DAYS.size - 1f)
 }
 
-class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 1) {
+class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -74,9 +74,50 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 1) {
                 box INTEGER, due INTEGER, last_review INTEGER)"""
         )
         db.execSQL("CREATE INDEX words_due ON words(due)")
+        createExamples(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    /** v2: extra example sentences per word (pasted from ChatGPT, Grok, DWDS, dict.cc …). */
+    private fun createExamples(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS examples(id INTEGER PRIMARY KEY AUTOINCREMENT, word_id INTEGER, de TEXT, en TEXT, fa TEXT, created INTEGER)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS examples_word ON examples(word_id)")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createExamples(db)   // saved words are kept
+    }
+
+    fun addExamples(wordId: Long, list: List<Example>): Int {
+        val existing = examples(wordId).map { it.de.lowercase() }.toMutableSet()
+        var n = 0
+        for (e in list) {
+            if (e.de.isBlank() || e.de.lowercase() in existing) continue
+            writableDatabase.insert("examples", null, ContentValues().apply {
+                put("word_id", wordId); put("de", e.de); put("en", e.en); put("fa", e.fa); put("created", System.currentTimeMillis())
+            })
+            existing.add(e.de.lowercase()); n++
+        }
+        return n
+    }
+
+    fun examples(wordId: Long): List<Example> {
+        val out = ArrayList<Example>()
+        readableDatabase.rawQuery("SELECT id, word_id, de, en, fa, created FROM examples WHERE word_id=? ORDER BY id", arrayOf(wordId.toString())).use { c ->
+            while (c.moveToNext()) out.add(Example(c.getLong(0), c.getLong(1), c.getString(2) ?: "", c.getString(3) ?: "", c.getString(4) ?: "", c.getLong(5)))
+        }
+        return out
+    }
+
+    fun allExamples(): Map<Long, List<Example>> {
+        val out = HashMap<Long, MutableList<Example>>()
+        readableDatabase.rawQuery("SELECT id, word_id, de, en, fa, created FROM examples ORDER BY id", emptyArray()).use { c ->
+            while (c.moveToNext()) out.getOrPut(c.getLong(1)) { ArrayList() }
+                .add(Example(c.getLong(0), c.getLong(1), c.getString(2) ?: "", c.getString(3) ?: "", c.getString(4) ?: "", c.getLong(5)))
+        }
+        return out
+    }
+
+    fun deleteExample(id: Long) { writableDatabase.delete("examples", "id=?", arrayOf(id.toString())) }
 
     fun all(): List<SavedWord> = query("SELECT * FROM words ORDER BY due ASC, id DESC", emptyArray())
 
@@ -101,6 +142,7 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 1) {
 
     fun delete(id: Long) {
         writableDatabase.delete("words", "id=?", arrayOf(id.toString()))
+        writableDatabase.delete("examples", "word_id=?", arrayOf(id.toString()))
     }
 
     private fun values(w: SavedWord) = ContentValues().apply {

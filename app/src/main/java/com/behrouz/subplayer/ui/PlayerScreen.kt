@@ -100,6 +100,7 @@ fun PlayerScreen(
         when {
             vm.screen == Screen.WORDS -> WordsScreen(vm)
             vm.screen == Screen.REVIEW -> ReviewScreen(vm)
+            vm.screen == Screen.PRACTICE -> PracticeScreen(vm)
             fullscreen && vm.videoUri != null -> Box(Modifier.fillMaxSize().background(Color.Black)) {
                 VideoSurface(vm, fullscreen = true, onToggleFullscreen = onToggleFullscreen, onOpenVideo = onOpenVideo)
             }
@@ -131,6 +132,8 @@ fun PlayerScreen(
         Sheet.Help -> HelpSheet(vm)
         Sheet.Settings -> SettingsSheet(vm)
         Sheet.Videos -> VideosSheet(vm, onOpenVideo)
+        Sheet.SubFile -> SubFileSheet(vm, onLoadSrt)
+        is Sheet.AddSentences -> AddSentencesSheet(vm, s)
         null -> {}
     }
     if (vm.showTour) Tour(vm)
@@ -303,13 +306,23 @@ private fun BoxScope.VideoSurface(vm: AppViewModel, fullscreen: Boolean, onToggl
 
     val overlay = fullscreen && (vm.controlsVisible || !vm.playing)
     if (vm.showSubs) {
-        val idx = if (!vm.playing && vm.selCue >= 0) vm.selCue else vm.currentCue
+        val idx = when {
+            !vm.playing && vm.selCue >= 0 -> vm.selCue
+            vm.currentCue >= 0 -> vm.currentCue
+            !vm.playing -> vm.heldCue          // "pause after each line": keep the finished line visible
+            else -> -1
+        }
         Column(
             Modifier.align(Alignment.BottomCenter)
                 .padding(horizontal = 14.dp)
                 .padding(bottom = if (overlay) 150.dp else if (fullscreen) 28.dp else 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (vm.shadowWaiting) {
+                Text("🎙  Your turn — say it aloud", color = Neon.Gold, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 6.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.6f))
+                        .padding(horizontal = 14.dp, vertical = 6.dp))
+            }
             if (idx >= 0 && idx < vm.cues.size) {
                 SubtitleLine(vm, idx, big = fullscreen)
                 if (!vm.playing) {
@@ -536,9 +549,13 @@ private fun ControlPanel(vm: AppViewModel, onToggleFullscreen: () -> Unit, onLoa
             IconButton(onClick = { vm.nextLine() }) { Icon(Icons.Next, "Next line", tint = White) }
         }
         RepeatRow(vm)
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Pill("Pause each line", active = vm.autoPause) { vm.toggleAutoPause() }
+            Pill("🎙 Shadowing", active = vm.shadowing) { vm.toggleShadowing() }
+        }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             ActionButton(Icons.Subtitles, "Subtitles") { vm.sheet = Sheet.Generate }
-            ActionButton(Icons.FileOpen, "Load .srt", onClick = onLoadSrt)
+            ActionButton(Icons.FileOpen, "Subtitle file") { vm.sheet = Sheet.SubFile }
             ActionButton(Icons.Download, "Save clip") {
                 if (vm.pointA >= 0 && vm.pointB > vm.pointA) vm.sheet = Sheet.Export
                 else vm.message = "Set A and B first, then save the clip"

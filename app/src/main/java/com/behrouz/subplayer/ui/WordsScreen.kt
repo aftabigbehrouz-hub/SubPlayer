@@ -97,6 +97,17 @@ fun WordsScreen(vm: AppViewModel) {
                 if (vm.dueCount > 0) "Review ${vm.dueCount} due now" else "Practise anyway",
                 Modifier.fillMaxWidth(), icon = Icons.School, enabled = vm.words.isNotEmpty()
             ) { vm.startReview() }
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp)).clickable { vm.openPractice() }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("🔥", fontSize = 26.sp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Practice · ${vm.streak}-day streak", color = W, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Explain("Fill the gap · dictation · der/die/das — ${vm.todayCount} answered today")
+                }
+                Icon(Icons.Next, null, tint = W.copy(alpha = 0.7f))
+            }
             Spacer(Modifier.height(12.dp))
             ReminderCard(vm)
             Spacer(Modifier.height(10.dp))
@@ -147,6 +158,7 @@ private fun ReminderCard(vm: AppViewModel) {
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
     var open by remember { mutableStateOf(false) }
@@ -178,6 +190,32 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                     modifier = Modifier.padding(vertical = 8.dp))
                 Explain("From “${w.videoName}” at ${fmt(w.startMs)} · reviewed ${w.reviews}× (${w.correct} correct)" +
                     if (w.lastReview > 0) " · last ${Srs.dueLabel(w.lastReview, now).replace("in ", "")} ago".replace("due now ago", "just now") else "")
+                val extra = vm.wordExamples[w.id].orEmpty()
+                if (extra.isNotEmpty()) {
+                    Text("MORE SENTENCES", color = Neon.Cyan, fontSize = 11.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
+                    extra.forEach { e ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                                Text(highlight(e.de, w.text), color = W, fontSize = 14.sp)
+                                if (e.en.isNotEmpty()) Text(e.en, color = W.copy(alpha = 0.6f), fontSize = 12.sp)
+                                if (e.fa.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                                    Text(e.fa, color = W.copy(alpha = 0.75f), fontSize = 14.sp, modifier = Modifier.fillMaxWidth())
+                                }
+                            }
+                            IconButton(onClick = { vm.speak(e.de) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
+                            IconButton(onClick = { vm.deleteExample(e) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Close, "Remove", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(16.dp)) }
+                        }
+                    }
+                }
+                androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, w.lemma.ifEmpty { w.text }, w.sentence) }
+                    Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, w.lemma.ifEmpty { w.text }, w.sentence) }
+                    Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, w.lemma.ifEmpty { w.text }, w.sentence) }
+                    Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, w.lemma.ifEmpty { w.text }, w.sentence) }
+                    Pill("＋ Add sentences", active = true) { vm.openAddSentences(w) }
+                }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill("Play in video", icon = Icons.Play) { vm.playClip(w, stayOnScreen = false) }
                     Pill("Speak", icon = Icons.Volume) { vm.speak(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }) }
@@ -216,6 +254,8 @@ private fun highlight(sentence: String, text: String) = buildAnnotatedString {
 fun ReviewScreen(vm: AppViewModel) {
     BackHandler { vm.endReview() }
     val w = vm.reviewQueue.getOrNull(vm.reviewIndex)
+    // each review shows another of the word's sentences (video line first, then the added ones)
+    val shown = w?.let { vm.sentencesOf(it).let { list -> list[it.reviews % list.size] } }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
             IconButton(onClick = { vm.endReview() }) { Icon(Icons.Close, "End review", tint = W) }
@@ -269,7 +309,7 @@ fun ReviewScreen(vm: AppViewModel) {
                 Modifier.fillMaxWidth().glass(RoundedCornerShape(26.dp)).padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(highlight(w.sentence, w.text), color = W, fontSize = 19.sp, textAlign = TextAlign.Center, lineHeight = 27.sp)
+                Text(highlight(shown?.de ?: w.sentence, w.text), color = W, fontSize = 19.sp, textAlign = TextAlign.Center, lineHeight = 27.sp)
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     if (w.article.isNotEmpty() && vm.reviewRevealed) Text(w.article + " ", color = articleTint(w.article), fontSize = 22.sp)
@@ -282,6 +322,8 @@ fun ReviewScreen(vm: AppViewModel) {
                         if (w.ipa.isNotEmpty()) Text(w.ipa, color = W.copy(alpha = 0.6f), fontSize = 15.sp)
                         Spacer(Modifier.height(8.dp))
                         if (w.english.isNotEmpty()) Text(w.english, color = W, fontSize = 17.sp, textAlign = TextAlign.Center)
+                        if (shown != null && shown.en.isNotEmpty()) Text("„${shown.en}“", color = W.copy(alpha = 0.7f), fontSize = 14.sp,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                         if (w.persian.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                             Text(w.persian, color = W, fontSize = 19.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                         }
@@ -290,7 +332,7 @@ fun ReviewScreen(vm: AppViewModel) {
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Explain("Reviewed ${w.reviews}× so far · ${w.correct} correct", Modifier.padding(bottom = 8.dp))
+            Explain("Reviewed ${w.reviews}× so far · ${w.correct} correct · ${vm.sentencesOf(w).size} sentence(s)", Modifier.padding(bottom = 8.dp))
         }
         // answer buttons
         if (!vm.reviewRevealed) {

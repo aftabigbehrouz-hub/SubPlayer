@@ -42,7 +42,12 @@ private val Scheme = darkColorScheme(
 
 @Composable
 fun SubPlayerTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, content = content)
+    // Light text everywhere by default (the app is dark), including bottom sheets and dialogs.
+    MaterialTheme(colorScheme = Scheme) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides Color(0xFFEDEBF5), content = content
+        )
+    }
 }
 
 /** Material icons (Apache 2.0) as path data, so no large icon library is needed. */

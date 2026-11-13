@@ -69,7 +69,7 @@ import com.behrouz.subplayer.dict.Dictionary
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
-    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)
@@ -86,6 +86,7 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
                     EntryView(vm, e)
                 }
             }
+            if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence)
             Spacer(Modifier.height(10.dp))
             Text(
                 "Dictionary: Wiktionary (CC BY-SA 4.0)",
@@ -264,7 +265,7 @@ private fun QuickActions(vm: AppViewModel, s: Sheet.Word) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
-    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.closeSheet() }, sheetState = rememberModalBottomSheetState(), containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)
@@ -316,6 +317,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
                     }
                 }
             }
+            LearnMore(vm, s.text, s.sentence)
         }
     }
 }
@@ -326,7 +328,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GenerateSheet(vm: AppViewModel) {
-    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg) {
+    ModalBottomSheet(onDismissRequest = { vm.sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = SheetBg, contentColor = androidx.compose.ui.graphics.Color(0xFFEDEBF5)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)) {
             Text("Make subtitles", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
@@ -441,5 +443,24 @@ private fun SaveBar(vm: AppViewModel, saved: Boolean, possible: Boolean) {
         Explain(if (saved) "In My Words — it will come back for review" else "Save it to review later, with this video moment",
             Modifier.weight(1f))
         Pill(if (saved) "Saved" else "Save", active = saved, icon = if (saved) Icons.Star else Icons.StarOutline) { vm.saveFromSheet() }
+    }
+}
+
+
+/** ChatGPT / Grok (ready question asking for 3 Beispielsätze + translations), DWDS, dict.cc, and "Add sentences". */
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun LearnMore(vm: AppViewModel, word: String, sentence: String) {
+    Section("Learn more · add sentences")
+    Explain("ChatGPT and Grok open with a ready question: meaning, forms and 3 Beispielsätze with English and Persian. " +
+        "Copy their answer, come back and tap ＋ Add sentences — they join this word for review and practice.")
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(top = 8.dp)) {
+        Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, word, sentence) }
+        Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence) }
+        Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence) }
+        Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, word, sentence) }
+        Pill("＋ Add sentences", active = true) { vm.ensureSavedFromSheet()?.let { vm.openAddSentences(it) } }
     }
 }
