@@ -1,4 +1,4 @@
-# SubPlayer 2.0 — learn German with your own videos
+# SubPlayer 2.1 — learn German with your own videos
 
 - **Subtitles made on your phone, offline:** Fast (Vosk), Accurate (Whisper Base) or Best (Whisper Small).
   Whisper adds punctuation and correct German capitalisation.
@@ -10,6 +10,13 @@
 - **Repeat:** A / B like VLC, or **Loop line** to repeat the current subtitle; ⏮ ⏭ jump line by line;
   speed 1× / 0.75× / 0.5×.
 - **Save clip:** the A–B part is saved as a new video in *Movies/SubPlayer*, with subtitles burnt in.
+- **My Words (★):** save any word or phrase with its meaning, sentence and video moment. Review shows the
+  sentence, plays the moment in the video, then reveals the meaning; *Got it* / *Again* schedules the next review
+  (1 → 2 → 4 → 7 → 15 → 30 → 60 days, or 10 minutes). Each word shows how many times it was reviewed.
+  Optional daily reminder. Saved words glow gold in the subtitles.
+- **Full screen:** button or just turn the phone sideways; tap = show/hide controls, double-tap left/right = ±5 s.
+- **Videos:** folder icon opens another video at any time; the clock icon lists recent videos and resumes them.
+- **Activation:** each phone needs an activation code made for it (see *Selling SubPlayer*).
 
 ---
 
@@ -74,7 +81,32 @@ in brackets so you can judge it). Rare words may have English only.
   entries, 183 924 with IPA, 138 271 with examples, 129 149 with English. The build log tests 32 everyday words.
 - **Clip export** uses Media3 Transformer: the clip is cut from A to B and each subtitle is drawn as an image
   on the frames it belongs to.
-- **Checks on every build:** unit tests for subtitle reading, writing, grouping, timing and line lookup.
+- **Checks on every build:** 14 unit tests — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
+  the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
+
+## Selling SubPlayer — activation codes
+
+Every phone shows a **device code** (e.g. `K3QF7-MZ2PA`) on the activation screen. The code you create from it
+works **only on that phone**, so a code passed on to someone else is useless.
+
+**Your own phone (once):** on the activation screen tap *I'm the owner*, enter your name and paste the contents of
+`SUBPLAYER_LICENCE_PRIVATE_KEY.txt`. The app checks the key against the public key built into it, stores it only on
+your phone, and unlocks **Settings (⋮) › Owner tools**.
+
+**For a buyer:** they send you their device code → *Owner tools* → enter the code and their name → *Create code* →
+*Share* it to them → they paste it and tap *Activate*.
+On a PC instead: `pip install cryptography`, then
+`python licence-tool/make_activation_code.py SUBPLAYER_LICENCE_PRIVATE_KEY.txt K3QF7-MZ2PA "Buyer Name"`.
+
+How it works: the activation code is the text `SP1|device|name` signed with your private key (ECDSA P‑256).
+The app holds only the public key, so it can check codes but nobody can create them without your key file.
+Keep that file private and backed up. A factory reset of the buyer's phone changes its device code (send a new code).
+
+Before selling, note: (1) the activation stops casual sharing, but a determined person could modify an APK;
+(2) sentence translation uses Google Translate's free public endpoint, which is not licensed for commercial apps —
+switch to a paid translation API before selling widely; (3) the dictionary is Wiktionary data (CC BY-SA 4.0): keep the
+attribution shown in the app; Whisper (MIT), whisper.cpp (MIT), Vosk (Apache 2.0) and Media3 (Apache 2.0) allow
+commercial use with their notices.
 
 ## Security
 
@@ -90,11 +122,15 @@ in brackets so you can judge it). Rare words may have English only.
 
 ```
 app/src/main/java/com/behrouz/subplayer/
-  MainActivity.kt        window, file pickers, full screen
-  AppViewModel.kt        player, A‑B, selection, tasks (subtitles, downloads, export)
-  ui/PlayerScreen.kt     main screen, tappable subtitles, controls
+  MainActivity.kt        window, file pickers, full screen, activation gate, permissions
+  AppViewModel.kt        player, A‑B, selection, saved words, review, recents, licence, tasks
+  ui/PlayerScreen.kt     home, main screen, full-screen controls, tappable subtitles
+  ui/WordsScreen.kt      My Words list, review flashcards
   ui/Sheets.kt           word card, phrase card, subtitle options, export dialog
-  ui/Theme.kt            colours, icons
+  ui/Extras.kt           help guide, intro tour, recent videos, settings/owner tools, activation screen
+  ui/Theme.kt            colours, icons, aurora background, glass panels
+  words/                 saved words (SQLite), review schedule, recents, daily reminder
+  licence/               device code, activation code check/creation
   asr/                   audio decoding, Vosk, Whisper (Kotlin side)
   dict/                  offline dictionary, online translator, pronunciation
   export/ClipExporter.kt A‑B clip with burnt‑in subtitles
@@ -103,6 +139,7 @@ app/src/main/java/com/behrouz/subplayer/
 app/src/main/cpp/        whisper.cpp build + JNI bridge
 app/src/test/            unit tests
 tools/                   dictionary builder + its test
+licence-tool/            make_activation_code.py (owner's PC tool)
 .github/workflows/       build-apk.yml (signed app), data.yml (dictionary + model mirror)
 ```
 
