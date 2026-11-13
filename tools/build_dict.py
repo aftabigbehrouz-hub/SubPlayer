@@ -95,7 +95,7 @@ def via_keys(ent):
     for c in cands:
         if c not in out:
             out.append(c)
-    return [(c, pos) for c in out[:3]]
+    return [(c, pos) for c in out[:4]]
 
 
 def main(out_path):
@@ -290,7 +290,12 @@ def main(out_path):
                 ctx = context - {key}
                 scored = [(len(g & ctx), i, fa_list) for i, (g, fa_list) in enumerate(senses)]
                 best = [x for x in scored if x[0] > 0]
-                chosen = sorted(best, key=lambda x: (-x[0], x[1]))[:1] if best else scored[:1]
+                if best:
+                    chosen = sorted(best, key=lambda x: (-x[0], x[1]))[:1]
+                elif len(senses) == 1:
+                    chosen = scored[:1]          # unambiguous English word
+                else:
+                    chosen = []                  # ambiguous and no evidence: try the next English word
                 for _, _, fa_list in chosen:
                     for f in fa_list[:2]:
                         fa_via.append(f + "  (" + key + ")")

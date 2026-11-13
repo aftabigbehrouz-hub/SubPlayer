@@ -1,105 +1,109 @@
-# SubPlayer — video player with offline German subtitles + A‑B repeat
+# SubPlayer 2.0 — learn German with your own videos
 
-What it does (nothing more):
-1. **Plays videos** (MP4, MKV, WebM, 3GP… anything ExoPlayer supports).
-2. **Generates German subtitles** from the video's speech, on the phone, offline.
-   The speech model (~45 MB) is downloaded once inside the app — the download link
-   is shown in the app before downloading. English is also offered.
-3. **A‑B repeat** like VLC: press **A** at the start, **B** at the end; that part loops
-   until you press **A‑B off**.
-
-It also auto-reloads subtitles you generated earlier and can load any `.srt` file.
-
----
-
-## 1. Get the APK — option A: Android Studio (recommended)
-
-1. Install **Android Studio** (free): https://developer.android.com/studio
-2. Unzip `SubPlayer.zip` → **File ▸ Open** → choose the `SubPlayer` folder.
-3. Wait for "Gradle sync" to finish (first time downloads ~1 GB of tools; needs internet).
-   If it asks to install an SDK platform (Android 14 / API 34), click **Install**.
-4. Plug in your phone with **USB debugging** on (Settings ▸ About ▸ tap *Build number* 7×,
-   then Developer options ▸ USB debugging) and press ▶ **Run** — or
-   **Build ▸ Build App Bundle(s)/APK(s) ▸ Build APK(s)** and copy
-   `app/build/outputs/apk/debug/app-debug.apk` to the phone and open it
-   (allow "Install unknown apps").
-
-## 1. Get the APK — option B: GitHub (no Android Studio)
-
-1. Create a new (private) repository on GitHub and upload the contents of the `SubPlayer` folder
-   (including the hidden `.github` folder).
-2. Open the **Actions** tab → the *Build APK* run starts automatically (~5 min).
-3. When it's green, open the run → **Artifacts ▸ SubPlayer-apk** → download, unzip, install on the phone.
+- **Subtitles made on your phone, offline:** Fast (Vosk), Accurate (Whisper Base) or Best (Whisper Small).
+  Whisper adds punctuation and correct German capitalisation.
+- **Tap any word** in the subtitle → card with article (der/die/das), IPA, German meanings with
+  examples, English, Persian, pronunciation (phone voice, slow voice, or real recording) and a DWDS link.
+  Inflected forms find their base word (*ging → gehen*, *Häuser → Haus*).
+- **Long-press a word, then tap another** → the whole phrase is translated (English + Persian, online),
+  with each word's meaning listed. **Double-tap** a word to translate the whole line.
+- **Repeat:** A / B like VLC, or **Loop line** to repeat the current subtitle; ⏮ ⏭ jump line by line;
+  speed 1× / 0.75× / 0.5×.
+- **Save clip:** the A–B part is saved as a new video in *Movies/SubPlayer*, with subtitles burnt in.
 
 ---
 
-## 2. How to use
+## Install
 
-| Step | Action |
-|---|---|
-| Open | **Open video** → pick a file (or "Open with ▸ SubPlayer" from a file manager). |
-| Subtitles | **Subtitles** → choose **German (Deutsch)**. First time: confirm the model download (link shown). Then it transcribes — progress shows in %. Keep the app open; **Cancel** stops it. |
-| Show/hide | Use the **CC** button in the player controls. |
-| Saved | Subtitles are saved to `Android/data/com.behrouz.subplayer/files/subtitles/<video>_<id>.de.srt` and load automatically the next time you open the same video. |
-| Own .srt | **Load .srt** → pick any subtitle file. |
-| Repeat | **A** = loop start, **B** = loop end (it jumps back to A at once), **A‑B off** = stop looping. Press A again to move the start. |
+Open https://github.com/aftabigbehrouz-hub/SubPlayer/releases/tag/latest in Chrome on the phone,
+tap **SubPlayer.apk**, then open it and tap **Install**.
+Needs Android 7+ on a 64‑bit phone. Whisper needs an ARMv8.2 processor (phones from ~2018 on); older phones get the Fast engine only.
 
-## 3. How the subtitles are made (method)
+## First use (each download happens once)
 
-1. **Audio extraction** — Android's built‑in decoder (MediaCodec) decodes the video's audio track in memory.
-2. **Conversion** — all channels are averaged to mono, low‑pass filtered and resampled to **16 000 Hz**
-   (what the speech model needs). Checked: 10 s of 48 kHz / 44.1 kHz / 22.05 kHz audio → exactly 160 000 samples,
-   so subtitle times do not drift (see `verify/verify_output.txt`).
-3. **Speech recognition** — **Vosk** (Kaldi), model `vosk-model-small-de-0.15`, returns each word with start/end time.
-4. **Subtitle lines** — words are grouped into a new line when there is a pause > 0.8 s, the line would be > 5 s,
-   or > 80 characters (wrapped to 2 rows of ~42). Each line stays 0.3 s after its last word (min 1 s on screen)
-   but never overlaps the next line.
+| What | Size | When |
+|---|---|---|
+| Fast speech model (German) | 45 MB | first time you choose *Fast* |
+| Whisper Base | 57 MB | first time you choose *Accurate* |
+| Whisper Small | 182 MB | first time you choose *Best* |
+| Voice detector (for Whisper) | 1 MB | with the first Whisper model |
+| German dictionary | 38 MB (≈130 MB unpacked) | first word you tap |
 
-**Speed:** on a modern phone roughly 2–5× faster than real time (a 10‑min video ≈ 2–5 min).
+All files come from this repository's **data-v1** release (reachable wherever GitHub is), with the original
+site as a fallback. The app checks every file's SHA‑256 fingerprint and refuses a corrupted or altered file.
 
-**Accuracy notes (small model):** clear speech works well; music, noise or several speakers reduce accuracy.
-Output is lower‑case without punctuation (the first letter of each line is capitalised); German nouns stay lower‑case.
-Subtitles are in the **spoken** language (German speech → German text); it does not translate.
+## Everyday use
 
-## 4. Changing / adding a model
+1. **Open video** (folder icon) — or “Open with ▸ SubPlayer” from a file manager.
+2. **Subtitles** → choose language and quality → **Start**. Keep the app open while it works; *Cancel* stops it.
+   The subtitles are saved and reload automatically next time.
+3. **Pause** (tap the picture) → **tap a word**. Long‑press a word and tap the last word of a phrase to translate a phrase.
+4. **A** at the start, **B** at the end → it loops. **Loop line** loops the current subtitle. ✕ stops looping.
+5. **Save clip** (after A and B) → tick *Burn subtitles* → **Save**.
 
-Models are listed in `ModelManager.kt` (`MODELS`). Any Vosk model zip from
-https://alphacephei.com/vosk/models can be added (url, top folder name, size).
-Larger German models are more accurate but very large (1.9 GB+), so the small one is the default.
+## What works offline / online
 
-## 5. Project files
+| Feature | Offline | Online extra |
+|---|---|---|
+| Subtitles (all engines) | ✓ | – |
+| Word card: IPA, meanings, examples, English, Persian | ✓ (after dictionary download) | – |
+| Pronunciation | ✓ phone voice (install *German* in Settings › Text‑to‑speech if missing) | real recording (Wikimedia) |
+| DWDS | – | opens dwds.de |
+| Phrase / sentence translation | word‑by‑word meanings | full sentence (Google Translate, fallback MyMemory) |
+| Clip export | ✓ | – |
+
+**About Persian:** about 4,400 words have a Persian translation written for them in German Wiktionary; about
+17,000 more get Persian through their main English meaning (shown as *via English*, with the English word
+in brackets so you can judge it). Rare words may have English only.
+
+---
+
+## How it is built (method)
+
+- **Speech → text.** The audio track is decoded on the phone (Android MediaCodec), mixed to mono and resampled to
+  16 kHz (a 10 s check gives exactly 160 000 samples, so no timing drift). *Whisper* (OpenAI, run by
+  whisper.cpp v1.9.5, compiled from source in this project) transcribes ~4‑minute pieces cut at quiet moments,
+  skipping silence with the Silero voice detector; known Whisper “hallucinations” on silence
+  (e.g. “Untertitel im Auftrag des ZDF”) and “(Musik)” lines are removed. *Vosk* gives word times that are
+  grouped into lines (new line after a 0.8 s pause, 5 s or 80 characters).
+- **Subtitle timing.** Each line stays at least 1 s and 0.3 s past its last word, never overlapping the next.
+- **Dictionary** (`tools/build_dict.py`, run by GitHub Actions) merges three Wiktionary extracts from kaikki.org:
+  German Wiktionary (IPA, meanings, examples, audio, inflected forms, direct English/Persian), English
+  Wiktionary's German section (English meanings, *ging → gehen* links) and English Wiktionary's English words
+  (Persian translations, matched by part of speech and by the English meaning that fits). Result: 205 606
+  entries, 183 924 with IPA, 138 271 with examples, 129 149 with English. The build log tests 32 everyday words.
+- **Clip export** uses Media3 Transformer: the clip is cut from A to B and each subtitle is drawn as an image
+  on the frames it belongs to.
+- **Checks on every build:** unit tests for subtitle reading, writing, grouping, timing and line lookup.
+
+## Security
+
+- Releases are signed with Behrouz's private key (certificate SHA‑256
+  `7F:8C:8B:67:6B:35:AA:71:B7:05:F5:B0:72:C5:21:BE:DD:00:FF:B2:0F:68:CE:4A:95:98:38:82:B4:C9:CC:88`), kept only in
+  encrypted GitHub secrets. Android refuses any update signed with another key. The build refuses to publish
+  without the key or with a different certificate.
+- Builds run only for the owner's commits; build tools and whisper.cpp are pinned to exact commits.
+- Downloaded models and the dictionary are verified by SHA‑256 before use.
+- The installed app never changes by itself.
+
+## Project files
 
 ```
-SubPlayer/
-├─ app/src/main/java/com/behrouz/subplayer/
-│  ├─ MainActivity.kt   player, buttons, A‑B repeat, subtitle loading
-│  ├─ ModelManager.kt   model list, download (resumable) + unzip
-│  ├─ AudioDecoder.kt   video audio → 16 kHz mono PCM
-│  ├─ Transcriber.kt    Vosk speech recognition → timed words
-│  └─ SrtBuilder.kt     timed words → .srt
-├─ app/src/main/res/    layout, theme, icon
-├─ app/build.gradle.kts dependencies (Media3 ExoPlayer, Vosk)
-├─ .github/workflows/build-apk.yml   optional cloud build
-└─ verify/              Python check of the resampling + subtitle-timing maths
+app/src/main/java/com/behrouz/subplayer/
+  MainActivity.kt        window, file pickers, full screen
+  AppViewModel.kt        player, A‑B, selection, tasks (subtitles, downloads, export)
+  ui/PlayerScreen.kt     main screen, tappable subtitles, controls
+  ui/Sheets.kt           word card, phrase card, subtitle options, export dialog
+  ui/Theme.kt            colours, icons
+  asr/                   audio decoding, Vosk, Whisper (Kotlin side)
+  dict/                  offline dictionary, online translator, pronunciation
+  export/ClipExporter.kt A‑B clip with burnt‑in subtitles
+  subs/Subtitles.kt      subtitle model, .srt/.vtt reader/writer, timing rules
+  data/Downloads.kt      downloads with resume + SHA‑256 check
+app/src/main/cpp/        whisper.cpp build + JNI bridge
+app/src/test/            unit tests
+tools/                   dictionary builder + its test
+.github/workflows/       build-apk.yml (signed app), data.yml (dictionary + model mirror)
 ```
 
-Requirements: Android 7.0 (API 24) or newer.
-
----
-
-## 6. Security — how the app is protected
-
-- **Your own signing key.** Every APK published here is signed with Behrouz's private key
-  (certificate SHA‑256 `7F:8C:8B:67:6B:35:AA:71:B7:05:F5:B0:72:C5:21:BE:DD:00:FF:B2:0F:68:CE:4A:95:98:38:82:B4:C9:CC:88`).
-  The key is never in this repository; GitHub passes it to the build from encrypted secrets.
-  Android **refuses to install an update** over SubPlayer unless it is signed with that same key.
-- **Build refuses to publish** if the key is missing or the APK carries any other certificate.
-- **Builds only run for the owner's own commits** to `main` — never for other people's pull requests.
-- **Build tools pinned** to exact commit SHAs, so a change upstream cannot alter the build.
-- **Installed app never changes by itself.** Nothing on GitHub can modify the copy on your phone;
-  it only changes if you install a new APK yourself.
-- **Check a download (optional):** the release page lists the APK's SHA‑256; compare with the
-  `SubPlayer.apk.sha256` file or any hash app.
-
-Keep `subplayer-release.jks` and its password backed up privately (e.g. offline). If lost, future
-updates must be installed after uninstalling the app; if leaked, someone could sign look‑alike updates.
+Dictionary data: Wiktionary, CC BY-SA 4.0. Whisper models: MIT. Vosk models: Apache 2.0.
