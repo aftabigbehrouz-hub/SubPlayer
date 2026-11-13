@@ -102,6 +102,49 @@ object Licence {
     }
 
     fun forgetOwnerKey(ctx: Context) = prefs(ctx).edit().remove("owner").apply()
+
+    // ------------------------------------------------------------------ free trial
+
+    const val TRIAL_DAYS = 10
+    const val SELLER_TELEGRAM = "Bgilone"
+    private const val DAY = 24L * 60 * 60 * 1000
+
+    /**
+     * Days left in the free trial (0 = ended). Pure function, unit-tested.
+     * If the phone's clock has been turned back more than a day before the last time the app
+     * was used, the trial counts as ended (stops "change the date" tricks).
+     */
+    fun trialDaysLeft(start: Long, now: Long, lastSeen: Long, days: Int = TRIAL_DAYS): Int {
+        if (now + DAY < lastSeen) return 0
+        val end = start + days * DAY
+        if (now >= end) return 0
+        return ((end - now + DAY - 1) / DAY).toInt().coerceIn(1, days)
+    }
+
+    fun trialEnd(ctx: Context) = trialStart(ctx) + TRIAL_DAYS * DAY
+
+    /** First use of the app (the earlier of first launch and first install). */
+    fun trialStart(ctx: Context): Long {
+        val p = prefs(ctx)
+        val saved = p.getLong("trial_start", 0L)
+        if (saved > 0) return saved
+        val installed = try {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime
+        } catch (_: Exception) { System.currentTimeMillis() }
+        val start = minOf(installed, System.currentTimeMillis())
+        p.edit().putLong("trial_start", start).apply()
+        return start
+    }
+
+    /** Call on every app start; returns days left and records "last seen". */
+    fun checkTrial(ctx: Context): Int {
+        val p = prefs(ctx)
+        val now = System.currentTimeMillis()
+        val last = p.getLong("last_seen", 0L)
+        val left = trialDaysLeft(trialStart(ctx), now, last)
+        if (now > last) p.edit().putLong("last_seen", now).apply()
+        return left
+    }
 }
 
 /** RFC 4648 Base32 without padding (letters + digits only: survives chat apps and is case-insensitive). */

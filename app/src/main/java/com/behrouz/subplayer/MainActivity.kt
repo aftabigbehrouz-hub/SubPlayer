@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         Reminder.channel(this)
         setContent {
             SubPlayerTheme {
-                if (vm.licence == null) LockScreen(vm) else MainContent()
+                if (vm.trialEnded || vm.showActivation) LockScreen(vm) else MainContent()
             }
         }
         if (savedInstanceState == null) handleIntent(intent)
@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(i: Intent?) {
         if (i == null) return
         if (i.action == Intent.ACTION_VIEW) i.data?.let { vm.openVideo(it) }
-        if (i.getStringExtra("open") == "review" && vm.licence != null) vm.startReview()
+        if (i.getStringExtra("open") == "review" && !vm.trialEnded) vm.startReview()
     }
 
     private fun enterFullscreen() {
@@ -114,6 +114,11 @@ class MainActivity : ComponentActivity() {
         } else {
             c.show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vm.recheckTrial()
     }
 
     override fun onStop() {

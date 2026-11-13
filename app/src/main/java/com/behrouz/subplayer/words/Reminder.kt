@@ -55,24 +55,60 @@ object Reminder {
     fun canNotify(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    fun show(ctx: Context, due: Int) {
+    fun show(ctx: Context, due: Int) = notify(ctx, 7,
+        if (due == 1) "1 word is waiting for you" else "$due words are waiting for you",
+        "A few minutes of review keeps them in your memory.", open = "review")
+
+    /** Schedules the two trial notifications (safe to call repeatedly). */
+    fun scheduleTrial(ctx: Context, trialEnd: Long) {
+        val wm = WorkManager.getInstance(ctx)
+        val now = System.currentTimeMillis()
+        fun at(name: String, time: Long, ended: Boolean) {
+            if (time <= now) return
+            val req = androidx.work.OneTimeWorkRequestBuilder<TrialWorker>()
+                .setInitialDelay(time - now, TimeUnit.MILLISECONDS)
+                .setInputData(androidx.work.workDataOf("ended" to ended))
+                .build()
+            wm.enqueueUniqueWork(name, androidx.work.ExistingWorkPolicy.KEEP, req)
+        }
+        at("trial-1day", trialEnd - 24L * 60 * 60 * 1000, false)
+        at("trial-ended", trialEnd + 60_000, true)
+    }
+
+    fun notify(ctx: Context, id: Int, title: String, text: String, open: String? = null) {
         if (!canNotify(ctx)) return
         channel(ctx)
         val open = PendingIntent.getActivity(
             ctx, 1,
-            Intent(ctx, MainActivity::class.java).putExtra("open", "review").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(ctx, MainActivity::class.java).apply { if (open != null) putExtra("open", open) }.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle(if (due == 1) "1 word is waiting for you" else "$due words are waiting for you")
-            .setContentText("A few minutes of review keeps them in your memory.")
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
         try {
-            NotificationManagerCompat.from(ctx).notify(7, n)
+            NotificationManagerCompat.from(ctx).notify(id, n)
         } catch (_: SecurityException) { }
+    }
+}
+
+/** One-time notifications: one day before the trial ends, and when it has ended. */
+class TrialWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
+    override fun doWork(): Result {
+        val c = applicationContext
+        if (com.behrouz.subplayer.licence.Licence.current(c) != null) return Result.success()
+        val ended = inputData.getBoolean("ended", false)
+        Reminder.notify(
+            c, 8,
+            if (ended) "Your SubPlayer free trial has ended" else "1 day left in your SubPlayer trial",
+            "To keep using it, send your device code to @${com.behrouz.subplayer.licence.Licence.SELLER_TELEGRAM} on Telegram."
+        )
+        return Result.success()
     }
 }
 

@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -207,7 +208,13 @@ fun SettingsSheet(vm: AppViewModel) {
 
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("Licence", color = W, fontWeight = FontWeight.Bold)
-                Explain("Licensed to ${vm.licence?.name ?: "—"} · this phone's device code: ${vm.deviceCode}", Modifier.padding(top = 4.dp))
+                if (vm.licence != null) {
+                    Explain("Licensed to ${vm.licence?.name} · device code ${vm.deviceCode}", Modifier.padding(top = 4.dp))
+                } else {
+                    Explain("Free trial · ${vm.trialLeft} of ${com.behrouz.subplayer.licence.Licence.TRIAL_DAYS} days left · device code ${vm.deviceCode}",
+                        Modifier.padding(top = 4.dp, bottom = 10.dp))
+                    GlowButton("Buy / activate", Modifier.fillMaxWidth()) { vm.sheet = null; vm.showActivation = true }
+                }
             }
 
             if (vm.isOwner) {
@@ -264,20 +271,35 @@ fun LockScreen(vm: AppViewModel) {
     var ownerMode by remember { mutableStateOf(false) }
     var key by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    BackHandler(enabled = !vm.trialEnded) { vm.showActivation = false }
     Box(Modifier.fillMaxSize()) {
         Aurora(Modifier.fillMaxSize())
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding().imePadding().padding(22.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(30.dp))
+            val ended = vm.trialEnded
+            val tg = "@" + com.behrouz.subplayer.licence.Licence.SELLER_TELEGRAM
+            if (!ended) {
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { vm.showActivation = false }) { Text("‹ Back to the app", color = W.copy(alpha = 0.7f)) }
+                }
+            } else Spacer(Modifier.height(30.dp))
             Box(Modifier.size(96.dp).background(Neon.hot, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(Icons.Lock, null, tint = Color(0xFF0B0A1A), modifier = Modifier.size(46.dp))
             }
             Spacer(Modifier.height(20.dp))
-            NeonTitle("Activate SubPlayer", 28.sp)
-            Explain("This copy needs an activation code made for this phone. Send the device code below to the seller; " +
-                "they will send you a code that unlocks SubPlayer on this phone only.",
+            NeonTitle(if (ended) "Your free trial has ended" else "Buy SubPlayer", 28.sp)
+            Text(
+                if (ended) "Thank you for trying SubPlayer for ${com.behrouz.subplayer.licence.Licence.TRIAL_DAYS} days! " +
+                    "To keep using it, send your device code to $tg on Telegram. You'll receive an activation code for this phone."
+                else "${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} of your free trial left. To buy, send your device code " +
+                    "to $tg on Telegram; you'll receive an activation code for this phone.",
+                color = W.copy(alpha = 0.85f), fontSize = 16.sp, textAlign = TextAlign.Center, lineHeight = 23.sp,
+                modifier = Modifier.padding(top = 10.dp, bottom = 16.dp)
+            )
+            GlowButton("Message $tg on Telegram", Modifier.fillMaxWidth(), icon = Icons.Share) { vm.contactSeller() }
+            Explain("Opens Telegram and copies your device code — just paste it in the chat.",
                 Modifier.padding(top = 8.dp, bottom = 18.dp))
 
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -291,7 +313,7 @@ fun LockScreen(vm: AppViewModel) {
             }
             Spacer(Modifier.height(16.dp))
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(18.dp)) {
-                Text("Activation code", color = W, fontWeight = FontWeight.Bold)
+                Text("Got your activation code?", color = W, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 GlassField(code, { code = it; error = null }, "Paste the code you received", singleLine = false)
                 error?.let { Text(it, color = Neon.Pink, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }

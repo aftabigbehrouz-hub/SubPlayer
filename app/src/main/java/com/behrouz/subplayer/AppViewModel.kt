@@ -152,6 +152,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var licence by mutableStateOf(Licence.current(app)); private set
     val deviceCode: String = Licence.deviceCode(app)
     var isOwner by mutableStateOf(Licence.ownerKey(app) != null); private set
+    var trialLeft by mutableIntStateOf(Licence.checkTrial(app)); private set
+    var showActivation by mutableStateOf(false)
+    val trialEnded get() = licence == null && trialLeft <= 0
 
     // ---- first-run tour + reminder settings
     private val uiPrefs = app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
@@ -163,6 +166,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!whisperSupported) genEngine = Engine.FAST
         refreshWords()
         recentList = recents.list()
+        if (licence == null) {
+            Reminder.scheduleTrial(app, Licence.trialEnd(app))
+            if (trialLeft in 1..1) message = "Last day of your free trial — tap the trial badge to buy"
+        }
         viewModelScope.launch {
             while (true) {
                 position = player.currentPosition
@@ -625,13 +632,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun activate(code: String): Boolean {
         val h = Licence.activate(ctx, code)
-        if (h != null) { licence = h; message = "Activated for ${h.name}" }
+        if (h != null) { licence = h; showActivation = false; message = "Activated for ${h.name} — thank you!" }
         return h != null
     }
 
     fun becomeOwner(privateKey: String, name: String): Boolean {
         val h = Licence.becomeOwner(ctx, privateKey, name)
-        if (h != null) { licence = h; isOwner = true; message = "Owner tools unlocked on this phone" }
+        if (h != null) { licence = h; isOwner = true; showActivation = false; message = "Owner tools unlocked on this phone" }
         return h != null
     }
 
@@ -641,6 +648,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!Regex("[A-Z2-7]{5}-[A-Z2-7]{5}").matches(d)) { message = "Device code looks wrong (format XXXXX-XXXXX)"; return null }
         if (buyer.isBlank()) { message = "Enter the buyer's name"; return null }
         return Licence.create(key, d, buyer)
+    }
+
+    /** Re-checks the trial (e.g. when the app comes back to the foreground). */
+    fun recheckTrial() { if (licence == null) trialLeft = Licence.checkTrial(ctx) }
+
+    /** Opens the seller's Telegram chat and copies this phone's device code for pasting. */
+    fun contactSeller() {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer device code", "SubPlayer device code: $deviceCode"))
+        android.widget.Toast.makeText(ctx, "Device code copied — paste it in the Telegram chat", android.widget.Toast.LENGTH_LONG).show()
+        val tg = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=${Licence.SELLER_TELEGRAM}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/${Licence.SELLER_TELEGRAM}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { ctx.startActivity(tg) } catch (_: Exception) {
+            try { ctx.startActivity(web) } catch (_: Exception) { message = "Install Telegram, or message @${Licence.SELLER_TELEGRAM} from any device" }
+        }
     }
 
     fun forgetOwnerKey() { Licence.forgetOwnerKey(ctx); isOwner = false; message = "Owner key removed from this phone" }

@@ -68,3 +68,23 @@ class LicenceAndReviewTest {
         assertEquals("in 3 days", Srs.dueLabel(3 * 86_400_000L, 0))
     }
 }
+
+class TrialTest {
+    private val day = 86_400_000L
+
+    @Test fun tenDaysCountDown() {
+        assertEquals(10, Licence.trialDaysLeft(0, 0, 0))
+        assertEquals(10, Licence.trialDaysLeft(0, day / 2, 0))
+        assertEquals(9, Licence.trialDaysLeft(0, day + 1, 0))
+        assertEquals(1, Licence.trialDaysLeft(0, 9 * day + 1, 0))
+        assertEquals(0, Licence.trialDaysLeft(0, 10 * day, 0))
+        assertEquals(0, Licence.trialDaysLeft(0, 40 * day, 0))
+    }
+
+    @Test fun clockTurnedBackEndsTrial() {
+        // last used on day 8, phone date set back to day 2 -> ended
+        assertEquals(0, Licence.trialDaysLeft(0, 2 * day, 8 * day))
+        // small clock differences (under a day) are tolerated
+        assertEquals(8, Licence.trialDaysLeft(0, 2 * day, 2 * day + 3_600_000))
+    }
+}

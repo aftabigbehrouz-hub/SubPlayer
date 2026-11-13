@@ -152,6 +152,14 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
                 else "Watch · understand · remember",
                 color = White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+            if (vm.licence == null && vm.trialLeft > 0) {
+                Text(
+                    "Free trial · ${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} left — Buy",
+                    color = if (vm.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(50))
+                        .clickable { vm.showActivation = true }.padding(vertical = 2.dp)
+                )
+            }
         }
         BarIcon(Icons.Star, "My words", badge = vm.dueCount) { vm.screen = Screen.WORDS }
         BarIcon(Icons.Folder, "Open a video") { onOpenVideo() }
