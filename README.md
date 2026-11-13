@@ -1,4 +1,4 @@
-# SubPlayer 2.1 — learn German with your own videos
+# SubPlayer 2.2 — learn German with your own videos
 
 - **Subtitles made on your phone, offline:** Fast (Vosk), Accurate (Whisper Base) or Best (Whisper Small).
   Whisper adds punctuation and correct German capitalisation.
@@ -16,7 +16,7 @@
   Optional daily reminder. Saved words glow gold in the subtitles.
 - **Full screen:** button or just turn the phone sideways; tap = show/hide controls, double-tap left/right = ±5 s.
 - **Videos:** folder icon opens another video at any time; the clock icon lists recent videos and resumes them.
-- **Activation:** each phone needs an activation code made for it (see *Selling SubPlayer*).
+- **Free trial:** 10 days with everything unlocked, then an activation code is needed (see *Selling SubPlayer*).
 
 ---
 
@@ -84,7 +84,13 @@ in brackets so you can judge it). Rare words may have English only.
 - **Checks on every build:** 14 unit tests — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
-## Selling SubPlayer — activation codes
+## Selling SubPlayer — 10-day trial + activation codes
+
+**Trial.** A new install works fully for **10 days**. The top bar shows *Free trial · N days left — Buy* (gold, pink in
+the last 3 days). One day before the end, and when it ends, the phone gets a notification. After 10 days the app shows
+*Your free trial has ended* with a **Message @Bgilone on Telegram** button: it opens your Telegram chat and copies the
+buyer's device code so they just paste it. Turning the phone's date back doesn't extend the trial (more than a day back =
+trial ended). Reinstalling the app or clearing its data does restart the trial — an offline app can't fully prevent that.
 
 Every phone shows a **device code** (e.g. `K3QF7-MZ2PA`) on the activation screen. The code you create from it
 works **only on that phone**, so a code passed on to someone else is useless.
