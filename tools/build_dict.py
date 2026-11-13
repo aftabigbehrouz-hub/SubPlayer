@@ -70,6 +70,14 @@ EN_POS = {"noun": "noun", "verb": "verb", "adj": "adj", "adv": "adv", "num": "nu
           "pron": "pron", "prep": "prep", "conj": "conj", "intj": "intj"}
 
 
+STOP = set("a an the of to in on at for by with or and as is be from that this which any one some its it into "
+           "used especially etc something someone person thing".split())
+
+
+def words_of(text):
+    return {w for w in re.findall(r"[a-z]+", (text or "").lower()) if len(w) > 2 and w not in STOP}
+
+
 def via_keys(ent):
     """The 2 main English meanings of a German entry, as (english word, part of speech)."""
     pos = EN_POS.get(ent["pos"])
@@ -156,6 +164,8 @@ def main(out_path):
             if not fw or fw.lower() == word.lower() or len(fw) >= 40:
                 continue
             parts = fw.split()
+            if " " in word:
+                continue   # phrases ("die direkte Frage") are not reached by tapping one word
             if len(parts) == 1:
                 k1 = fw.strip("!,.;:()").lower()
                 if k1:
@@ -227,7 +237,7 @@ def main(out_path):
 
     # ---------------- C: English Wiktionary (English words -> Persian) ----------------
     # Persian is taken only from the English word's first 3 meanings, per part of speech.
-    en2fa = {}   # (word, pos) -> [fa...]
+    en2fa = {}   # (word, pos) -> [(gloss words, [fa...]), ...] for the first 5 meanings
     nC = 0
     for e in stream(URL_C):
         nC += 1
@@ -235,15 +245,19 @@ def main(out_path):
         if w not in need:
             continue
         pos = e.get("pos", "")
-        fa = []
-        for s_i, sense in enumerate((e.get("senses") or [])[:3]):
-            fa += [t.get("word", "") for t in (sense.get("translations") or [])
-                   if (t.get("lang_code") or t.get("code")) == "fa"]
-        if not fa:  # older layout: translations at entry level, in sense order
-            fa = [t.get("word", "") for t in (e.get("translations") or [])
-                  if (t.get("lang_code") or t.get("code")) == "fa"][:4]
-        if fa:
-            en2fa.setdefault((w, pos), []).extend(fa)
+        senses = []
+        for sense in (e.get("senses") or [])[:5]:
+            fa = [t.get("word", "") for t in (sense.get("translations") or [])
+                  if (t.get("lang_code") or t.get("code")) == "fa"]
+            if fa:
+                gl = " ".join(sense.get("glosses", []) or [])
+                senses.append((words_of(gl), fa))
+        if not senses:  # older layout: entry-level translations, each tagged with its sense text
+            for t in (e.get("translations") or []):
+                if (t.get("lang_code") or t.get("code")) == "fa":
+                    senses.append((words_of(t.get("sense", "")), [t.get("word", "")]))
+        if senses:
+            en2fa.setdefault((w, pos), []).extend(senses)
     print("C entries read:", nC, "English (word,pos) with Persian:", len(en2fa), flush=True)
     # ---------------- write SQLite ----------------
     if os.path.exists(out_path):
@@ -263,10 +277,23 @@ def main(out_path):
         fa = uniq(ent["fa"], MAX_FA)
         fa_via = []
         if not fa:
+            context = set()
+            for x in ent["en"][:8] + ent.get("en_gloss", [])[:3]:
+                context |= words_of(x)
             for key, epos in via_keys(ent):
-                got = en2fa.get((key, epos), [])
-                for f in got[:2]:
-                    fa_via.append(f + "  (" + key + ")")
+                senses = en2fa.get((key, epos), [])
+                if not senses:
+                    continue
+                # choose the English meaning that shares words with the German word's other
+                # English translations (Wohnung: dwelling/apartment -> "flat" = apartment);
+                # with no evidence use only the first meaning
+                ctx = context - {key}
+                scored = [(len(g & ctx), i, fa_list) for i, (g, fa_list) in enumerate(senses)]
+                best = [x for x in scored if x[0] > 0]
+                chosen = sorted(best, key=lambda x: (-x[0], x[1]))[:1] if best else scored[:1]
+                for _, _, fa_list in chosen:
+                    for f in fa_list[:2]:
+                        fa_via.append(f + "  (" + key + ")")
             fa_via = uniq(fa_via, 4)
         stats["entries"] += 1
         if ent["ipa"]: stats["ipa"] += 1

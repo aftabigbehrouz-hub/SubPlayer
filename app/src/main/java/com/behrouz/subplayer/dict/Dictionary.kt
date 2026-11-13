@@ -50,7 +50,7 @@ class Dictionary(file: File) {
         val out = ArrayList<Entry>()
         db.rawQuery(
             "SELECT e.lemma,e.pos,e.gender,e.ipa,e.hyph,e.audio,e.data FROM lookup l " +
-                "JOIN entry e ON e.id=l.id WHERE l.key=? LIMIT 8", arrayOf(key)
+                "JOIN entry e ON e.id=l.id WHERE l.key=? LIMIT 40", arrayOf(key)
         ).use { c ->
             while (c.moveToNext()) {
                 val d = JSONObject(c.getString(6))

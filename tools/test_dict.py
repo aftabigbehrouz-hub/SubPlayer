@@ -11,7 +11,18 @@ found = 0
 for w in WORDS:
     rows = db.execute(
         "SELECT e.lemma,e.pos,e.gender,e.ipa,e.audio,e.data FROM lookup l JOIN entry e ON e.id=l.id "
-        "WHERE l.key=? LIMIT 3", (w.lower(),)).fetchall()
+        "WHERE l.key=? LIMIT 40", (w.lower(),)).fetchall()
+    def score(r):
+        lemma, pos, gender, ipa, audio, data = r; d = json.loads(data); sc = 0
+        if lemma == w: sc += 3
+        elif lemma.lower() == w.lower(): sc += 2
+        if d["enGloss"] or d["en"]: sc += 2
+        if d["fa"]: sc += 2
+        elif d["faVia"]: sc += 1
+        if (w[0].isupper()) == (pos == "noun"): sc += 1
+        if pos == "name": sc -= 6
+        return (sc, len(d["senses"]))
+    rows = sorted(rows, key=score, reverse=True)[:2]   # same order as the app
     if rows:
         found += 1
     print(f"--- {w}: {len(rows)} match(es)")
