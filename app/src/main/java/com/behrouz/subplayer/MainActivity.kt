@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
                 PlayerScreen(
                     vm = vm,
                     fullscreen = fullscreen,
-                    onToggleFullscreen = { setFullscreen(!fullscreen) },
+                    onToggleFullscreen = { applyFullscreen(!fullscreen) },
                     onOpenVideo = { pickVideo.launch(arrayOf("video/*")) },
                     onLoadSrt = { pickSrt.launch(arrayOf("*/*")) }
                 )
@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
         if (i?.action == Intent.ACTION_VIEW) i.data?.let { vm.openVideo(it) }
     }
 
-    private fun setFullscreen(on: Boolean) {
+    private fun applyFullscreen(on: Boolean) {
         fullscreen = on
         val c = WindowCompat.getInsetsController(window, window.decorView)
         if (on) {
