@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# Only the newest run may publish (an older run finishing later must not overwrite it)
+concurrency:
+  group: data-release
+  cancel-in-progress: true
+
 jobs:
   data:
     runs-on: ubuntu-latest

@@ -153,11 +153,19 @@ def main(out_path):
         for f in e.get("forms", []) or []:
             fw = clean(f.get("form", ""))
             # skip auxiliary phrases like "hat gemacht" -> keep last word too
-            if fw and fw.lower() != word.lower() and len(fw) < 40:
-                lookup[fw.lower()].add(key)
-                parts = fw.split()
-                if len(parts) == 2 and parts[0].lower() in ("hat", "ist", "haben", "sein", "werden", "wird"):
-                    lookup[parts[1].lower()].add(key)
+            if not fw or fw.lower() == word.lower() or len(fw) >= 40:
+                continue
+            parts = fw.split()
+            if len(parts) == 1:
+                k1 = fw.strip("!,.;:()").lower()
+                if k1:
+                    lookup[k1].add(key)
+            else:
+                # "des Hauses", "hat gemacht", "ich gehe": a tapped word is one word -> keep the last
+                # word only if it differs from the lemma (Hauses, gemacht, gehe)
+                last = parts[-1].strip("!,.;:()").lower()
+                if last and last != word.lower() and not last.startswith("("):
+                    lookup[last].add(key)
     print("A entries read:", nA, "lemmas kept:", len(entries), flush=True)
 
     by_lemma = collections.defaultdict(list)
@@ -243,7 +251,7 @@ def main(out_path):
     db = sqlite3.connect(out_path)
     db.execute("PRAGMA page_size=4096")
     db.execute("CREATE TABLE entry(id INTEGER PRIMARY KEY, lemma TEXT, pos TEXT, gender TEXT, ipa TEXT, hyph TEXT, audio TEXT, data TEXT)")
-    db.execute("CREATE TABLE lookup(key TEXT, id INTEGER)")
+    db.execute("CREATE TABLE lookup(key TEXT, id INTEGER, PRIMARY KEY(key, id)) WITHOUT ROWID")
     db.execute("CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT)")
     ids = {}
     stats = collections.Counter()
@@ -288,7 +296,6 @@ def main(out_path):
                 lrows.append((key, ids[k]))
     lrows = sorted(set(lrows))
     db.executemany("INSERT INTO lookup VALUES(?,?)", lrows)
-    db.execute("CREATE INDEX lookup_key ON lookup(key)")
     db.execute("INSERT INTO meta VALUES('version','1')")
     db.execute("INSERT INTO meta VALUES('source','Wiktionary (de, en) via kaikki.org, CC BY-SA 4.0')")
     db.commit()
