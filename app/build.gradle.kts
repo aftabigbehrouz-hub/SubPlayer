@@ -15,11 +15,27 @@ android {
         versionName = "1.0"
     }
 
+    // Your permanent signing key. It is NEVER stored in this repository: GitHub
+    // passes it to the build from encrypted secrets (SIGNING_KEYSTORE_B64 /
+    // SIGNING_PASSWORD). Android only accepts updates signed with the same key.
+    val keystorePath: String? = System.getenv("SIGNING_KEYSTORE")
+    signingConfigs {
+        create("release") {
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SIGNING_PASSWORD")
+                keyAlias = "subplayer"
+                keyPassword = System.getenv("SIGNING_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Personal-use app: release is signed with the debug key so it installs directly.
-            signingConfig = signingConfigs.getByName("debug")
+            // Local builds without the key fall back to the debug key.
+            signingConfig = if (keystorePath != null) signingConfigs.getByName("release")
+                            else signingConfigs.getByName("debug")
         }
     }
 

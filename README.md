@@ -84,3 +84,22 @@ SubPlayer/
 ```
 
 Requirements: Android 7.0 (API 24) or newer.
+
+---
+
+## 6. Security — how the app is protected
+
+- **Your own signing key.** Every APK published here is signed with Behrouz's private key
+  (certificate SHA‑256 `7F:8C:8B:67:6B:35:AA:71:B7:05:F5:B0:72:C5:21:BE:DD:00:FF:B2:0F:68:CE:4A:95:98:38:82:B4:C9:CC:88`).
+  The key is never in this repository; GitHub passes it to the build from encrypted secrets.
+  Android **refuses to install an update** over SubPlayer unless it is signed with that same key.
+- **Build refuses to publish** if the key is missing or the APK carries any other certificate.
+- **Builds only run for the owner's own commits** to `main` — never for other people's pull requests.
+- **Build tools pinned** to exact commit SHAs, so a change upstream cannot alter the build.
+- **Installed app never changes by itself.** Nothing on GitHub can modify the copy on your phone;
+  it only changes if you install a new APK yourself.
+- **Check a download (optional):** the release page lists the APK's SHA‑256; compare with the
+  `SubPlayer.apk.sha256` file or any hash app.
+
+Keep `subplayer-release.jks` and its password backed up privately (e.g. offline). If lost, future
+updates must be installed after uninstalling the app; if leaked, someone could sign look‑alike updates.
