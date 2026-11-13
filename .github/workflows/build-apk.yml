@@ -32,7 +32,7 @@ jobs:
       - name: Compile (debug)
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace
 
       - name: Load signing key from encrypted secrets
         env:
