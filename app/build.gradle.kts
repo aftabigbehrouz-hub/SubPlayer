@@ -19,6 +19,8 @@ android {
         applicationId = "com.behrouz.subplayer"
         minSdk = 24
         targetSdk = 36    // Google Play: new apps and updates must target Android 16 (API 36)
+        // Home-screen name; the test copies below get "SubPlayer Bazaar", "SubPlayer Myket" …
+        manifestPlaceholders["appLabel"] = "@string/app_name"
         versionCode = 9
         versionName = "2.6"
 
@@ -118,6 +120,13 @@ android {
             signingConfig = if (keystorePath != null) signingConfigs.getByName("release")
                             else signingConfigs.getByName("debug")
         }
+        // Test copies for the owner's phone: same as release, own package name (.test) and a
+        // home-screen name that says which store version it is. Never uploaded to a store.
+        create("labelled") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".test"
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {
@@ -181,4 +190,12 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
+}
+
+// Home-screen names of the test copies
+androidComponents {
+    onVariants(selector().withBuildType("labelled")) { v ->
+        val label = when (v.flavorName) { "bazaar" -> "Bazaar"; "myket" -> "Myket"; "play" -> "Play"; else -> "Direct" }
+        v.manifestPlaceholders.put("appLabel", "SubPlayer $label")
+    }
 }

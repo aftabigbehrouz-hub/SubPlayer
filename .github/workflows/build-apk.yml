@@ -49,7 +49,12 @@ jobs:
         env:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
-          ./gradlew assembleDirectRelease bundlePlayRelease assembleBazaarRelease assembleMyketRelease --stacktrace
+          ./gradlew assembleDirectRelease bundlePlayRelease assembleBazaarRelease assembleMyketRelease \
+            assembleBazaarLabelled assembleMyketLabelled assemblePlayLabelled --stacktrace
+          mkdir -p test-copies
+          cp app/build/outputs/apk/bazaar/labelled/app-bazaar-labelled.apk "test-copies/SubPlayer-TEST-Bazaar.apk"
+          cp app/build/outputs/apk/myket/labelled/app-myket-labelled.apk "test-copies/SubPlayer-TEST-Myket.apk"
+          cp app/build/outputs/apk/play/labelled/app-play-labelled.apk "test-copies/SubPlayer-TEST-Play.apk"
           cp app/build/outputs/apk/direct/release/app-direct-release.apk SubPlayer.apk
           cp app/build/outputs/apk/bazaar/release/app-bazaar-release.apk SubPlayer-CafeBazaar.apk
           cp app/build/outputs/apk/myket/release/app-myket-release.apk SubPlayer-Myket.apk
@@ -66,7 +71,7 @@ jobs:
       - name: Verify signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          for A in SubPlayer.apk SubPlayer-CafeBazaar.apk SubPlayer-Myket.apk; do
+          for A in SubPlayer.apk SubPlayer-CafeBazaar.apk SubPlayer-Myket.apk test-copies/*.apk; do
             "$APKSIGNER" verify --print-certs "$A" | tee certs.txt
             CERT=$(grep -m1 'certificate SHA-256 digest' certs.txt | awk '{print $NF}')
             if [ "$CERT" != "$EXPECTED_CERT_SHA256" ]; then
@@ -113,6 +118,16 @@ jobs:
 
           SubPlayer.apk: open it on your phone. SubPlayer-GooglePlay.aab: upload in Google Play Console.
           SubPlayer-CafeBazaar.apk / SubPlayer-Myket.apk: upload in the Cafe Bazaar / Myket developer panels."
+
+      - name: Publish test copies (owner's phone only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd test-copies && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release delete test-copies --yes --cleanup-tag || true
+          gh release create test-copies test-copies/*.apk test-copies/SHA256SUMS.txt \
+            --title "SubPlayer test copies (for the owner's phone)" \
+            --notes "Built from commit ${GITHUB_SHA::7}. Labelled versions with their own package names (.test), to install next to the normal app for checking. Not for the stores."
 
       - name: Store APK on apk branch
         run: |
