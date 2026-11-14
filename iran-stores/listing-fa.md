@@ -2,10 +2,10 @@
 
 Copy each block into the Bazaar / Myket developer panel. Persian text uses proper half-spaces (ZWNJ).
 
-## App name (نام برنامه)  (23 characters)
+## App name (نام فارسی برنامه)  (36 characters)
 
 ```
-ساب‌پلیر: زبان با ویدئو
+ساب‌پلیر | آلمانی و انگلیسی با ویدئو
 ```
 
 ## Short description (توضیح کوتاه)  (80 characters)
@@ -57,3 +57,29 @@ Copy each block into the Bazaar / Myket developer panel. Persian text uses prope
 
 داده‌های واژه‌نامه: ویکی‌واژه از طریق kaikki.org با مجوز CC BY-SA 4.0. تشخیص گفتار: Whisper (OpenAI، مجوز MIT).
 ```
+
+## English name (افزودن نام انگلیسی برنامه)
+
+```
+SubPlayer | German & English with Videos
+```
+
+## English short description (افزودن توضیحات کوتاه انگلیسی)
+
+```
+Subtitles for your own videos, tap any word, A-B loop, review. German & English.
+```
+
+## English description (افزودن توضیحات انگلیسی)
+
+Use the English full description from `SubPlayer-PlayStore-Kit/listing-en.md`, and replace its last paragraph
+(SUBSCRIPTION) with:
+
+```
+SUBSCRIPTION
+The first 10 days are free. After that, a yearly subscription bought in this store keeps every feature unlocked.
+```
+
+## Developer title (عنوان توسعه‌دهنده)
+
+Already set in your panel: «ویدیو پلیر آلمانی زیرنویس ساز». Fine to keep. It's the name shown as the publisher.

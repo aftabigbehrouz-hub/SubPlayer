@@ -36,6 +36,20 @@
 
 ## 2. Create the app and the subscription in each panel
 
+**Important (Bazaar ▸ اطلاعات پایه ▸ روش قیمت‌گذاری):** choose **رایگان** (free) and tick **«برنامه نیاز به پرداخت
+درون‌برنامه‌ای دارد»**. Do **not** choose «پرداخت هزینه قبل از دانلود» (pay before download). The app charges through the
+in-app subscription after the free trial; pay-before-download would make people pay twice. It also has a low price
+cap: in your panel, 2,000,000 rials was accepted and 3,000,000 was refused.
+
+Bazaar ▸ پرداخت درون‌برنامه‌ای ▸ محصول جدید:
+- نوع محصول: **اشتراک مدت‌دار** · نوع اشتراک: **اشتراک | ۳۶۵ روزه**
+- شناسهٔ کالا: **`subplayer_pro`** · عنوان: «اشتراک سالانهٔ ساب‌پلیر»
+- قیمت شامل مالیات: **6,900,000 ریال** (= 690,000 تومان). Prices in the panel are in **rials** (10 rials = 1 toman).
+- وضعیت: **فعال**
+- The «اشتراک ۵ دقیقه‌ای (برای تست توسعه‌دهنده)» type is for test products. SubPlayer looks only for `subplayer_pro`.
+
+Old general steps:
+
 1. Create a new app and upload the APK: Bazaar `SubPlayer-CafeBazaar.apk`, Myket `SubPlayer-Myket.apk`. These first
    uploads are only there so you can create the product; they can't take payments yet.
 2. **In-app payment** (پرداخت درون‌برنامه‌ای) ▸ add a **subscription** (اشتراک) product:
