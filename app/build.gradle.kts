@@ -1,14 +1,14 @@
 import java.util.Properties
 
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 // Public keys of the Iranian stores (store-keys.properties, from each store's developer panel)
 val storeKeys = Properties().apply {
     val f = rootProject.file("store-keys.properties")
     if (f.exists()) f.inputStream().use { input -> load(input) }
-}
-
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
