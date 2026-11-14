@@ -87,8 +87,8 @@ Windows SmartScreen may say “Windows protected your PC” (the app is not code
 | English dictionary | 19 MB (≈60 MB unpacked) | first English word you tap |
 
 **Windows downloads** (also once, from the same release, SHA‑256 checked): German dictionary 38 MB, English dictionary
-19 MB, and the speech model you choose — *Fast* Whisper Base ≈141 MB, *Accurate* Whisper Small ≈464 MB,
-*Best* Whisper Large‑v3 Turbo ≈1.5 GB (fast with an NVIDIA card, slow on CPU only). *Online* needs no model.
+19 MB, and the speech model you choose — *Fast* Whisper Base ≈148 MB, *Accurate* Whisper Small ≈486 MB,
+*Best* Whisper Large‑v3 Turbo ≈1.6 GB (fast with an NVIDIA card, slow on CPU only). *Online* needs no model.
 
 All files come from this repository's **data-v1** release (reachable wherever GitHub is), with the original
 site as a fallback. The app checks every file's SHA‑256 fingerprint and refuses a corrupted or altered file.

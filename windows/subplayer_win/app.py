@@ -881,7 +881,7 @@ class Main(QMainWindow):
 
             def job():
                 folder = downloads.ensure(asset, lambda d, t: self._bg_progress(d / max(t, 1), f"Downloading {asset.label}… "
-                                                                                f"{d // 1048576} of {t // 1048576} MB"), lambda: self.cancel)
+                                                                                f"{d // 1_000_000} of {t // 1_000_000} MB"), lambda: self.cancel)
                 return asr.transcribe_offline(video, str(folder), lang, self._bg_progress, lambda: self.cancel)
         self.run_bg("subs", lambda: (job(), lang, video, name), cancellable=True, label="Making subtitles…")
 
@@ -983,7 +983,7 @@ class Main(QMainWindow):
 
     def download_asset(self, asset, then=None):
         def job():
-            downloads.ensure(asset, lambda d, t: self._bg_progress(d / max(t, 1), f"Downloading {asset.label}… {d // 1048576} of {t // 1048576} MB"),
+            downloads.ensure(asset, lambda d, t: self._bg_progress(d / max(t, 1), f"Downloading {asset.label}… {d // 1_000_000} of {t // 1_000_000} MB"),
                              lambda: self.cancel)
             return then
         self.run_bg("download", job, cancellable=True, label=f"Downloading {asset.label}…")
