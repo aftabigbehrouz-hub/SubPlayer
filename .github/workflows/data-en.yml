@@ -1,0 +1,35 @@
+name: Build English dictionary
+
+# Separate from the German data workflow so the German dictionary file never changes.
+on:
+  push:
+    branches: [main]
+    paths: ['tools/en/**', '.github/workflows/data-en.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-en-release
+  cancel-in-progress: true
+
+jobs:
+  dict-en:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build English dictionary
+        run: python3 tools/en/build_en.py dict.db
+      - name: Test with everyday words
+        run: python3 tools/en/test_en.py dict.db
+      - name: Package
+        run: |
+          ls -la dict.db
+          zip -9 -j dict-en-v1.zip dict.db
+          sha256sum dict-en-v1.zip | tee dict-en-v1.sha256
+          stat -c '%n %s' dict-en-v1.zip
+      - name: Publish to data-v1 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload data-v1 dict-en-v1.zip dict-en-v1.sha256 --clobber

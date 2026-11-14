@@ -5,7 +5,7 @@ name: Build dictionary and mirror models
 on:
   push:
     branches: [main]
-    paths: ['tools/**', '.github/workflows/data.yml']
+    paths: ['tools/build_dict.py', 'tools/test_dict.py']
 
 permissions:
   contents: write
