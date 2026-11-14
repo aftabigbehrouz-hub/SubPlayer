@@ -71,7 +71,7 @@ private val HELP = listOf(
             "You can also choose “Open with ▸ SubPlayer” in your file manager."),
     HelpItem(Icons.Subtitles, "Make subtitles",
         "Subtitles ▸ choose the spoken language and quality ▸ Start. Everything runs on your phone, offline. " +
-            "Fast = quick, no punctuation. Accurate (Whisper Base) = recommended. Best (Whisper Small) = most accurate, " +
+            (if (com.behrouz.subplayer.asr.VoskEngine.AVAILABLE) "Fast = quick, no punctuation. " else "") + "Accurate (Whisper Base) = recommended. Best (Whisper Small) = most accurate, " +
             "takes about as long as the video. Each model downloads once. Subtitles are saved and reload next time. " +
             "Already have subtitles? “Load .srt”."),
     HelpItem(Icons.Star, "Tap a word",
@@ -121,8 +121,9 @@ private val HELP = listOf(
             "on both: it syncs on start, a little after each change and with “Sync now”. Everything is kept in one private " +
             "gist on your own account. Videos are not uploaded — copy the video file to the PC with the same name."),
     HelpItem(Icons.Lock, "Offline & privacy",
-        "Subtitles, dictionary, review and clip saving work without internet. Only sentence translation, real recordings " +
-            "and DWDS go online. Your videos never leave your phone.")
+        "Subtitles, dictionary, review and clip saving work without internet. Online only when you use it: sentence " +
+            "translation, real recordings, DWDS/Cambridge, Online subtitles (the audio goes to the provider you chose) and " +
+            "Sync (your words go to your own GitHub). Your videos never leave your phone.")
 )
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -213,7 +214,7 @@ fun VideosSheet(vm: AppViewModel, onOpenVideo: () -> Unit) {
             Explain("Recently opened videos continue where you stopped.", Modifier.padding(bottom = 12.dp))
             GlowButton("Open another video", Modifier.fillMaxWidth(), icon = Icons.Folder) { vm.sheet = null; onOpenVideo() }
             Spacer(Modifier.height(8.dp))
-            Pill("Paste a video link", icon = Icons.Download) { vm.openLinkSheet() }
+            if (!com.behrouz.subplayer.BuildConfig.PLAY) Pill("Paste a video link", icon = Icons.Download) { vm.openLinkSheet() }
             Spacer(Modifier.height(12.dp))
             if (vm.recentList.isEmpty()) Explain("No recent videos yet.")
             vm.recentList.forEach { RecentRow(vm, it) }
@@ -233,7 +234,7 @@ fun SettingsSheet(vm: AppViewModel) {
             NeonTitle("Settings", 24.sp)
             Spacer(Modifier.height(10.dp))
 
-            Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
+            if (com.behrouz.subplayer.BuildConfig.PLAY) SubscriptionCard(vm) else Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("Licence", color = W, fontWeight = FontWeight.Bold)
                 if (vm.licence != null) {
                     Explain("Licensed to ${vm.licence?.name} · device code ${vm.deviceCode}", Modifier.padding(top = 4.dp))
@@ -244,7 +245,7 @@ fun SettingsSheet(vm: AppViewModel) {
                 }
             }
 
-            if (vm.isOwner) {
+            if (vm.isOwner && !com.behrouz.subplayer.BuildConfig.PLAY) {
                 Spacer(Modifier.height(12.dp))
                 OwnerTools(vm, ctx)
             }
@@ -256,7 +257,8 @@ fun SettingsSheet(vm: AppViewModel) {
             Spacer(Modifier.height(12.dp))
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("About", color = W, fontWeight = FontWeight.Bold)
-                Explain("SubPlayer · speech recognition: Whisper (OpenAI, via whisper.cpp) and Vosk · dictionaries: German and English " +
+                Explain("SubPlayer · speech recognition: Whisper (OpenAI, via whisper.cpp)" +
+                    (if (com.behrouz.subplayer.asr.VoskEngine.AVAILABLE) " and Vosk" else "") + " · dictionaries: German and English " +
                     "Wiktionary via kaikki.org (CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online only).", Modifier.padding(top = 4.dp))
                 TextButton(onClick = { vm.sheet = null; vm.showTour = true }) { Text("Replay the intro tour", color = Neon.Cyan) }
             }

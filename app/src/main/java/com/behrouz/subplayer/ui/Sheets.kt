@@ -358,7 +358,7 @@ fun GenerateSheet(vm: AppViewModel) {
                 }
             }
             Section("Quality")
-            Engine.values().forEach { e ->
+            Engine.values().filter { it != Engine.FAST || com.behrouz.subplayer.asr.VoskEngine.AVAILABLE }.forEach { e ->
                 val enabled = e == Engine.FAST || e == Engine.ONLINE || vm.whisperSupported
                 val asset = when (e) {
                     Engine.FAST -> if (vm.genLang == "de") Assets.VOSK_DE else Assets.VOSK_EN

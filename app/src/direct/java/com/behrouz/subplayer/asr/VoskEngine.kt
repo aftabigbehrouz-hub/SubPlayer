@@ -18,6 +18,9 @@ import java.io.File
 /** Fast offline recogniser (Vosk / Kaldi). Lower accuracy, no punctuation. */
 object VoskEngine {
 
+    /** This build includes Vosk (the Google Play build does not). */
+    const val AVAILABLE = true
+
     private const val RATE = 16_000
 
     suspend fun transcribe(ctx: Context, uri: Uri, modelDir: File, onProgress: (Int) -> Unit): List<Cue> =

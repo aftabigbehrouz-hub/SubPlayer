@@ -203,7 +203,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var shadowResumeAt = 0L
     private var lastCueIdx = -1
 
-    // ---- licence
+    // ---- Google Play subscription (play build) — a no-op in the direct build
+    val playStore = com.behrouz.subplayer.store.PlayStore(app)
+
+    // ---- licence (direct build)
     var licence by mutableStateOf(Licence.current(app)); private set
     val deviceCode: String = Licence.deviceCode(app)
     var isOwner by mutableStateOf(Licence.ownerKey(app) != null); private set
@@ -221,11 +224,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var onlineKey by mutableStateOf(uiPrefs.getString("online_key_" + onlineProvider.name, "") ?: ""); private set
 
     init {
-        if (!whisperSupported) genEngine = Engine.FAST
+        if (!whisperSupported) genEngine = if (VoskEngine.AVAILABLE) Engine.FAST else Engine.ONLINE
         refreshWords()
         recentList = recents.list()
         viewModelScope.launch { delay(1500); if (syncToken.isNotBlank()) syncNow(silent = true) }
-        if (licence == null) {
+        if (licence == null && !com.behrouz.subplayer.BuildConfig.PLAY) {
             Reminder.scheduleTrial(app, Licence.trialEnd(app))
             if (trialLeft in 1..1) message = "Last day of your free trial — tap the trial badge to buy"
         }
@@ -956,7 +959,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                      else @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
         if (stream != null && (i.type ?: "").startsWith("video")) { openVideo(stream); return }
         val text = i.getStringExtra(Intent.EXTRA_TEXT) ?: return
-        if (Regex("""https?://\S+""").containsMatchIn(text)) sheet = Sheet.Link(text)
+        if (!com.behrouz.subplayer.BuildConfig.PLAY && Regex("""https?://\S+""").containsMatchIn(text)) sheet = Sheet.Link(text)
     }
 
     // ------------------------------------------------------ online transcription settings
@@ -1283,6 +1286,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         rememberPosition()
         store.close()
+        playStore.end()
         job?.cancel()
         player.release()
         speaker.shutdown()

@@ -33,3 +33,6 @@ FetchContent_MakeAvailable(whispercpp)
 add_library(whisper_jni SHARED whisper_jni.cpp)
 target_link_libraries(whisper_jni PRIVATE whisper log)
 target_compile_options(whisper_jni PRIVATE -O3)
+
+# 16 KB memory pages (Google Play requirement for apps targeting Android 15+)
+target_link_options(whisper_jni PRIVATE "-Wl,-z,max-page-size=16384")

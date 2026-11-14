@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.behrouz.subplayer"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.behrouz.subplayer"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 8
-        versionName = "2.5"
+        targetSdk = 36    // Google Play: new apps and updates must target Android 16 (API 36)
+        versionCode = 9
+        versionName = "2.6"
 
         // 64-bit ARM phones (practically every phone from the last ~7 years)
         ndk { abiFilters += listOf("arm64-v8a") }
@@ -20,8 +20,27 @@ android {
         externalNativeBuild {
             cmake {
                 // Whisper must be compiled optimised, even in debug builds, or it is 10x slower.
-                arguments += listOf("-DCMAKE_BUILD_TYPE=Release")
+                // ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES: 16 KB-aligned native code (Google Play requirement)
+                arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             }
+        }
+    }
+
+    // Two builds from one code base:
+    //  play   = Google Play: subscription with a 10-day free trial through Google Play Billing.
+    //           No activation codes, no Telegram, no video-link downloads, no Vosk (not 16 KB ready).
+    //  direct = the APK you hand out yourself: activation codes + 10-day trial, all features.
+    flavorDimensions += "store"
+    productFlavors {
+        create("play") {
+            dimension = "store"
+            applicationId = "com.behrouz.subplayer.play"
+            buildConfigField("boolean", "PLAY", "true")
+        }
+        create("direct") {
+            dimension = "store"
+            applicationId = "com.behrouz.subplayer"
+            buildConfigField("boolean", "PLAY", "false")
         }
     }
 
@@ -64,6 +83,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
@@ -100,8 +120,12 @@ dependencies {
     implementation("androidx.media3:media3-common:1.4.1")
 
     // Fast offline speech recognition (Vosk). Whisper is built from source (src/main/cpp).
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
-    implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    // (direct build only: its native library is not 16 KB aligned, which Google Play refuses)
+    "directImplementation"("net.java.dev.jna:jna:5.13.0@aar")
+    "directImplementation"("com.alphacephei:vosk-android:0.3.47@aar")
+
+    // Google Play subscription (play build only). Play requires Billing Library 8 or later.
+    "playImplementation"("com.android.billingclient:billing:8.3.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")

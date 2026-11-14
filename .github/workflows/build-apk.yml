@@ -5,7 +5,7 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['tools/**', '.github/workflows/data.yml', '.github/workflows/data-en.yml', '.github/workflows/data-win.yml', 'README.md', 'windows/**', '.github/workflows/windows.yml']
+    paths-ignore: ['tools/**', '.github/workflows/data.yml', '.github/workflows/data-en.yml', '.github/workflows/data-win.yml', 'README.md', 'PRIVACY.md', 'TERMS.md', 'play-store/**', 'windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
       - name: Compile (debug)
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+          ./gradlew testDirectDebugUnitTest testPlayDebugUnitTest compileDirectDebugKotlin compilePlayDebugKotlin --stacktrace
 
       - name: Load signing key from encrypted secrets
         env:
@@ -45,13 +45,21 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
-      - name: Build signed APK
+      - name: Build signed APK (direct) and app bundle (Google Play)
         env:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
-          ./gradlew assembleRelease --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk SubPlayer.apk
+          ./gradlew assembleDirectRelease bundlePlayRelease --stacktrace
+          cp app/build/outputs/apk/direct/release/app-direct-release.apk SubPlayer.apk
+          cp app/build/outputs/bundle/playRelease/app-play-release.aab SubPlayer-GooglePlay.aab
           rm -f "$SIGNING_KEYSTORE"
+
+      - name: Check 16 KB page alignment (Google Play rule)
+        run: |
+          pip install -q pyelftools
+          python3 tools/ci/check_16kb.py SubPlayer.apk SubPlayer-GooglePlay.aab
+          ZIPALIGN=$(ls "$ANDROID_HOME"/build-tools/*/zipalign | sort -V | tail -1)
+          "$ZIPALIGN" -c -P 16 4 SubPlayer.apk && echo "APK zip alignment OK (16 KB)"
 
       - name: Verify signature
         run: |
@@ -63,11 +71,21 @@ jobs:
             exit 1
           fi
           sha256sum SubPlayer.apk | tee SubPlayer.apk.sha256
+          # the Play bundle must be signed with the same key (it becomes the Play "upload key")
+          AAB_CERT=$(keytool -printcert -jarfile SubPlayer-GooglePlay.aab | grep -m1 'SHA256:' | awk '{print $2}' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "AAB certificate SHA-256: $AAB_CERT"
+          if [ "$AAB_CERT" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::App bundle signed with an unexpected certificate ($AAB_CERT)"
+            exit 1
+          fi
+          sha256sum SubPlayer-GooglePlay.aab | tee SubPlayer-GooglePlay.aab.sha256
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: SubPlayer-apk
-          path: SubPlayer.apk
+          path: |
+            SubPlayer.apk
+            SubPlayer-GooglePlay.aab
 
       - name: Publish release
         env:
@@ -75,18 +93,20 @@ jobs:
         run: |
           FILE_SHA=$(cut -d' ' -f1 SubPlayer.apk.sha256)
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest SubPlayer.apk SubPlayer.apk.sha256 \
+          AAB_SHA=$(cut -d' ' -f1 SubPlayer-GooglePlay.aab.sha256)
+          gh release create latest SubPlayer.apk SubPlayer.apk.sha256 SubPlayer-GooglePlay.aab SubPlayer-GooglePlay.aab.sha256 \
             --title "SubPlayer (latest build)" \
             --notes "Built from commit ${GITHUB_SHA::7}.
 
           Signing certificate SHA-256: \`${EXPECTED_CERT_SHA256}\`
           APK file SHA-256: \`${FILE_SHA}\`
+          Google Play bundle SHA-256: \`${AAB_SHA}\`
 
-          Download SubPlayer.apk and open it on your phone."
+          SubPlayer.apk: open it on your phone. SubPlayer-GooglePlay.aab: upload it in Google Play Console."
 
       - name: Store APK on apk branch
         run: |
-          mkdir /tmp/out && cp SubPlayer.apk SubPlayer.apk.sha256 /tmp/out/
+          mkdir /tmp/out && cp SubPlayer.apk SubPlayer.apk.sha256 SubPlayer-GooglePlay.aab SubPlayer-GooglePlay.aab.sha256 /tmp/out/
           cd /tmp/out
           git init -q -b apk
           git config user.name "github-actions"

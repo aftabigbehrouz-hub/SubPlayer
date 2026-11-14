@@ -156,7 +156,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
                 else "Watch · understand · remember",
                 color = White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            if (vm.licence == null && vm.trialLeft > 0) {
+            if (!com.behrouz.subplayer.BuildConfig.PLAY && vm.licence == null && vm.trialLeft > 0) {
                 Text(
                     "Free trial · ${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} left — Buy",
                     color = if (vm.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -215,7 +215,7 @@ private fun Home(vm: AppViewModel, onOpenVideo: () -> Unit, modifier: Modifier) 
             Spacer(Modifier.height(18.dp))
             GlowButton("Open a video", icon = Icons.Folder, onClick = onOpenVideo)
             Spacer(Modifier.height(10.dp))
-            Pill("Paste a video link (Tagesschau, .mp4 …)", icon = Icons.Download) { vm.openLinkSheet() }
+            if (!com.behrouz.subplayer.BuildConfig.PLAY) Pill("Paste a video link (Tagesschau, .mp4 …)", icon = Icons.Download) { vm.openLinkSheet() }
         }
 
         if (vm.words.isNotEmpty()) {
