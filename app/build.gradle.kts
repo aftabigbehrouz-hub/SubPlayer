@@ -1,3 +1,11 @@
+import java.util.Properties
+
+// Public keys of the Iranian stores (store-keys.properties, from each store's developer panel)
+val storeKeys = Properties().apply {
+    val f = rootProject.file("store-keys.properties")
+    if (f.exists()) f.inputStream().use { input -> load(input) }
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -33,10 +41,6 @@ android {
     //  bazaar / myket = Cafe Bazaar and Myket (Iran): 10-day trial in the app, then a yearly
     //           subscription paid through that store (Myket's official billing library speaks to both).
     // Public keys of the Iranian stores come from store-keys.properties (from each store's developer panel).
-    val storeKeys = java.util.Properties().apply {
-        val f = rootProject.file("store-keys.properties")
-        if (f.exists()) f.inputStream().use { load(it) }
-    }
     fun market(id: String, bind: String, permission: String) = mapOf(
         "marketApplicationId" to id, "marketBindAddress" to bind, "marketPermission" to permission)
     flavorDimensions += "store"
