@@ -36,9 +36,27 @@ class Cancelled(Exception):
     pass
 
 
-def decode_audio(path: str):
-    from faster_whisper.audio import decode_audio as dec
-    return dec(path, sampling_rate=16000)
+def decode_audio(path: str, cancelled=lambda: False):
+    """The video's sound as 16 kHz mono float32 (own PyAV code: works across PyAV versions)."""
+    import av
+    import numpy as np
+    res = av.AudioResampler(format="s16", layout="mono", rate=16000)
+    parts = []
+    with av.open(path) as c:
+        if not c.streams.audio:
+            raise ValueError("This file has no sound track.")
+        stream = c.streams.audio[0]
+        for frame in c.decode(stream):
+            if cancelled():
+                raise Cancelled()
+            frame.pts = None
+            for f in res.resample(frame):
+                parts.append(f.to_ndarray().reshape(-1))
+        for f in res.resample(None):
+            parts.append(f.to_ndarray().reshape(-1))
+    if not parts:
+        raise ValueError("No sound found in this file.")
+    return np.concatenate(parts).astype(np.float32) / 32768.0
 
 
 def transcribe_offline(video: str, model_dir: str, lang: str, progress=lambda f, msg: None, cancelled=lambda: False) -> list[Cue]:
@@ -49,7 +67,8 @@ def transcribe_offline(video: str, model_dir: str, lang: str, progress=lambda f,
     except Exception:
         model = WhisperModel(model_dir, device="cpu", compute_type="int8")
     progress(0.0, "Reading the audio…")
-    segments, info = model.transcribe(video, language=lang, beam_size=5, vad_filter=True, word_timestamps=True,
+    audio = decode_audio(video, cancelled)
+    segments, info = model.transcribe(audio, language=lang, beam_size=5, vad_filter=True, word_timestamps=True,
                                       condition_on_previous_text=False)
     total = max(1.0, float(info.duration or 1))
     segs = []
@@ -79,7 +98,7 @@ def transcribe_online(video: str, provider: Provider, key: str, lang: str, progr
     if not key.strip():
         raise ValueError(f"Add your {provider.title.split(' ·')[0]} API key first (Settings).")
     progress(0.0, "Reading the audio…")
-    audio = decode_audio(video)
+    audio = decode_audio(video, cancelled)
     n = len(audio)
     step = CHUNK_S * 16000
     segs = []

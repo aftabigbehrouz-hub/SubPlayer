@@ -1,4 +1,15 @@
-# SubPlayer 2.4 — learn German with your own videos
+# SubPlayer 2.5 — learn German (and English) with your own videos · Android + Windows
+
+**New in 2.5**
+- **English words too:** in English subtitles a tapped word opens the **English dictionary** (English Wiktionary,
+  131 124 entries, 19 MB): IPA, English definitions with examples, **German translations** (63 587 words) and Persian
+  (11 173 words). *Cambridge* replaces DWDS, and ChatGPT/Grok ask for English sentences with German and Persian.
+  English words are saved, reviewed and practised like the German ones (🇬🇧 in My Words).
+- **Windows app** with the same learning features (player + A‑B/loop line, offline or online subtitles, word card with both
+  dictionaries, My Words, review, practice, activation + 10‑day trial).
+- **Sync phone ↔ PC** through one private GitHub gist on your own account: words, added sentences, review progress,
+  streak and subtitles. Newest change wins; deletions travel too.
+
 
 - **Subtitles made on your phone, offline:** Fast (Vosk), Accurate (Whisper Base) or Best (Whisper Small).
   Whisper adds punctuation and correct German capitalisation.
@@ -41,9 +52,28 @@
 
 ## Install
 
-Open https://github.com/aftabigbehrouz-hub/SubPlayer/releases/tag/latest in Chrome on the phone,
-tap **SubPlayer.apk**, then open it and tap **Install**.
+**Phone:** open https://github.com/aftabigbehrouz-hub/SubPlayer/releases/tag/latest in Chrome on the phone,
+tap **SubPlayer.apk**, then open it and tap **Install** (it updates 2.4 in place; your words are kept).
 Needs Android 7+ on a 64‑bit phone. Whisper needs an ARMv8.2 processor (phones from ~2018 on); older phones get the Fast engine only.
+
+**Windows 10/11 (64‑bit):** open https://github.com/aftabigbehrouz-hub/SubPlayer/releases/tag/windows, download
+**SubPlayer-Windows.zip**, right‑click ▸ *Extract All*, open the **SubPlayer** folder and double‑click **SubPlayer.exe**.
+Windows SmartScreen may say “Windows protected your PC” (the app is not code‑signed with a paid certificate):
+*More info ▸ Run anyway*. Optional check: the SHA‑256 of the zip is in **SubPlayer-Windows.sha256** next to it
+(PowerShell: `Get-FileHash SubPlayer-Windows.zip`). For a German voice: Windows Settings ▸ Time & language ▸ Speech ▸
+*Add voices* ▸ Deutsch.
+
+## Sync phone ↔ PC (once, 3 minutes)
+
+1. On either device: **Settings ▸ Sync ▸ Get a token ↗** (opens GitHub). Sign in, keep the note “SubPlayer sync”,
+   choose an expiry (e.g. *No expiration* or 1 year), make sure **only “gist”** is ticked, **Generate token**, copy it.
+2. Paste it in **Settings ▸ Sync** on the phone (*Save token*) and in the Windows app (*Save token*).
+3. Done. It syncs when the app starts, ~20 s after each change, when you come back to the app, when the PC app closes,
+   and with **Sync now** / **⟳ Sync**. Everything lives in one *secret* gist called “SubPlayer sync (private)”.
+- **Videos are not uploaded.** Copy the video file to the other device with the **same file name**: its subtitles then
+  load automatically and *Play in video* finds the moment.
+- The token can only read/write your gists — nothing else on your account. Revoke it any time on GitHub
+  (Settings ▸ Developer settings ▸ Tokens). Each buyer uses their own GitHub account and token.
 
 ## First use (each download happens once)
 
@@ -53,12 +83,24 @@ Needs Android 7+ on a 64‑bit phone. Whisper needs an ARMv8.2 processor (phones
 | Whisper Base | 57 MB | first time you choose *Accurate* |
 | Whisper Small | 182 MB | first time you choose *Best* |
 | Voice detector (for Whisper) | 1 MB | with the first Whisper model |
-| German dictionary | 38 MB (≈130 MB unpacked) | first word you tap |
+| German dictionary | 38 MB (≈130 MB unpacked) | first German word you tap |
+| English dictionary | 19 MB (≈60 MB unpacked) | first English word you tap |
+
+**Windows downloads** (also once, from the same release, SHA‑256 checked): German dictionary 38 MB, English dictionary
+19 MB, and the speech model you choose — *Fast* Whisper Base ≈141 MB, *Accurate* Whisper Small ≈464 MB,
+*Best* Whisper Large‑v3 Turbo ≈1.5 GB (fast with an NVIDIA card, slow on CPU only). *Online* needs no model.
 
 All files come from this repository's **data-v1** release (reachable wherever GitHub is), with the original
 site as a fallback. The app checks every file's SHA‑256 fingerprint and refuses a corrupted or altered file.
 
-## Everyday use
+## Everyday use on Windows
+
+*Open* a video → *Subtitles* → language and quality → *Start* (progress at the bottom, *Cancel* stops).
+Pause and **click a word** — the word card is on the right. **Shift+click** first and last word = phrase,
+**Ctrl+click** = whole sentence. Keys: Space play/pause, ←/→ 5 s, ↑/↓ previous/next line, **A**/**B** loop, **L** loop line,
+Esc stop loop, F full screen. *My Words*, *Review* (Space = show meaning, then Got it / Again) and *Practice* are in the top bar.
+
+## Everyday use on the phone
 
 1. **Open video** (folder icon) — or “Open with ▸ SubPlayer” from a file manager.
 2. **Subtitles** → choose language and quality → **Start**. Keep the app open while it works; *Cancel* stops it.
@@ -100,7 +142,16 @@ in brackets so you can judge it). Rare words may have English only.
   entries, 183 924 with IPA, 138 271 with examples, 129 149 with English. The build log tests 32 everyday words.
 - **Clip export** uses Media3 Transformer: the clip is cut from A to B and each subtitle is drawn as an image
   on the frames it belongs to.
-- **Checks on every build:** 28 unit tests — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Sync** (`sync/SyncDoc.kt`, `windows/subplayer_win/sync.py`): every word and sentence has a permanent id and a
+  last‑changed time; merging keeps the newer copy, a deletion leaves a dated marker that beats older copies (kept 120 days),
+  subtitles are matched by video file name, and the streak takes the device that practised on the later day. Both apps
+  write the identical JSON; 9 Android and 5 Windows tests check the rules (including two simulated devices syncing
+  through one gist: save → review → delete).
+- **Windows app** (`windows/`): Python + Qt (PySide6) player; subtitles by faster‑whisper (Whisper on CTranslate2,
+  voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
+  check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
+  the packaged SubPlayer.exe in a self‑test before publishing.
+- **Checks on every build:** 37 Android unit tests (+ 15 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
@@ -111,6 +162,10 @@ the last 3 days). One day before the end, and when it ends, the phone gets a not
 *Your free trial has ended* with a **Message @Bgilone on Telegram** button: it opens your Telegram chat and copies the
 buyer's device code so they just paste it. Turning the phone's date back doesn't extend the trial (more than a day back =
 trial ended). Reinstalling the app or clearing its data does restart the trial — an offline app can't fully prevent that.
+
+**Windows buyers** work the same way: the PC shows its own device code (from Windows' machine id) on the activation window
+and in Settings; create the code with *Owner tools* on your phone or the PC tool below. A PC and a phone are separate
+devices (each needs its own code) — you decide whether one purchase includes both.
 
 Every phone shows a **device code** (e.g. `K3QF7-MZ2PA`) on the activation screen. The code you create from it
 works **only on that phone**, so a code passed on to someone else is useless.
@@ -162,11 +217,15 @@ app/src/main/java/com/behrouz/subplayer/
   export/ClipExporter.kt A‑B clip with burnt‑in subtitles
   subs/Subtitles.kt      subtitle model, .srt/.vtt reader/writer, timing rules
   data/Downloads.kt      downloads with resume + SHA‑256 check
+  sync/                  sync document, merge rules, GitHub gist client
 app/src/main/cpp/        whisper.cpp build + JNI bridge
 app/src/test/            unit tests
-tools/                   dictionary builder + its test
+tools/                   German dictionary builder + its test;  tools/en/ English dictionary builder + test
+windows/                 Windows app: subplayer_win/ (app.py window, pages.py words/review/practice, dialogs.py,
+                         asr.py, dictionary.py, store.py, sync.py, syncer.py, licence.py …), tests/, run.py
 licence-tool/            make_activation_code.py (owner's PC tool)
-.github/workflows/       build-apk.yml (signed app), data.yml (dictionary + model mirror)
+.github/workflows/       build-apk.yml (signed app), data.yml (German dictionary + model mirror), data-en.yml (English
+                         dictionary), data-win.yml (Windows speech-model mirror), windows.yml (Windows app)
 ```
 
-Dictionary data: Wiktionary, CC BY-SA 4.0. Whisper models: MIT. Vosk models: Apache 2.0.
+Dictionary data: Wiktionary, CC BY-SA 4.0. Whisper models: MIT. Vosk models: Apache 2.0. faster-whisper / CTranslate2: MIT. Qt for Python (PySide6): LGPL v3 (the Windows app ships Qt as separate DLLs, which the LGPL allows).

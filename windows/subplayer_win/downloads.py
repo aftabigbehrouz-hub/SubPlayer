@@ -35,9 +35,9 @@ DICT_DE = Asset("dict-de", "German dictionary", "dict-de-v1.zip", 38,
 DICT_EN = Asset("dict-en", "English dictionary", "dict-en-v1.zip", 19,
                 "36ce4981ee0001d651bc451a0ebfca59eefab7d7f911815ef22f35f77be43ea3", "dict-en", "dict-en/dict.db")
 # faster-whisper models (mirrored from Hugging Face by .github/workflows/data-win.yml)
-FW_BASE = Asset("fw-base", "Whisper Base (fast)", "fw-base-v1.zip", 141, "SHA_FW_BASE", "", "fw-base")
-FW_SMALL = Asset("fw-small", "Whisper Small (accurate)", "fw-small-v1.zip", 464, "SHA_FW_SMALL", "", "fw-small")
-FW_TURBO = Asset("fw-turbo", "Whisper Large-v3 Turbo (best)", "fw-turbo-v1.zip", 1550, "SHA_FW_TURBO", "", "fw-turbo")
+FW_BASE = Asset("fw-base", "Whisper Base (fast)", "fw-base-v1.zip", 141, "405ec612c4a7e195aa1387a93646e928940e8ff9821e5af1f3550b9622717d70", "", "fw-base")
+FW_SMALL = Asset("fw-small", "Whisper Small (accurate)", "fw-small-v1.zip", 464, "ef7c8f7d26200beafda1f69a1e8c13739fbbef423be01a783fc98abbe57976d5", "", "fw-small")
+FW_TURBO = Asset("fw-turbo", "Whisper Large-v3 Turbo (best)", "fw-turbo-v1.zip", 1547, "9e26e965991680da8649b1afbc679b5908cd78d935a016fefeb9f05c044ace2c", "", "fw-turbo")
 
 
 def root() -> Path:

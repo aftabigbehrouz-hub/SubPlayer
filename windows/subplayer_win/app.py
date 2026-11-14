@@ -1066,6 +1066,23 @@ def selftest(out: str) -> int:
     except Exception as e:
         ok = False
         lines.append(f"FAIL vad model: {e}")
+    try:  # decode real audio through the packaged PyAV (1 s, 440 Hz tone written as WAV)
+        import math
+        import struct
+        import tempfile
+        import wave
+        from . import asr
+        f = Path(tempfile.gettempdir()) / "subplayer-selftest.wav"
+        with wave.open(str(f), "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+            w.writeframes(b"".join(struct.pack("<hh", v, v) for v in (int(8000 * math.sin(2 * math.pi * 440 * i / 44100)) for i in range(44100))))
+        n = len(asr.decode_audio(str(f)))
+        if abs(n - 16000) > 400:
+            raise ValueError(f"{n} samples instead of 16000")
+        lines.append(f"OK   audio decoding ({n} samples for 1 s)")
+    except Exception as e:
+        ok = False
+        lines.append(f"FAIL audio decoding: {e}")
     lines.append(f"device code {licence.device_code()}")
     Path(out).write_text("\n".join(lines) + ("\nALL OK\n" if ok else "\n"), encoding="utf-8")
     return 0 if ok else 1
