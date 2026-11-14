@@ -9,6 +9,11 @@
   then a yearly subscription paid through the store (Myket's official billing library, which also supports Bazaar).
   Paste the stores' public keys into `store-keys.properties` and the build makes them with payment switched on. Guide,
   Persian listing and toman pricing are in [`iran-stores/`](iran-stores/IRAN-STORES-GUIDE.md).
+- **Test copies for your phone** (release `test-copies`): `SubPlayer-TEST-Bazaar.apk`, `-Myket.apk`, `-Play.apk` show up as
+  "SubPlayer Bazaar", "SubPlayer Myket" and "SubPlayer Play" and have their own package names (`….test`), so they install
+  next to your normal app and next to later store installs. Bazaar/Myket copies run their 10-day trial with everything
+  unlocked. The Play copy only shows the Google Play subscription screen, because Google's payment works only for apps
+  installed from Google Play. Never upload the test copies to a store.
 - All Android versions now target **Android 16 (API 36)**, as Google Play requires, and the speech engine is built for
   **16 KB memory pages**. The build refuses a Play bundle with any library that isn't aligned.
 - [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
