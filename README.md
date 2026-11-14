@@ -5,7 +5,11 @@
   10-day free trial through Google Play Billing (Billing Library 8.3). Same features, minus the Vosk "Fast" engine and
   video-link downloads. No activation codes or Telegram in that version (Play rules). Step-by-step publishing guide,
   listing texts (EN/DE), graphics and form answers are in [`play-store/`](play-store/PLAY-STORE-GUIDE.md).
-- Both Android versions now target **Android 16 (API 36)**, as Google Play requires, and the speech engine is built for
+- **Cafe Bazaar and Myket versions** (`SubPlayer-CafeBazaar.apk`, `SubPlayer-Myket.apk`): 10-day free trial in the app,
+  then a yearly subscription paid through the store (Myket's official billing library, which also supports Bazaar).
+  Paste the stores' public keys into `store-keys.properties` and the build makes them with payment switched on. Guide,
+  Persian listing and toman pricing are in [`iran-stores/`](iran-stores/IRAN-STORES-GUIDE.md).
+- All Android versions now target **Android 16 (API 36)**, as Google Play requires, and the speech engine is built for
   **16 KB memory pages**. The build refuses a Play bundle with any library that isn't aligned.
 - [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
 

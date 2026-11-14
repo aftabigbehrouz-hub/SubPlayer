@@ -5,7 +5,7 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['tools/**', '.github/workflows/data.yml', '.github/workflows/data-en.yml', '.github/workflows/data-win.yml', 'README.md', 'PRIVACY.md', 'TERMS.md', 'play-store/**', 'windows/**', '.github/workflows/windows.yml']
+    paths-ignore: ['tools/**', '.github/workflows/data.yml', '.github/workflows/data-en.yml', '.github/workflows/data-win.yml', 'README.md', 'PRIVACY.md', 'TERMS.md', 'play-store/**', 'iran-stores/**', 'windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
 
 permissions:
