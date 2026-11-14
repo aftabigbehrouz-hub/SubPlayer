@@ -1,0 +1,61 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller==6.22.3
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Package (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --windowed --name SubPlayer `
+            --collect-all faster_whisper --collect-all ctranslate2 --collect-all onnxruntime `
+            --collect-submodules av --hidden-import PySide6.QtTextToSpeech `
+            run.py
+      - name: Self-test the packaged app
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath dist\SubPlayer\SubPlayer.exe -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "self-test failed" }
+      - name: Zip
+        run: |
+          Copy-Item ..\README.md dist\SubPlayer\README.md
+          Compress-Archive -Path dist\SubPlayer -DestinationPath SubPlayer-Windows.zip
+          $h = (Get-FileHash SubPlayer-Windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  SubPlayer-Windows.zip" | Out-File -Encoding ascii SubPlayer-Windows.sha256
+          Get-Content SubPlayer-Windows.sha256
+          (Get-Item SubPlayer-Windows.zip).Length
+      - name: Publish release "windows"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view windows --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create windows --repo ${{ github.repository }} --title "SubPlayer for Windows" --notes "Unzip and run SubPlayer\SubPlayer.exe. Check: SHA-256 in SubPlayer-Windows.sha256." }
+          gh release upload windows SubPlayer-Windows.zip SubPlayer-Windows.sha256 --clobber --repo ${{ github.repository }}

@@ -1,0 +1,47 @@
+name: Mirror Windows speech models
+
+# Copies the faster-whisper models the Windows app uses into the data-v1 release,
+# so they download from GitHub (works where Hugging Face is blocked) and can be SHA-checked.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/data-win.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-win-release
+  cancel-in-progress: true
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - name: fw-base
+            repo: Systran/faster-whisper-base
+          - name: fw-small
+            repo: Systran/faster-whisper-small
+          - name: fw-turbo
+            repo: mobiuslabsgmbh/faster-whisper-large-v3-turbo
+    steps:
+      - name: Download ${{ matrix.repo }}
+        run: |
+          pip install -q "huggingface_hub>=0.24"
+          python3 -c "from huggingface_hub import snapshot_download as d; d('${{ matrix.repo }}', local_dir='${{ matrix.name }}', allow_patterns=['*.bin','*.json','*.txt'])"
+          rm -rf ${{ matrix.name }}/.cache
+          ls -la ${{ matrix.name }}
+      - name: Package
+        run: |
+          zip -0 -r ${{ matrix.name }}-v1.zip ${{ matrix.name }}
+          sha256sum ${{ matrix.name }}-v1.zip | tee ${{ matrix.name }}-v1.sha256
+          stat -c '%n %s' ${{ matrix.name }}-v1.zip
+      - name: Publish to data-v1 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload data-v1 ${{ matrix.name }}-v1.zip ${{ matrix.name }}-v1.sha256 --clobber --repo ${{ github.repository }}
