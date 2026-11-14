@@ -13,6 +13,9 @@ class PlayStore(@Suppress("UNUSED_PARAMETER") ctx: Context) {
     var priceText by mutableStateOf<String?>(null); private set
     var trialDays by mutableStateOf(0); private set
     var error by mutableStateOf<String?>(null); private set
+    val subscribed get() = false
+    val trialLeft get() = 0
+    val storeName = ""
     fun start() {}
     fun refresh() {}
     fun buy(@Suppress("UNUSED_PARAMETER") activity: Activity) {}

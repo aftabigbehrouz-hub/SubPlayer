@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // only Myket's billing library is taken from JitPack
+        maven("https://jitpack.io") { content { includeGroup("com.github.myketstore") } }
     }
 }
 

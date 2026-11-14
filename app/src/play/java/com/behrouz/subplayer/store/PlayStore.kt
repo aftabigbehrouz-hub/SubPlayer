@@ -38,6 +38,9 @@ class PlayStore(ctx: Context) {
     var priceText by mutableStateOf<String?>(null); private set     // e.g. "€29.99 / year"
     var trialDays by mutableStateOf(0); private set                  // > 0 when this user can still get the free trial
     var error by mutableStateOf<String?>(null); private set
+    val subscribed get() = status == Status.ACTIVE
+    val trialLeft get() = 0               // Google Play runs the free trial itself
+    val storeName = "Google Play"
 
     private var details: ProductDetails? = null
     private var offerToken: String? = null

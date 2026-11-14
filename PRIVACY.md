@@ -1,6 +1,6 @@
 # SubPlayer — Privacy Policy
 
-*Last updated: 14 November 2026 · applies to SubPlayer for Android (Google Play and direct download) and SubPlayer for Windows*
+*Last updated: 14 November 2026 · applies to SubPlayer for Android (Google Play, Cafe Bazaar, Myket and direct download) and SubPlayer for Windows*
 
 ## Who is responsible
 
@@ -34,6 +34,8 @@ Uninstalling the app (or "Clear storage" in Android settings) deletes all of thi
 | **Learn more** buttons (ChatGPT, Grok, DWDS, Cambridge, dict.cc) | The word and its sentence | The app or website you tap, opened by Android | That service's own policy |
 | **Video links** (direct-download version only) | The link you paste, then a normal file request | The website of that link | That website's own policy |
 | **Subscription** (Google Play version) | Purchase handled entirely by Google Play | Google | https://policies.google.com/privacy |
+| **Subscription** (Cafe Bazaar / Myket versions) | Purchase handled by the store app on your phone | Cafe Bazaar (Hezardastan) or Myket | https://cafebazaar.ir/privacy · https://myket.ir/privacy |
+| **"Install Myket" link** (Myket version, only if Myket is missing and you tap Install) | Phone model, Android version, advertising ID, app name — added by Myket's billing library to its install link | Myket | https://myket.ir/privacy |
 
 The developer never sees any of this data. SubPlayer sends nothing in the background and nothing for any other purpose.
 All connections use HTTPS encryption.
@@ -57,3 +59,13 @@ state in Germany.
 ## Changes
 
 If this policy changes, the new version is published at this address with a new date.
+
+---
+
+## خلاصه به فارسی
+
+سابپلیر حساب کاربری، تبلیغات، آمارگیری و ردیابی ندارد و سازنده هیچ سروری ندارد و هیچ دادهای از شما دریافت نمیکند.
+ویدئوها، زیرنویسها، واژههای ذخیرهشده و پیشرفت مرور فقط روی گوشی شما میمانند. فقط وقتی خودتان از قابلیتهای
+اختیاری استفاده کنید، داده مستقیم از گوشی به سرویسی که انتخاب کردهاید میرود: زیرنویس آنلاین (صدای ویدئو به Groq یا OpenAI
+با کلید خودتان)، ترجمهٔ جمله (Google یا MyMemory)، همگامسازی (به Gist خصوصی در حساب GitHub خودتان) و دانلود
+واژهنامه و مدلها (از GitHub). پرداخت اشتراک در کافهبازار یا مایکت از طریق خود آن فروشگاه انجام میشود.

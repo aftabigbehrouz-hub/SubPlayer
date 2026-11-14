@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         Reminder.channel(this)
         setContent {
             SubPlayerTheme {
-                if (BuildConfig.PLAY) {
+                if (BuildConfig.STORE_BILLING) {
                     // Google Play build: the app opens once Google Play confirms the subscription / free trial
                     if (vm.playStore.status == com.behrouz.subplayer.store.PlayStore.Status.ACTIVE) MainContent()
                     else com.behrouz.subplayer.ui.Paywall(vm, this@MainActivity)
@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
         if (i == null) return
         if (i.action == Intent.ACTION_VIEW) i.data?.let { vm.openVideo(it) }
         if (i.action == Intent.ACTION_SEND) vm.handleShared(i)
-        if (i.getStringExtra("open") == "review" && (BuildConfig.PLAY || !vm.trialEnded)) vm.startReview()
+        if (i.getStringExtra("open") == "review" && (BuildConfig.STORE_BILLING || !vm.trialEnded)) vm.startReview()
     }
 
     private fun enterFullscreen() {
@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (BuildConfig.PLAY) vm.playStore.refresh() else vm.recheckTrial()
+        if (BuildConfig.STORE_BILLING) vm.playStore.refresh() else vm.recheckTrial()
         vm.syncOnResume()
     }
 

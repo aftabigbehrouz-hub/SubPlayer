@@ -228,7 +228,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshWords()
         recentList = recents.list()
         viewModelScope.launch { delay(1500); if (syncToken.isNotBlank()) syncNow(silent = true) }
-        if (licence == null && !com.behrouz.subplayer.BuildConfig.PLAY) {
+        if (licence == null && !com.behrouz.subplayer.BuildConfig.STORE_BILLING) {
             Reminder.scheduleTrial(app, Licence.trialEnd(app))
             if (trialLeft in 1..1) message = "Last day of your free trial — tap the trial badge to buy"
         }

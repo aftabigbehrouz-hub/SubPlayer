@@ -234,7 +234,7 @@ fun SettingsSheet(vm: AppViewModel) {
             NeonTitle("Settings", 24.sp)
             Spacer(Modifier.height(10.dp))
 
-            if (com.behrouz.subplayer.BuildConfig.PLAY) SubscriptionCard(vm) else Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
+            if (com.behrouz.subplayer.BuildConfig.STORE_BILLING) SubscriptionCard(vm) else Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("Licence", color = W, fontWeight = FontWeight.Bold)
                 if (vm.licence != null) {
                     Explain("Licensed to ${vm.licence?.name} · device code ${vm.deviceCode}", Modifier.padding(top = 4.dp))
@@ -245,7 +245,7 @@ fun SettingsSheet(vm: AppViewModel) {
                 }
             }
 
-            if (vm.isOwner && !com.behrouz.subplayer.BuildConfig.PLAY) {
+            if (vm.isOwner && !com.behrouz.subplayer.BuildConfig.STORE_BILLING) {
                 Spacer(Modifier.height(12.dp))
                 OwnerTools(vm, ctx)
             }

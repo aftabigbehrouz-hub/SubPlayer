@@ -101,6 +101,8 @@ fun Paywall(vm: AppViewModel, activity: Activity) {
                             price == null -> "Loading the price from Google Play…"
                             s.trialDays > 0 -> "Free for ${s.trialDays} days, then $price. Renews every year until you cancel. " +
                                 "Cancel at least a day before the trial ends and you pay nothing."
+                            !com.behrouz.subplayer.BuildConfig.PLAY -> "Your 10-day free trial has ended. Subscribe in ${s.storeName}: $price.\n" +
+                                "مهلت ۱۰ روزهٔ رایگان تمام شد. برای ادامه، اشتراک سالانه را از ${s.storeName} بخرید."
                             else -> "$price. Renews every year until you cancel."
                         },
                         color = W.copy(alpha = 0.85f), fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 19.sp,
@@ -109,13 +111,18 @@ fun Paywall(vm: AppViewModel, activity: Activity) {
                     s.error?.let { Text(it, color = Neon.Pink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp)) }
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { s.refresh() }) { Text("Restore purchase", color = Neon.Cyan) }
-                        TextButton(onClick = { s.manage(activity) }) { Text("Manage in Google Play", color = Neon.Cyan) }
+                        TextButton(onClick = { s.manage(activity) }) {
+                            Text(if (com.behrouz.subplayer.BuildConfig.PLAY) "Manage in Google Play" else "Open in ${s.storeName}", color = Neon.Cyan)
+                        }
                     }
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Explain("Payment is charged to your Google account. Cancel any time in Google Play ▸ Payments & subscriptions; " +
-                "you keep access until the end of the paid year.", Modifier.padding(horizontal = 8.dp))
+            Explain(
+                if (com.behrouz.subplayer.BuildConfig.PLAY) "Payment is charged to your Google account. Cancel any time in Google Play ▸ Payments & subscriptions; " +
+                    "you keep access until the end of the paid year."
+                else "Payment goes through ${s.storeName}. The subscription is managed in the ${s.storeName} app.",
+                Modifier.padding(horizontal = 8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { open(PRIVACY_URL) }) { Text("Privacy policy", color = W.copy(alpha = 0.6f), fontSize = 13.sp) }
                 TextButton(onClick = { open(TERMS_URL) }) { Text("Terms of use", color = W.copy(alpha = 0.6f), fontSize = 13.sp) }
@@ -133,14 +140,22 @@ fun SubscriptionCard(vm: AppViewModel) {
         Text("Subscription", color = W, fontWeight = FontWeight.Bold)
         Explain(
             when (s.status) {
-                PlayStore.Status.ACTIVE -> "Active — thank you! Google Play renews it every year until you cancel."
+                PlayStore.Status.ACTIVE -> when {
+                    s.subscribed && s.trialLeft == 0 && com.behrouz.subplayer.BuildConfig.PLAY -> "Active — thank you! Google Play renews it every year until you cancel."
+                    s.subscribed -> "Active — thank you! (${s.storeName})"
+                    else -> "Free trial · ${s.trialLeft} day${if (s.trialLeft == 1) "" else "s"} left. Subscribe in ${s.storeName} to keep SubPlayer after that."
+                }
                 PlayStore.Status.PENDING -> "Payment being processed by Google Play."
                 else -> "Not active."
             },
             Modifier.padding(top = 4.dp, bottom = 6.dp)
         )
+        if (!s.subscribed && activity != null) {
+            GlowButton(if (s.priceText != null) "Subscribe · ${s.priceText}" else "Subscribe", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { s.buy(activity) }
+            s.error?.let { Text(it, color = Neon.Pink, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp)) }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Pill("Manage / cancel") { activity?.let { s.manage(it) } }
+            Pill(if (com.behrouz.subplayer.BuildConfig.PLAY) "Manage / cancel" else "Open in ${s.storeName}") { activity?.let { s.manage(it) } }
             Pill("Privacy policy") { activity?.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL))) }
         }
     }
