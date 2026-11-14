@@ -1,6 +1,16 @@
-# SubPlayer 2.5 — learn German (and English) with your own videos · Android + Windows
+# SubPlayer 2.6 — learn German (and English) with your own videos · Android + Windows
 
-**New in 2.5**
+**New in 2.6**
+- **Google Play version** (`SubPlayer-GooglePlay.aab`, package `com.behrouz.subplayer.play`): yearly subscription with a
+  10-day free trial through Google Play Billing (Billing Library 8.3). Same features, minus the Vosk "Fast" engine and
+  video-link downloads. No activation codes or Telegram in that version (Play rules). Step-by-step publishing guide,
+  listing texts (EN/DE), graphics and form answers are in [`play-store/`](play-store/PLAY-STORE-GUIDE.md).
+- Both Android versions now target **Android 16 (API 36)**, as Google Play requires, and the speech engine is built for
+  **16 KB memory pages**. The build refuses a Play bundle with any library that isn't aligned.
+- [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
+
+
+**2.5**
 - **English words too:** in English subtitles a tapped word opens the **English dictionary** (English Wiktionary,
   131 124 entries, 19 MB): IPA, English definitions with examples, **German translations** (63 587 words) and Persian
   (11 173 words). *Cambridge* replaces DWDS, and ChatGPT/Grok ask for English sentences with German and Persian.
