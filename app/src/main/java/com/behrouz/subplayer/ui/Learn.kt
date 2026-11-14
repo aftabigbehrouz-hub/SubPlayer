@@ -160,13 +160,13 @@ fun SyncSettings(vm: AppViewModel) {
             Modifier.padding(vertical = 6.dp))
         GlassField(token, { token = it }, "GitHub token (gist scope only)")
         Row(Modifier.padding(top = 8.dp)) {
-            Pill("Save token", active = token.isNotBlank() && token.trim() != vm.syncToken) { vm.setSyncToken(token) }
+            Pill("Save token", active = token.isNotBlank() && token.trim() != vm.syncToken) { vm.saveSyncToken(token) }
             Spacer(Modifier.width(8.dp))
             Pill(if (vm.syncing) "Syncing…" else "Sync now", active = vm.syncToken.isNotBlank() && !vm.syncing) { vm.syncNow() }
             Spacer(Modifier.width(8.dp))
             Pill("Get a token ↗") { vm.openUrl(com.behrouz.subplayer.sync.GistSync.TOKEN_PAGE) }
         }
         Explain(vm.syncStatus, Modifier.padding(top = 8.dp))
-        if (vm.syncToken.isNotBlank()) TextButton(onClick = { token = ""; vm.setSyncToken("") }) { Text("Stop syncing on this phone", color = Neon.Cyan) }
+        if (vm.syncToken.isNotBlank()) TextButton(onClick = { token = ""; vm.saveSyncToken("") }) { Text("Stop syncing on this phone", color = Neon.Cyan) }
     }
 }

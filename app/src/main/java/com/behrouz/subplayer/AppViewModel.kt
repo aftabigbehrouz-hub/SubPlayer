@@ -817,7 +817,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var syncJob: Job? = null
     private var lastSync = 0L
 
-    fun setSyncToken(t: String) {
+    fun saveSyncToken(t: String) {
         syncToken = t.trim()
         uiPrefs.edit().putString("sync_token", syncToken).remove("gist_id").apply()
         if (syncToken.isNotEmpty()) syncNow() else { syncStatus = "Not set up"; uiPrefs.edit().putString("sync_status", syncStatus).apply() }
