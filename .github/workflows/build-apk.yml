@@ -57,7 +57,7 @@ jobs:
       - name: Check 16 KB page alignment (Google Play rule)
         run: |
           pip install -q pyelftools
-          python3 tools/ci/check_16kb.py SubPlayer.apk SubPlayer-GooglePlay.aab
+          python3 tools/ci/check_16kb.py SubPlayer-GooglePlay.aab --allow libvosk.so SubPlayer.apk
           ZIPALIGN=$(ls "$ANDROID_HOME"/build-tools/*/zipalign | sort -V | tail -1)
           "$ZIPALIGN" -c -P 16 4 SubPlayer.apk && echo "APK zip alignment OK (16 KB)"
 

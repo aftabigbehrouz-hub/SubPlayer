@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A0A14"/><stop offset="0.55" stop-color="#1B1240"/><stop offset="1" stop-color="#0B1E33"/>
+    </linearGradient>
+    <radialGradient id="g1" cx="0.18" cy="0.25" r="0.5"><stop offset="0" stop-color="#8B5CFF" stop-opacity="0.45"/><stop offset="1" stop-color="#8B5CFF" stop-opacity="0"/></radialGradient>
+    <radialGradient id="g2" cx="0.85" cy="0.85" r="0.5"><stop offset="0" stop-color="#22E4FF" stop-opacity="0.30"/><stop offset="1" stop-color="#22E4FF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22E4FF"/><stop offset="1" stop-color="#FF4FD8"/></linearGradient>
+  </defs>
+  <rect width="1024" height="500" fill="url(#bg)"/>
+  <rect width="1024" height="500" fill="url(#g1)"/><rect width="1024" height="500" fill="url(#g2)"/>
+  <g transform="translate(64,92) scale(1.25)">
+    <rect width="108" height="108" rx="24" fill="#2B2350"/>
+    <path d="M42,26 L74,46 L42,66 Z" fill="#fff"/>
+    <rect x="24" y="76" width="60" height="8" rx="4" fill="#FFD54F"/><rect x="34" y="88" width="40" height="6" rx="3" fill="#FFD54F"/>
+  </g>
+  <text x="230" y="150" font-family="Inter" font-weight="800" font-size="76" fill="url(#t)">SubPlayer</text>
+  <text x="232" y="200" font-family="Inter" font-weight="500" font-size="30" fill="#EDEBF5">Learn German &amp; English with your own videos</text>
+  <rect x="64" y="292" width="896" height="132" rx="26" fill="#000" fill-opacity="0.45" stroke="#8B5CFF" stroke-opacity="0.45"/>
+  <text x="512" y="352" text-anchor="middle" font-family="Inter" font-weight="600" font-size="40" fill="#FFFFFF">Ich glaube, das <tspan fill="#FFD166">Haus</tspan> ist alt.</text>
+  <text x="512" y="398" text-anchor="middle" font-family="Inter" font-weight="500" font-size="24" fill="#9A98B5">das Haus · /haʊ̯s/ · house · خانه</text>
+  <text x="232" y="256" font-family="Inter" font-weight="500" font-size="24" fill="#9A98B5">Subtitles · tap-a-word dictionary · A-B repeat · review</text>
+</svg>
