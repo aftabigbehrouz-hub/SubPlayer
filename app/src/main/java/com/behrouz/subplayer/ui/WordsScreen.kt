@@ -203,22 +203,24 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                                     Text(e.fa, color = W.copy(alpha = 0.75f), fontSize = 14.sp, modifier = Modifier.fillMaxWidth())
                                 }
                             }
-                            IconButton(onClick = { vm.speak(e.de) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
+                            IconButton(onClick = { vm.speak(e.de, lang = w.lang) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
                             IconButton(onClick = { vm.deleteExample(e) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Close, "Remove", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(16.dp)) }
                         }
                     }
                 }
                 androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, w.lemma.ifEmpty { w.text }, w.sentence) }
-                    Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, w.lemma.ifEmpty { w.text }, w.sentence) }
-                    Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, w.lemma.ifEmpty { w.text }, w.sentence) }
-                    Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, w.lemma.ifEmpty { w.text }, w.sentence) }
+                    val lw = w.lemma.ifEmpty { w.text }
+                    Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, lw, w.sentence, w.lang) }
+                    Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, lw, w.sentence, w.lang) }
+                    if (w.lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, lw, w.sentence, w.lang) }
+                    else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, lw, w.sentence, w.lang) }
+                    Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, lw, w.sentence, w.lang) }
                     Pill("＋ Add sentences", active = true) { vm.openAddSentences(w) }
                 }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill("Play in video", icon = Icons.Play) { vm.playClip(w, stayOnScreen = false) }
-                    Pill("Speak", icon = Icons.Volume) { vm.speak(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }) }
+                    Pill("Speak", icon = Icons.Volume) { vm.speak(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, lang = w.lang) }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { vm.deleteWord(w) }) { Icon(Icons.Delete, "Delete", tint = W.copy(alpha = 0.6f)) }
                 }
@@ -315,7 +317,7 @@ fun ReviewScreen(vm: AppViewModel) {
                     if (w.article.isNotEmpty() && vm.reviewRevealed) Text(w.article + " ", color = articleTint(w.article), fontSize = 22.sp)
                     Text(w.text, color = Neon.Gold, fontSize = 30.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                 }
-                IconButton(onClick = { vm.speak(w.text) }) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan) }
+                IconButton(onClick = { vm.speak(w.text, lang = w.lang) }) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan) }
                 AnimatedVisibility(vm.reviewRevealed, enter = expandVertically() + fadeIn()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         if (w.lemma.isNotEmpty() && w.lemma != w.text) Text("→ ${w.lemma}", color = W.copy(alpha = 0.8f), fontSize = 16.sp)

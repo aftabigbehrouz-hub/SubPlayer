@@ -6,7 +6,8 @@ import java.util.TimeZone
 import kotlin.random.Random
 
 /** An extra example sentence for a saved word. */
-data class Example(val id: Long = 0, val wordId: Long = 0, val de: String, val en: String = "", val fa: String = "", val created: Long = 0)
+data class Example(val id: Long = 0, val wordId: Long = 0, val de: String, val en: String = "", val fa: String = "", val created: Long = 0,
+                   val uid: String = "", val updated: Long = 0)
 
 /** Turns text pasted from ChatGPT, Grok, DWDS, dict.cc … into example sentences. */
 object Sentences {
@@ -26,13 +27,21 @@ object Sentences {
      *   blocks of "DE: …" / "EN: …" / "FA: …" lines
      *   plain German sentences, one per line (when nothing is labelled)
      */
-    fun parse(raw: String, max: Int = 12): List<Example> {
+    /**
+     * [primary] = the language being learnt ("de" or "en"). Its sentence goes in Example.de (the "sentence" field),
+     * the other language in Example.en (the "translation" field), Persian in fa.
+     */
+    fun parse(raw: String, max: Int = 12, primary: String = "de"): List<Example> {
         val lines = raw.replace("\r", "").split('\n').map { clean(it.replace(BULLET, "").replace("**", "")) }.filter { it.isNotEmpty() }
         val structured = lines.any { it.contains('|') || LABEL.containsMatchIn(it) }
         val out = ArrayList<Example>()
         if (structured) {
+            // label blocks (DE: … / EN: … / FA: … on separate lines) are grouped: a new block starts when a field repeats
+            var cur: Example? = null
+            fun flush() { cur?.let { if (it.de.isNotEmpty()) out.add(it) }; cur = null }
             for (line in lines) {
                 if (line.contains('|')) {
+                    flush()
                     val parts = line.split('|').map { clean(clean(it).replace(LABEL, "")) }.filter { it.isNotEmpty() }
                     if (parts.isEmpty()) continue
                     val fa = parts.firstOrNull { isPersian(it) } ?: ""
@@ -45,13 +54,21 @@ object Sentences {
                     val label = m.groupValues[1].lowercase(Locale.ROOT)
                     val value = clean(line.substring(m.range.last + 1))
                     if (value.isEmpty()) continue
-                    when (label) {
-                        "de", "deutsch", "german" -> out.add(Example(de = value))
-                        "en", "english", "englisch" -> if (out.isNotEmpty()) out[out.size - 1] = out.last().copy(en = value)
-                        else -> if (out.isNotEmpty()) out[out.size - 1] = out.last().copy(fa = value)
+                    val isDe = label == "de" || label == "deutsch" || label == "german"
+                    val isEn = label == "en" || label == "english" || label == "englisch"
+                    val field = when {
+                        (if (primary == "en") isEn else isDe) -> 0
+                        (if (primary == "en") isDe else isEn) -> 1
+                        else -> 2
                     }
+                    var c = cur ?: Example(de = "")
+                    val taken = when (field) { 0 -> c.de.isNotEmpty(); 1 -> c.en.isNotEmpty(); else -> c.fa.isNotEmpty() }
+                    if (taken) { flush(); c = Example(de = "") }
+                    c = when (field) { 0 -> c.copy(de = value); 1 -> c.copy(en = value); else -> c.copy(fa = value) }
+                    cur = c
                 }
             }
+            flush()
         } else {
             for (line in lines) {
                 val t = clean(line)
@@ -144,6 +161,12 @@ class Progress(ctx: Context) {
     }
 
     val todayCount: Int get() = if (p.getLong("last_day", -10) == today()) p.getInt("today", 0) else 0
+
+    val raw: Triple<Int, Long, Int> get() = Triple(p.getInt("streak", 0), p.getLong("last_day", -10), p.getInt("today", 0))
+
+    fun setRaw(streak: Int, lastDay: Long, today: Int) {
+        p.edit().putInt("streak", streak).putLong("last_day", lastDay).putInt("today", today).apply()
+    }
 
     /** Call for every answered review or practice question. */
     fun record() {

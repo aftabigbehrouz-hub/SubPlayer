@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -142,5 +143,30 @@ fun OnlineSettings(vm: AppViewModel) {
             Spacer(Modifier.width(8.dp))
             Pill("Get a key ↗") { vm.openUrl(vm.onlineProvider.keyPage) }
         }
+    }
+}
+
+
+/** Sync My Words, sentences, review progress and subtitles through a private GitHub gist (phone ↔ Windows). */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun SyncSettings(vm: AppViewModel) {
+    var token by remember(vm.syncToken) { mutableStateOf(vm.syncToken) }
+    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
+        Text("Sync (phone ↔ Windows)", color = Light, fontWeight = FontWeight.Bold)
+        Explain("Your words, added sentences, review boxes, streak and subtitles are kept in ONE private gist on your own " +
+            "GitHub account. Use the same token here and in the Windows app. The newest change wins; deletions travel too. " +
+            "Videos are not uploaded — open the same file (same name) on the other device to get its subtitles and clips.",
+            Modifier.padding(vertical = 6.dp))
+        GlassField(token, { token = it }, "GitHub token (gist scope only)")
+        Row(Modifier.padding(top = 8.dp)) {
+            Pill("Save token", active = token.isNotBlank() && token.trim() != vm.syncToken) { vm.setSyncToken(token) }
+            Spacer(Modifier.width(8.dp))
+            Pill(if (vm.syncing) "Syncing…" else "Sync now", active = vm.syncToken.isNotBlank() && !vm.syncing) { vm.syncNow() }
+            Spacer(Modifier.width(8.dp))
+            Pill("Get a token ↗") { vm.openUrl(com.behrouz.subplayer.sync.GistSync.TOKEN_PAGE) }
+        }
+        Explain(vm.syncStatus, Modifier.padding(top = 8.dp))
+        if (vm.syncToken.isNotBlank()) TextButton(onClick = { token = ""; vm.setSyncToken("") }) { Text("Stop syncing on this phone", color = Neon.Cyan) }
     }
 }

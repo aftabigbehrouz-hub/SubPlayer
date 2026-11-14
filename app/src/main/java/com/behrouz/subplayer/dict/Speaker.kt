@@ -14,20 +14,26 @@ class Speaker(ctx: Context) : TextToSpeech.OnInitListener {
 
     @Volatile var germanVoice = false
         private set
+    @Volatile var englishVoice = false
+        private set
     @Volatile var ready = false
         private set
 
     override fun onInit(status: Int) {
         ready = status == TextToSpeech.SUCCESS
         if (ready) {
+            val en = tts.isLanguageAvailable(Locale.US)
+            englishVoice = en != TextToSpeech.LANG_MISSING_DATA && en != TextToSpeech.LANG_NOT_SUPPORTED
             val r = tts.setLanguage(Locale.GERMANY)
             germanVoice = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
         }
     }
 
-    /** Returns false if no German voice is installed. */
-    fun speak(text: String, slow: Boolean = false): Boolean {
-        if (!ready || !germanVoice) return false
+    /** Returns false if no voice for [lang] (de / en) is installed. */
+    fun speak(text: String, slow: Boolean = false, lang: String = "de"): Boolean {
+        if (!ready) return false
+        if (lang == "en") { if (!englishVoice) return false; tts.setLanguage(Locale.US) }
+        else { if (!germanVoice) return false; tts.setLanguage(Locale.GERMANY) }
         tts.setSpeechRate(if (slow) 0.7f else 0.95f)
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "subplayer")
         return true

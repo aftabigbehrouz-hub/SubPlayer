@@ -78,6 +78,11 @@ private val HELP = listOf(
         "Pause (tap the picture) and tap any word in the subtitle: article, IPA, meanings with examples, English, " +
             "Persian, the phone's voice (also slow), a real recording when online, and DWDS. " +
             "Inflected words find their base form (ging → gehen). The dictionary (38 MB) downloads with your first tap."),
+    HelpItem(Icons.Star, "English videos",
+        "Make English subtitles (Subtitles ▸ English) or load an English .srt: tapping a word then opens the English " +
+            "dictionary (19 MB, downloads with your first English tap): IPA, English definitions with examples, German " +
+            "translations and Persian. Cambridge replaces DWDS, and ChatGPT/Grok ask for English sentences with German and " +
+            "Persian. Your saved English words are reviewed and practised like the German ones."),
     HelpItem(Icons.Copy, "Phrases & whole lines",
         "Long-press the first word, then tap the last word: the phrase is translated into English and Persian " +
             "(needs internet) and each word's meaning is listed (offline). Double-tap a word to translate the whole line."),
@@ -110,6 +115,11 @@ private val HELP = listOf(
     HelpItem(Icons.Fullscreen, "Full screen",
         "Full screen (or just turn the phone sideways). Tap once to show/hide the controls, double-tap the left or right " +
             "side to jump 5 seconds, double-tap the middle to play/pause. Subtitle words stay tappable. Back exits."),
+    HelpItem(Icons.Sync, "Sync with Windows",
+        "Settings ▸ Sync: tap “Get a token ↗”, sign in to GitHub, create a token with only the “gist” box ticked and paste " +
+            "it here and in the Windows app. My Words, sentences, review progress, streak and subtitles then stay the same " +
+            "on both: it syncs on start, a little after each change and with “Sync now”. Everything is kept in one private " +
+            "gist on your own account. Videos are not uploaded — copy the video file to the PC with the same name."),
     HelpItem(Icons.Lock, "Offline & privacy",
         "Subtitles, dictionary, review and clip saving work without internet. Only sentence translation, real recordings " +
             "and DWDS go online. Your videos never leave your phone.")
@@ -240,12 +250,14 @@ fun SettingsSheet(vm: AppViewModel) {
             }
 
             Spacer(Modifier.height(12.dp))
+            SyncSettings(vm)
+            Spacer(Modifier.height(12.dp))
             OnlineSettings(vm)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(20.dp)).padding(16.dp)) {
                 Text("About", color = W, fontWeight = FontWeight.Bold)
-                Explain("SubPlayer · speech recognition: Whisper (OpenAI, via whisper.cpp) and Vosk · dictionary: Wiktionary " +
-                    "(CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online only).", Modifier.padding(top = 4.dp))
+                Explain("SubPlayer · speech recognition: Whisper (OpenAI, via whisper.cpp) and Vosk · dictionaries: German and English " +
+                    "Wiktionary via kaikki.org (CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online only).", Modifier.padding(top = 4.dp))
                 TextButton(onClick = { vm.sheet = null; vm.showTour = true }) { Text("Replay the intro tour", color = Neon.Cyan) }
             }
         }

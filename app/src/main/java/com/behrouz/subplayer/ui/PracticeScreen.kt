@@ -172,7 +172,7 @@ private fun GapQuestion(vm: AppViewModel, q: Question.Gap) {
                 if (c.fa.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Text(c.fa, color = L.copy(alpha = 0.85f), fontSize = 16.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
-                Row(Modifier.padding(top = 6.dp)) { Pill("Speak", icon = Icons.Volume) { vm.speak(c.sentence) } }
+                Row(Modifier.padding(top = 6.dp)) { Pill("Speak", icon = Icons.Volume) { vm.speak(c.sentence, lang = c.word.lang) } }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -259,7 +259,7 @@ private fun ArticleQuestion(vm: AppViewModel, q: Question.Article) {
             Text(if (fb == null) "___  ${q.word.lemma}" else "${q.word.article}  ${q.word.lemma}", color = L, fontSize = 34.sp, fontWeight = FontWeight.Black)
             if (q.word.english.isNotEmpty()) Text(q.word.english, color = L.copy(alpha = 0.6f), fontSize = 14.sp, textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.padding(top = 6.dp)) { Pill("Speak", icon = Icons.Volume) { vm.speak(if (fb != null) "${q.word.article} ${q.word.lemma}" else q.word.lemma) } }
+            Row(Modifier.padding(top = 6.dp)) { Pill("Speak", icon = Icons.Volume) { vm.speak(if (fb != null) "${q.word.article} ${q.word.lemma}" else q.word.lemma, lang = q.word.lang) } }
         }
         Spacer(Modifier.height(24.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

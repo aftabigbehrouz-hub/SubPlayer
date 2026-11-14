@@ -53,11 +53,15 @@ object Assets {
     val VAD = Asset(
         "vad", "Voice detector", "ggml-silero-v5.1.2.bin", 1,
         "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin")
+    val DICT_EN = Asset(
+        "dict-en", "English dictionary", "dict-en-v1.zip", DICT_EN_MB,
+        "36ce4981ee0001d651bc451a0ebfca59eefab7d7f911815ef22f35f77be43ea3", null, unzipInto = "dict-en", result = "dict-en/dict.db")
     val DICT_DE = Asset(
         "dict-de", "German dictionary", "dict-de-v1.zip", DICT_MB,
         "7991bd05f238b6697aa6eddc4a9ec710e537545cb6a2e605196370a6344babc7", null, unzipInto = "dict", result = "dict/dict.db")
 }
 
+private const val DICT_EN_MB = 19 // set after the English dictionary build
 private const val DICT_MB = 38 // dict-de-v1.zip = 37 909 522 bytes
 
 object Downloader {

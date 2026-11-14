@@ -29,6 +29,10 @@ import com.behrouz.subplayer.dict.Speaker
 import com.behrouz.subplayer.dict.Translator
 import com.behrouz.subplayer.export.ClipExporter
 import com.behrouz.subplayer.licence.Licence
+import com.behrouz.subplayer.sync.GistSync
+import com.behrouz.subplayer.sync.SSub
+import com.behrouz.subplayer.sync.SyncDoc
+import com.behrouz.subplayer.sync.SyncMerge
 import com.behrouz.subplayer.words.Cloze
 import com.behrouz.subplayer.words.Example
 import com.behrouz.subplayer.words.Practice
@@ -71,7 +75,8 @@ sealed class Sheet {
         val onlineBusy: Boolean = false,
         val cueStart: Long = -1,
         val cueEnd: Long = -1,
-        val saved: Boolean = false
+        val saved: Boolean = false,
+        val lang: String = "de"
     ) : Sheet()
 
     data class Phrase(
@@ -86,7 +91,8 @@ sealed class Sheet {
         val sentence: String = "",
         val cueStart: Long = -1,
         val cueEnd: Long = -1,
-        val saved: Boolean = false
+        val saved: Boolean = false,
+        val lang: String = "de"
     ) : Sheet()
 
     object Generate : Sheet()
@@ -155,7 +161,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val whisperSupported = WhisperEngine.cpuSupported()
 
     private var job: Job? = null
-    private var dictionary: Dictionary? = null
+    private val dictionaries = HashMap<String, Dictionary>()
+
+    /** Language of the words being watched: English subtitles use the English dictionary. */
+    fun wordLang() = if (cueLang == "en") "en" else "de"
 
     // ---- navigation / app state
     var screen by mutableStateOf(Screen.PLAYER)
@@ -215,6 +224,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!whisperSupported) genEngine = Engine.FAST
         refreshWords()
         recentList = recents.list()
+        viewModelScope.launch { delay(1500); if (syncToken.isNotBlank()) syncNow(silent = true) }
         if (licence == null) {
             Reminder.scheduleTrial(app, Licence.trialEnd(app))
             if (trialLeft in 1..1) message = "Last day of your free trial — tap the trial badge to buy"
@@ -271,6 +281,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 cues = Srt.parse(f.readText()); cueLang = lang
                 cueInfo = "Saved ${langName(lang)} subtitles"
                 break
+            }
+        }
+        if (cues.isEmpty()) {
+            // subtitles made on another device for a video with the same file name
+            val key = videoKey(videoName)
+            for (lang in listOf("de", "en")) {
+                val f = File(syncedSubsDir(), "$key.$lang.srt")
+                if (f.exists()) {
+                    cues = Srt.parse(f.readText()); cueLang = lang
+                    runCatching { srtFile(uri, lang).also { it.parentFile?.mkdirs() }.writeText(f.readText()) }
+                    cueInfo = "${langName(lang)} subtitles from your other device"
+                    break
+                }
             }
         }
         val startAt = if (resume) recents.get(uri.toString())?.positionMs?.takeIf { it > 3000 } ?: 0L else 0L
@@ -401,7 +424,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         clearSelection()
     }
 
-    fun openWord(raw: String, sentence: String, cueStart: Long = -1, cueEnd: Long = -1) {
+    fun openWord(raw: String, sentence: String, cueStart: Long = -1, cueEnd: Long = -1, lang: String? = null) {
         val word = Dictionary.normalize(raw)
         if (word.isEmpty()) return
         val prev = sheet
@@ -410,15 +433,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is Sheet.Phrase -> Triple(prev.cueStart, prev.cueEnd, prev.sentence)
             else -> Triple(-1L, -1L, sentence)
         }
-        sheet = Sheet.Word(word, sent, cueStart = cs, cueEnd = ce, saved = isSaved(word, cs))
+        val l = lang ?: (prev as? Sheet.Word)?.lang?.takeIf { cueStart < 0 } ?: (prev as? Sheet.Phrase)?.lang?.takeIf { cueStart < 0 } ?: wordLang()
+        sheet = Sheet.Word(word, sent, cueStart = cs, cueEnd = ce, saved = isSaved(word, cs), lang = l)
         viewModelScope.launch {
-            val d = dictionaryOrNull()
-            if (d == null) {
-                update<Sheet.Word> { if (it.word == word) it.copy(loading = false, needDictionary = true) else it }
-                return@launch
+            val d = dictionaryOrNull(l)
+            var res = if (d == null) emptyList() else withContext(Dispatchers.IO) { runCatching { d.lookup(word) }.getOrDefault(emptyList()) }
+            var used = l
+            // not found: try the other language's dictionary (e.g. an English word in German subtitles)
+            if (res.isEmpty()) {
+                val other = if (l == "en") "de" else "en"
+                dictionaryOrNull(other)?.let { o ->
+                    val r2 = withContext(Dispatchers.IO) { runCatching { o.lookup(word) }.getOrDefault(emptyList()) }
+                    if (r2.isNotEmpty()) { res = r2; used = other }
+                }
             }
-            val res = withContext(Dispatchers.IO) { runCatching { d.lookup(word) }.getOrDefault(emptyList()) }
-            update<Sheet.Word> { if (it.word == word) it.copy(loading = false, entries = res) else it }
+            update<Sheet.Word> {
+                if (it.word != word) it
+                else if (d == null && res.isEmpty()) it.copy(loading = false, needDictionary = true)
+                else it.copy(loading = false, entries = res, lang = used)
+            }
         }
     }
 
@@ -426,8 +459,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val s = sheet as? Sheet.Word ?: return
         update<Sheet.Word> { it.copy(onlineBusy = true) }
         viewModelScope.launch {
-            val en = runCatching { Translator.translate(s.word, "de", "en").text }.getOrElse { "— (${it.message})" }
-            val fa = runCatching { Translator.translate(s.word, "de", "fa").text }.getOrElse { "—" }
+            val target = if (s.lang == "en") "de" else "en"
+            val en = runCatching { Translator.translate(s.word, s.lang, target).text }.getOrElse { "— (${it.message})" }
+            val fa = runCatching { Translator.translate(s.word, s.lang, "fa").text }.getOrElse { "—" }
             update<Sheet.Word> { if (it.word == s.word) it.copy(onlineEn = en, onlineFa = fa, onlineBusy = false) else it }
         }
     }
@@ -435,14 +469,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun openPhrase(words: List<String>, sentence: String, cueStart: Long, cueEnd: Long) {
         val text = words.joinToString(" ")
         val clean = words.map { Dictionary.normalize(it) }.filter { it.isNotEmpty() }
+        val lang = wordLang()
         sheet = Sheet.Phrase(text, clean, sentence = sentence, cueStart = cueStart, cueEnd = cueEnd,
-            saved = isSaved(text, cueStart))
+            saved = isSaved(text, cueStart), lang = lang)
         viewModelScope.launch {
             // word-by-word glosses from the offline dictionary
-            dictionaryOrNull()?.let { d ->
+            dictionaryOrNull(lang)?.let { d ->
                 val g = withContext(Dispatchers.IO) {
                     clean.associateWith { w ->
-                        runCatching { d.lookup(w).firstOrNull()?.let { e -> e.english.firstOrNull() ?: e.senses.firstOrNull()?.de ?: "" } }
+                        runCatching { d.lookup(w).firstOrNull()?.let { e -> e.english.firstOrNull() ?: e.german.firstOrNull()?.let { g -> "DE: $g" } ?: e.senses.firstOrNull()?.de ?: "" } }
                             .getOrNull().orEmpty().take(60)
                     }
                 }
@@ -451,8 +486,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             try {
-                val en = Translator.translate(text, cueLangOrDe(), "en")
-                val fa = Translator.translate(text, cueLangOrDe(), "fa")
+                // English subtitles → German + Persian; German subtitles → English + Persian
+                val en = Translator.translate(text, lang, if (lang == "en") "de" else "en")
+                val fa = Translator.translate(text, lang, "fa")
                 update<Sheet.Phrase> { if (it.text == text) it.copy(en = en.text, fa = fa.text, busy = false, service = en.service) else it }
             } catch (e: Exception) {
                 update<Sheet.Phrase> {
@@ -469,16 +505,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (s is T) sheet = f(s)
     }
 
-    fun dictionaryReady() = Downloader.isReady(ctx, Assets.DICT_DE)
+    private fun dictAsset(lang: String) = if (lang == "en") Assets.DICT_EN else Assets.DICT_DE
 
-    fun downloadDictionary() {
+    fun dictionaryReady(lang: String = "de") = Downloader.isReady(ctx, dictAsset(lang))
+
+    fun dictSizeMb(lang: String) = dictAsset(lang).sizeMb
+
+    fun downloadDictionary(lang: String = "de") {
         if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        val a = dictAsset(lang)
         job = viewModelScope.launch {
-            task = Task("Dictionary", "Downloading German dictionary…", 0)
+            task = Task("Dictionary", "Downloading ${a.label}…", 0)
             try {
-                Downloader.ensure(ctx, Assets.DICT_DE) { p -> ui { task = Task("Dictionary", "Downloading German dictionary… $p%", p) } }
-                message = "Dictionary ready — works offline"
-                (sheet as? Sheet.Word)?.let { openWord(it.word, it.sentence) }
+                Downloader.ensure(ctx, a) { p -> ui { task = Task("Dictionary", "Downloading ${a.label}… $p%", p) } }
+                message = "${a.label} ready — works offline"
+                (sheet as? Sheet.Word)?.let { openWord(it.word, it.sentence, lang = lang) }
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Exception) {
@@ -489,17 +530,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun dictionaryOrNull(): Dictionary? {
-        dictionary?.let { return it }
-        if (!dictionaryReady()) return null
+    private suspend fun dictionaryOrNull(lang: String = "de"): Dictionary? {
+        dictionaries[lang]?.let { return it }
+        if (!dictionaryReady(lang)) return null
         return withContext(Dispatchers.IO) {
-            runCatching { Dictionary(Downloader.target(ctx, Assets.DICT_DE)) }.getOrNull()
-        }?.also { dictionary = it }
+            runCatching { Dictionary(Downloader.target(ctx, dictAsset(lang))) }.getOrNull()
+        }?.also { dictionaries[lang] = it }
     }
 
-    fun speak(text: String, slow: Boolean = false) {
-        if (!speaker.speak(text, slow)) {
-            message = "No German voice installed. Open Settings › Text-to-speech and add German."
+    fun speak(text: String, slow: Boolean = false, lang: String = wordLang()) {
+        if (!speaker.speak(text, slow, lang)) {
+            message = "No ${if (lang == "en") "English" else "German"} voice installed. Open Android Settings › Text-to-speech and add it."
         }
     }
 
@@ -508,8 +549,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         speaker.playRecording(url) { err -> ui { message = err } }
     }
 
-    fun openDwds(word: String) {
-        val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.dwds.de/wb/" + Uri.encode(word)))
+    /** DWDS for German words, Cambridge for English ones. */
+    fun openDwds(word: String, lang: String = "de") {
+        val url = if (lang == "en") "https://dictionary.cambridge.org/dictionary/english/" + Uri.encode(word.lowercase())
+        else "https://www.dwds.de/wb/" + Uri.encode(word)
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { ctx.startActivity(i) }.onFailure { message = "No browser found" }
     }
@@ -569,6 +613,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     val f = srtFile(uri, lang)
                     withContext(Dispatchers.IO) { f.parentFile?.mkdirs(); f.writeText(Srt.write(result)) }
+                    scheduleSync()
                     if (videoUri == uri) {
                         cues = result; cueLang = lang
                         cueInfo = "${langName(lang)} · ${engine.title}"
@@ -597,6 +642,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return store.find(Dictionary.normalize(text), u, cueStart) != null
     }
 
+    fun refreshWordsAndSync() { refreshWords(); scheduleSync() }
+
     fun refreshWords() {
         val all = store.all()
         words = all
@@ -612,9 +659,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w: SavedWord = when (val s = sheet) {
             is Sheet.Word -> {
                 val e = s.entries.firstOrNull()
+                val meaning = if (e != null && e.lang == "en")
+                    listOfNotNull(e.senses.firstOrNull()?.de, e.german.take(2).joinToString(", ").takeIf { it.isNotEmpty() }?.let { "DE: $it" }).joinToString("  ·  ")
+                    else e?.english?.take(2)?.joinToString("; ")
                 SavedWord(
+                    lang = e?.lang ?: s.lang,
                     text = s.word, lemma = e?.lemma ?: s.word, article = e?.article ?: "", ipa = e?.ipa ?: "",
-                    english = e?.english?.take(2)?.joinToString("; ") ?: s.onlineEn.orEmpty(),
+                    english = meaning ?: s.onlineEn.orEmpty(),
                     persian = (e?.persian?.takeIf { it.isNotEmpty() } ?: e?.persianViaEnglish)?.take(3)?.joinToString("، ")
                         ?: s.onlineFa.orEmpty(),
                     sentence = s.sentence, videoUri = u.toString(), videoName = videoName,
@@ -623,6 +674,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             is Sheet.Phrase -> SavedWord(
+                lang = s.lang,
                 text = s.text, lemma = s.text, english = s.en.orEmpty(), persian = s.fa.orEmpty(),
                 sentence = s.sentence, videoUri = u.toString(), videoName = videoName,
                 startMs = s.cueStart.coerceAtLeast(0), endMs = maxOf(s.cueEnd, s.cueStart + 2000),
@@ -638,7 +690,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.insert(w)
             message = "★ Saved to My Words — it will come up for review"
         }
-        refreshWords()
+        refreshWordsAndSync()
         when (val s = sheet) {
             is Sheet.Word -> sheet = s.copy(saved = existing == null)
             is Sheet.Phrase -> sheet = s.copy(saved = existing == null)
@@ -648,7 +700,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun isKnownWord(token: String) = key(token) in savedKeys
 
-    fun deleteWord(w: SavedWord) { store.delete(w.id); refreshWords() }
+    fun deleteWord(w: SavedWord) { store.delete(w.id); refreshWordsAndSync() }
 
     /** Opens the word's video (if needed) and loops the subtitle line it came from. */
     fun playClip(w: SavedWord, stayOnScreen: Boolean = true) {
@@ -687,7 +739,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         reviewRevealed = false
         clearAB()
         player.pause()
-        refreshWords()
+        refreshWordsAndSync()
     }
 
     fun endReview() { clearAB(); player.pause(); screen = Screen.WORDS }
@@ -755,6 +807,99 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+
+
+    // ------------------------------------------------------ sync (private GitHub gist)
+
+    var syncToken by mutableStateOf(uiPrefs.getString("sync_token", "") ?: ""); private set
+    var syncStatus by mutableStateOf(uiPrefs.getString("sync_status", "Not set up") ?: "Not set up"); private set
+    var syncing by mutableStateOf(false); private set
+    private var syncJob: Job? = null
+    private var lastSync = 0L
+
+    fun setSyncToken(t: String) {
+        syncToken = t.trim()
+        uiPrefs.edit().putString("sync_token", syncToken).remove("gist_id").apply()
+        if (syncToken.isNotEmpty()) syncNow() else { syncStatus = "Not set up"; uiPrefs.edit().putString("sync_status", syncStatus).apply() }
+    }
+
+    private fun localSubs(): Map<String, SSub> {
+        val out = HashMap<String, SSub>()
+        val re = Regex("""^(.*)_([0-9a-f]+)\.(de|en|und)\.srt$""")
+        fun add(key: String, lang: String, f: File) {
+            val k = "$key|$lang"
+            if ((out[k]?.updated ?: -1) < f.lastModified()) out[k] = SSub(key, lang, f.readText(), f.lastModified())
+        }
+        subsDir().listFiles()?.forEach { f -> re.find(f.name)?.let { m -> add(m.groupValues[1], m.groupValues[3], f) } }
+        syncedSubsDir().listFiles()?.forEach { f ->
+            val n = f.name.removeSuffix(".srt"); val lang = n.substringAfterLast('.'); add(n.substringBeforeLast('.'), lang, f)
+        }
+        return out
+    }
+
+    private fun localDoc(): SyncDoc {
+        val (ws, es) = store.exportSync()
+        val (st, day, today) = progress.raw
+        return SyncDoc(ws.associateBy { it.uid }, es.associateBy { it.uid }, store.tombstones(), localSubs(), st, day, today)
+    }
+
+    private fun applySubs(d: SyncDoc) {
+        val dir = syncedSubsDir().apply { mkdirs() }
+        val local = localSubs()
+        for ((k, sub) in d.subs) {
+            if ((local[k]?.updated ?: -1) >= sub.updated) continue
+            val f = File(dir, "${sub.key}.${sub.lang}.srt")
+            f.writeText(sub.srt); f.setLastModified(sub.updated)
+        }
+    }
+
+    /** Pull → merge → apply → push. Newest change wins; deletions travel too. */
+    fun syncNow(silent: Boolean = false) {
+        if (syncToken.isBlank()) { if (!silent) message = "Add a GitHub token first (Settings › Sync)"; return }
+        if (syncing) return
+        syncing = true
+        syncStatus = "Syncing…"
+        viewModelScope.launch {
+            try {
+                val n = withContext(Dispatchers.IO) {
+                    val g = GistSync(syncToken)
+                    var id = uiPrefs.getString("gist_id", null) ?: g.find()
+                    val remoteText = if (id != null) g.read(id) else ""
+                    val remote = SyncMerge.fromJson(remoteText)
+                    val merged = SyncMerge.merge(localDoc(), remote)
+                    store.applySync(merged) { name -> recents.list().firstOrNull { it.name.equals(name, ignoreCase = true) }?.uri ?: "" }
+                    applySubs(merged)
+                    progress.setRaw(merged.streak, merged.lastDay, merged.today)
+                    val json = SyncMerge.toJson(merged)
+                    if (id == null) id = g.create(json) else if (json != remoteText) g.write(id, json)
+                    uiPrefs.edit().putString("gist_id", id).apply()
+                    merged.words.size
+                }
+                refreshWords()
+                streak = progress.streak; todayCount = progress.todayCount
+                lastSync = System.currentTimeMillis()
+                syncStatus = "Synced " + java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.US).format(java.util.Date()) + " · $n words"
+                if (!silent) message = "Synced ✓ — $n words"
+            } catch (e: Exception) {
+                syncStatus = "Sync failed: " + (e.message ?: e.javaClass.simpleName)
+                if (!silent) message = syncStatus
+            } finally {
+                syncing = false
+                uiPrefs.edit().putString("sync_status", syncStatus).apply()
+            }
+        }
+    }
+
+    /** Sync a little after a change (several quick changes → one sync). */
+    fun scheduleSync() {
+        if (syncToken.isBlank()) return
+        syncJob?.cancel()
+        syncJob = viewModelScope.launch { delay(20_000); syncNow(silent = true) }
+    }
+
+    fun syncOnResume() {
+        if (syncToken.isNotBlank() && System.currentTimeMillis() - lastSync > 120_000) syncNow(silent = true)
+    }
 
     // ------------------------------------------------------ complete sentences
 
@@ -835,9 +980,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------ learn more
 
-    enum class Source { CHATGPT, GROK, DWDS, DICTCC, OTHER }
+    enum class Source { CHATGPT, GROK, DWDS, DICTCC, CAMBRIDGE, OTHER }
 
-    private fun aiPrompt(word: String, sentence: String) =
+    private fun aiPrompt(word: String, sentence: String, lang: String = wordLang()) = if (lang == "en")
+        "Explain the English word “$word”" + (if (sentence.isNotBlank()) " as used in: “${sentence.replace('\n', ' ')}”" else "") + ".\n" +
+            "1) Meaning in simple English, plus the German and the Persian translation.\n" +
+            "2) IPA (UK and US), word forms, and common collocations.\n" +
+            "3) Exactly 3 natural example sentences of everyday English, one per line, in this format:\n" +
+            "EN: … | DE: … | FA: …"
+    else
         "Explain the German word „$word“" + (if (sentence.isNotBlank()) " as used in: „${sentence.replace('\n', ' ')}“" else "") + ".\n" +
             "1) Meaning in English and in Persian.\n" +
             "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt.\n" +
@@ -845,8 +996,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "DE: … | EN: … | FA: …"
 
     /** Opens ChatGPT / Grok with a ready question, or DWDS / dict.cc for the word. */
-    fun learnMore(source: Source, word: String, sentence: String) {
+    fun learnMore(source: Source, word: String, sentence: String, lang: String = wordLang()) {
         val w = word.trim()
+        fun aiPrompt(word: String, sentence: String) = this@AppViewModel.aiPrompt(word, sentence, lang)
         // installed apps first
         when (source) {
             Source.CHATGPT, Source.GROK -> {
@@ -865,13 +1017,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (!AppLinks.lookUp(ctx, null, w)) AppLinks.sendText(ctx, null, w)
                 return
             }
-            Source.DWDS -> {}
+            Source.DWDS, Source.CAMBRIDGE -> {}
         }
         val url = when (source) {
             Source.CHATGPT -> "https://chatgpt.com/?q=" + Uri.encode(aiPrompt(w, sentence))
             Source.GROK -> "https://grok.com/?q=" + Uri.encode(aiPrompt(w, sentence))
             Source.DWDS -> "https://www.dwds.de/wb/" + Uri.encode(w)
             Source.DICTCC -> "https://www.dict.cc/?s=" + Uri.encode(w)
+            Source.CAMBRIDGE -> "https://dictionary.cambridge.org/dictionary/english/" + Uri.encode(w.lowercase())
             Source.OTHER -> return
         }
         if (source == Source.CHATGPT || source == Source.GROK) {
@@ -910,15 +1063,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun previewSentences(raw: String) = Sentences.parse(raw)
 
     fun addSentences(wordId: Long, raw: String) {
-        val list = Sentences.parse(raw)
+        val lang = words.firstOrNull { it.id == wordId }?.lang ?: "de"
+        val list = Sentences.parse(raw, primary = lang)
         if (list.isEmpty()) { message = "No sentences found. Each line should look like: DE: … | EN: … | FA: …"; return }
         val n = store.addExamples(wordId, list)
-        refreshWords()
+        refreshWordsAndSync()
         sheet = null
         message = if (n == 0) "Those sentences are already saved" else "$n sentence${if (n == 1) "" else "s"} added — they'll appear in review and practice"
     }
 
-    fun deleteExample(e: Example) { store.deleteExample(e.id); refreshWords() }
+    fun deleteExample(e: Example) { store.deleteExample(e.id); refreshWordsAndSync() }
 
     /** All sentences for a word: the video line first, then added examples (sentence, en, fa). */
     fun sentencesOf(w: SavedWord): List<Example> =
@@ -928,6 +1082,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun recordProgress() {
         progress.record(); streak = progress.streak; todayCount = progress.todayCount
+        scheduleSync()
     }
 
     fun openPractice() { practiceMode = null; feedback = null; screen = Screen.PRACTICE }
@@ -935,7 +1090,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun available(mode: PracticeMode): Int = when (mode) {
         PracticeMode.GAPS -> words.count { w -> sentencesOf(w).any { Practice.cloze(w, it.de) != null } }
         PracticeMode.DICTATION -> words.count { it.sentence.isNotBlank() && it.endMs > it.startMs }
-        PracticeMode.ARTICLES -> words.count { it.article in setOf("der", "die", "das") }
+        PracticeMode.ARTICLES -> words.count { it.lang == "de" && it.article in setOf("der", "die", "das") }
     }
 
     fun startPractice(mode: PracticeMode) {
@@ -949,7 +1104,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ?.let { c -> Question.Gap(c, Practice.choices(c.answer, words.map { it.text }, rnd)) }
             }
             PracticeMode.DICTATION -> pool.filter { it.sentence.isNotBlank() }.map { Question.Dictation(it) }
-            PracticeMode.ARTICLES -> pool.filter { it.article in setOf("der", "die", "das") }.map { Question.Article(it) }
+            PracticeMode.ARTICLES -> pool.filter { it.lang == "de" && it.article in setOf("der", "die", "das") }.map { Question.Article(it) }
         }.take(10)
         if (qs.isEmpty()) {
             message = when (mode) {
@@ -1102,9 +1257,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun tokens(text: String): List<String> = text.split(Regex("\\s+")).filter { it.isNotBlank() }
 
+    /** Same key on every device for the same video file name (used to sync subtitles). */
+    fun videoKey(name: String) = name.substringBeforeLast('.').replace(Regex("[^\\p{L}\\p{N}._-]+"), "_").take(60)
+
+    private fun subsDir() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "subtitles")
+    private fun syncedSubsDir() = File(ctx.filesDir, "synced_subs")
+
     private fun srtFile(uri: Uri, lang: String): File {
-        val dir = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "subtitles")
-        val base = displayName(uri).substringBeforeLast('.').replace(Regex("[^\\p{L}\\p{N}._-]+"), "_").take(60)
+        val dir = subsDir()
+        val base = videoKey(displayName(uri))
         return File(dir, "${base}_${Integer.toHexString(uri.toString().hashCode())}.$lang.srt")
     }
 
@@ -1125,6 +1286,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         job?.cancel()
         player.release()
         speaker.shutdown()
-        dictionary?.close()
+        dictionaries.values.forEach { it.close() }
     }
 }

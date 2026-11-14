@@ -93,10 +93,11 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
                     Pill("Translate whole sentence") { vm.openSentenceOfSheet() }
                 }
             }
-            if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence)
+            if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence, s.lang)
             Spacer(Modifier.height(10.dp))
             Text(
-                "Dictionary: Wiktionary (CC BY-SA 4.0)",
+                if (s.lang == "en") "English dictionary: English Wiktionary via kaikki.org (CC BY-SA 4.0)"
+                else "Dictionary: German & English Wiktionary via kaikki.org (CC BY-SA 4.0)",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline
             )
         }
@@ -127,21 +128,25 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
     }
     // pronunciation + links
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        FilledTonalButton(onClick = { vm.speak(e.lemma) }) {
+        FilledTonalButton(onClick = { vm.speak(e.lemma, lang = e.lang) }) {
             Icon(Icons.Volume, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Speak")
         }
-        OutlinedButton(onClick = { vm.speak(e.lemma, slow = true) }) { Text("Slow") }
+        OutlinedButton(onClick = { vm.speak(e.lemma, slow = true, lang = e.lang) }) { Text("Slow") }
         if (e.audioUrl.isNotEmpty()) {
             OutlinedButton(onClick = { vm.playRecording(e.audioUrl) }) {
                 Icon(Icons.Play, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Recording")
             }
         }
-        OutlinedButton(onClick = { vm.openDwds(e.lemma) }) {
-            Text("DWDS"); Spacer(Modifier.width(4.dp)); Icon(Icons.OpenIn, null, Modifier.size(16.dp))
+        OutlinedButton(onClick = { vm.openDwds(e.lemma, e.lang) }) {
+            Text(if (e.lang == "en") "Cambridge" else "DWDS"); Spacer(Modifier.width(4.dp)); Icon(Icons.OpenIn, null, Modifier.size(16.dp))
         }
     }
 
-    if (e.english.isNotEmpty()) {
+    if (e.lang == "en" && e.german.isNotEmpty()) {
+        Section("Deutsch")
+        Text(e.german.take(6).joinToString(", "), style = MaterialTheme.typography.bodyLarge)
+    }
+    if (e.lang != "en" && e.english.isNotEmpty()) {
         Section("English")
         e.english.take(6).forEachIndexed { i, g -> Text("${i + 1}. $g", style = MaterialTheme.typography.bodyLarge) }
     }
@@ -150,7 +155,7 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
     PersianBlock(vm, e)
 
     if (e.senses.isNotEmpty()) {
-        Section("Bedeutungen")
+        Section(if (e.lang == "en") "Definitions" else "Bedeutungen")
         e.senses.forEachIndexed { i, sense ->
             Text("${i + 1}. ${sense.de}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             sense.examples.forEach { ex ->
@@ -160,7 +165,7 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f).padding(start = 14.dp)
                     )
-                    IconButton(onClick = { vm.speak(cleanExample(ex)) }, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = { vm.speak(cleanExample(ex), lang = e.lang) }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Volume, "Speak example", Modifier.size(18.dp))
                     }
                 }
@@ -168,9 +173,9 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
         }
     }
     if (e.synonyms.isNotEmpty()) {
-        Section("Synonyme")
+        Section(if (e.lang == "en") "Synonyms" else "Synonyme")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            e.synonyms.forEach { syn -> SuggestionChip(onClick = { vm.openWord(syn, syn) }, label = { Text(syn) }) }
+            e.synonyms.forEach { syn -> SuggestionChip(onClick = { vm.openWord(syn, syn, lang = e.lang) }, label = { Text(syn) }) }
         }
     }
 }
@@ -225,14 +230,15 @@ private fun NeedDictionary(vm: AppViewModel, s: Sheet.Word) {
     Spacer(Modifier.height(8.dp))
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.padding(16.dp)) {
-            Text("Offline dictionary not downloaded yet", style = MaterialTheme.typography.titleSmall)
+            val en = s.lang == "en"
+            Text(if (en) "English dictionary not downloaded yet" else "German dictionary not downloaded yet", style = MaterialTheme.typography.titleSmall)
             Text(
-                "About ${Assets.DICT_DE.sizeMb} MB, once. Then every word works without internet: " +
-                    "IPA, meanings, examples, English and Persian.",
+                "About ${vm.dictSizeMb(s.lang)} MB, once. Then every word works without internet: " +
+                    (if (en) "IPA, English definitions with examples, German and Persian." else "IPA, meanings, examples, English and Persian."),
                 style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 6.dp)
             )
-            Button(onClick = { vm.downloadDictionary() }, enabled = vm.task == null) {
-                Icon(Icons.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Download dictionary")
+            Button(onClick = { vm.downloadDictionary(s.lang) }, enabled = vm.task == null) {
+                Icon(Icons.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(if (en) "Download English dictionary" else "Download German dictionary")
             }
         }
     }
@@ -257,11 +263,11 @@ private fun NotFound(vm: AppViewModel, s: Sheet.Word) {
 @Composable
 private fun QuickActions(vm: AppViewModel, s: Sheet.Word) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
-        FilledTonalButton(onClick = { vm.speak(s.word) }) {
+        FilledTonalButton(onClick = { vm.speak(s.word, lang = s.lang) }) {
             Icon(Icons.Volume, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Speak")
         }
-        OutlinedButton(onClick = { vm.openDwds(s.word) }) {
-            Text("DWDS"); Spacer(Modifier.width(4.dp)); Icon(Icons.OpenIn, null, Modifier.size(16.dp))
+        OutlinedButton(onClick = { vm.openDwds(s.word, s.lang) }) {
+            Text(if (s.lang == "en") "Cambridge" else "DWDS"); Spacer(Modifier.width(4.dp)); Icon(Icons.OpenIn, null, Modifier.size(16.dp))
         }
     }
 }
@@ -280,10 +286,10 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
             SaveBar(vm, s.saved, s.cueStart >= 0 && vm.videoUri != null)
             Text(s.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { vm.speak(s.text) }) {
+                FilledTonalButton(onClick = { vm.speak(s.text, lang = s.lang) }) {
                     Icon(Icons.Volume, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Speak")
                 }
-                OutlinedButton(onClick = { vm.speak(s.text, slow = true) }) { Text("Slow") }
+                OutlinedButton(onClick = { vm.speak(s.text, slow = true, lang = s.lang) }) { Text("Slow") }
             }
             when {
                 s.busy -> Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -295,7 +301,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
                     style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp)
                 )
                 else -> {
-                    Section("English")
+                    Section(if (s.lang == "en") "Deutsch" else "English")
                     Text(s.en ?: "", style = MaterialTheme.typography.bodyLarge)
                     Section("فارسی")
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -314,7 +320,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { vm.openWord(w, s.text) }
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { vm.openWord(w, s.text, lang = s.lang) }
                     ) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                             Text(w, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(120.dp))
@@ -324,7 +330,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
                     }
                 }
             }
-            LearnMore(vm, s.text, s.sentence)
+            LearnMore(vm, s.text, s.sentence, s.lang)
         }
     }
 }
@@ -463,18 +469,20 @@ private fun SaveBar(vm: AppViewModel, saved: Boolean, possible: Boolean) {
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun LearnMore(vm: AppViewModel, word: String, sentence: String) {
+fun LearnMore(vm: AppViewModel, word: String, sentence: String, lang: String = "de") {
     Section("Learn more · add sentences")
     Explain("ChatGPT and Grok (app if installed, otherwise the website) get a ready question: meaning, forms and " +
-        "3 Beispielsätze with English and Persian. dict.cc opens its app if installed; “Other app…” lists every dictionary " +
+        (if (lang == "en") "3 example sentences with German and Persian. Cambridge opens the English dictionary website. "
+         else "3 Beispielsätze with English and Persian. ") + "dict.cc opens its app if installed; “Other app…” lists every dictionary " +
         "or translator on your phone. Copy an answer, come back and tap ＋ Add sentences.")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(top = 8.dp)) {
-        Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, word, sentence) }
-        Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence) }
-        Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence) }
-        Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, word, sentence) }
-        Pill("Other app…") { vm.learnMore(AppViewModel.Source.OTHER, word, sentence) }
+        Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, word, sentence, lang) }
+        Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence, lang) }
+        if (lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, word, sentence, lang) }
+        else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence, lang) }
+        Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, word, sentence, lang) }
+        Pill("Other app…") { vm.learnMore(AppViewModel.Source.OTHER, word, sentence, lang) }
         Pill("＋ Add sentences", active = true) { vm.ensureSavedFromSheet()?.let { vm.openAddSentences(it) } }
     }
 }

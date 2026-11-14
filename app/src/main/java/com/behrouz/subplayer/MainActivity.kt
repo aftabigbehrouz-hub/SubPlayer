@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.recheckTrial()
+        vm.syncOnResume()
     }
 
     override fun onStop() {

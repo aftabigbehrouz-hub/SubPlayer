@@ -22,7 +22,9 @@ class Dictionary(file: File) {
         val english: List<String>, // English meanings
         val persian: List<String>, // direct Persian translations
         val persianViaEnglish: List<String>,
-        val synonyms: List<String>
+        val synonyms: List<String>,
+        val german: List<String> = emptyList(),   // English dictionary: German translations
+        val lang: String = "de"
     )
 
     private val db: SQLiteDatabase =
@@ -38,6 +40,9 @@ class Dictionary(file: File) {
         // contractions: geht's -> geht, gibt's -> gibt
         if (word.endsWith("'s") || word.endsWith("’s")) candidates.add(word.dropLast(2).lowercase())
         if (word.contains('-')) candidates.add(word.substringAfterLast('-').lowercase())
+        // English: possessive and contractions (Tom's, didn't → did)
+        if (word.endsWith("'s") || word.endsWith("’s")) candidates.add(word.dropLast(2).lowercase())
+        if (word.endsWith("n't")) candidates.add(word.dropLast(3).lowercase())
 
         for (key in candidates) {
             val list = query(key)
@@ -69,7 +74,9 @@ class Dictionary(file: File) {
                         english = d.optJSONArray("enGloss").strings().ifEmpty { d.optJSONArray("en").strings() },
                         persian = d.optJSONArray("fa").strings(),
                         persianViaEnglish = d.optJSONArray("faVia").strings(),
-                        synonyms = d.optJSONArray("syn").strings()
+                        synonyms = d.optJSONArray("syn").strings(),
+                        german = d.optJSONArray("deTr").strings(),
+                        lang = d.optString("lang", "de")
                     )
                 )
             }
@@ -88,6 +95,7 @@ class Dictionary(file: File) {
             if (e.lemma == word) s += 3 else if (e.lemma.equals(word, ignoreCase = true)) s += 2
             if (e.english.isNotEmpty()) s += 2
             if (e.persian.isNotEmpty()) s += 2 else if (e.persianViaEnglish.isNotEmpty()) s += 1
+            if (e.german.isNotEmpty()) s += 1
             if (capital == (e.pos == "noun")) s += 1
             if (e.pos == "name") s -= 6
             return s
