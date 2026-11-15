@@ -171,6 +171,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
                 Text(
                     "Free trial · ${ps.trialLeft} day${if (ps.trialLeft == 1) "" else "s"} left — Subscribe",
                     color = if (ps.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(50))
                         .clickable { vm.sheet = Sheet.Settings }.padding(vertical = 2.dp)
                 )
@@ -179,6 +180,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
                 Text(
                     "Free trial · ${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} left — Buy",
                     color = if (vm.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(50))
                         .clickable { vm.showActivation = true }.padding(vertical = 2.dp)
                 )

@@ -168,7 +168,7 @@ if tap("Discover programmes"):
     time.sleep(18)
     shot("03_discover_english")
     # a programme's card
-    n = find("6 Minute", contains=True, timeout=5) or find("NASA", contains=True, timeout=5)
+    n = find("English in a Minute:", contains=True, timeout=5)
     if n:
         adb("shell", "input", "tap", str(n["x"]), str(n["y"]))
         time.sleep(2)
@@ -184,13 +184,19 @@ open("/tmp/a.srt", "w", encoding="utf-8").write(SRT)
 open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
 # the files are copied by the app's own user (run-as: debug build), so the app owns them like files it made itself
 def place(local, dest):
-    adb("push", local, "/data/local/tmp/" + os.path.basename(local))
-    adb("shell", "chmod", "644", "/data/local/tmp/" + os.path.basename(local))
-    adb("shell", "run-as", PKG, "sh", "-c", f"mkdir -p {os.path.dirname(dest)} && cp /data/local/tmp/{os.path.basename(local)} {dest}")
+    tmp = "/data/local/tmp/" + os.path.basename(local)
+    adb("push", local, tmp)
+    adb("shell", "chmod", "644", tmp)
+    r = subprocess.run(["adb", "shell", f"run-as {PKG} sh -c 'mkdir -p {os.path.dirname(dest)} && cp {tmp} {dest}'"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("   run-as copy failed:", r.stdout, r.stderr, "— pushing directly")
+        adb("shell", "mkdir", "-p", os.path.dirname(dest))
+        adb("push", local, dest)
 place("/tmp/Wetterbericht.mp4", f"{FILES}/Wetterbericht.mp4")
 place("/tmp/a.srt", f"{FILES}/subtitles/Wetterbericht_{java_hash(uri)}.de.srt")
 place("/tmp/b.srt", f"{FILES}/subtitles/Tagesschau_Wetter_1a2b3c.de.srt")
-print(adb("shell", "run-as", PKG, "ls", "-la", f"{FILES}", f"{FILES}/subtitles", check=False))
+print(adb("shell", f"run-as {PKG} ls -la {FILES} {FILES}/subtitles", check=False))
 adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", uri, "-t", "video/mp4", "-n", f"{PKG}/.MainActivity")
 time.sleep(4)
 tap("A1–C2")
