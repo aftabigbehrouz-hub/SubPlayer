@@ -38,10 +38,14 @@ jobs:
           $SM/sdkmanager "emulator" "platform-tools" "system-images;android-34;google_apis;x86_64" > /dev/null
           echo no | $SM/avdmanager create avd -n tour -k "system-images;android-34;google_apis;x86_64" -d pixel_6
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          ls -l /dev/kvm || true
+          $ANDROID_HOME/emulator/emulator -accel-check || true
           nohup $ANDROID_HOME/emulator/emulator -avd tour -no-window -no-audio -no-boot-anim -no-snapshot \
-            -gpu swiftshader_indirect -memory 4096 -camera-back none > emulator.log 2>&1 &
-          $ANDROID_HOME/platform-tools/adb wait-for-device
-          timeout 900 bash -c 'until [ "$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
+            -gpu swiftshader_indirect -memory 4096 -camera-back none -camera-front none > emulator.log 2>&1 &
+          sleep 30; tail -20 emulator.log
+          if ! timeout 900 bash -c 'until [ "$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'; then
+            echo "The emulator did not start:"; tail -80 emulator.log; exit 1
+          fi
           A=$ANDROID_HOME/platform-tools/adb
           $A shell settings put global window_animation_scale 0
           $A shell settings put global transition_animation_scale 0

@@ -1,6 +1,31 @@
-# SubPlayer 2.6 — learn German (and English) with your own videos · Android + Windows
+# SubPlayer 2.7 — learn German (and English) with your own videos · Android + Windows
 
-**New in 2.6**
+**New in Android 2.7** (versionCode 11 — the phone gets the features of Windows 2.1 and 2.2)
+- **Word levels in colour** (pill *A1–C2* under the video): A1 green · A2 cyan · B1 blue · B2 violet · C1 orange · C2 pink;
+  *⋯ Options* colours only words from a chosen level up. Same lists as Windows (English CEFR-J + Octanove; German estimated
+  from word frequency). The word card shows the level too.
+- **Translation line** (pill *Translation*): each subtitle's translation into Persian, English or German underneath, made as
+  the lines come; **Translate all now** (*⋯ Options*) translates the whole video before watching and keeps it (offline).
+- **Where else is it used?** (word and phrase cards, Study, My Words): every line of all your subtitled videos with the word
+  or its forms; tap a line to watch that moment.
+- **Correct subtitles:** *Edit line* and ✎ in the **Transcript** — text, start/end (± 0.1 s, "= now"), delete, add a line;
+  *⋯ Options ▸ Subtitle timing* moves all lines (± 0.25 s / 1 s). Saved with the video and synced.
+- **Study video:** the video's words by level and count (tap = card, save with its moment), your words from it, and
+  practice from its whole text — gaps at your level, dictation of its lines.
+- **My Words:** nouns · verbs · adjectives · phrases · other, by video, a **calendar** of the days you saved words, a
+  **picture of the video moment**, **export** to CSV (Excel), text or Anki (share or Download/SubPlayer).
+- **Discover** (compass icon; not in the Google Play version): German broadcasters (ARD, ZDF, 3sat, Arte, DW, KiKA,
+  phoenix, regional) with suggestions by level, search and *only with subtitles*; English — VOA Learning English, NASA
+  videos, and podcasts of BBC Learning English, BBC World Service, PBS, TED and NPR (audio → Music/SubPlayer). The
+  broadcaster's own subtitles come along. Links of ARD Mediathek, ZDF, 3sat, DW, KiKA, phoenix and NASA pages open too.
+  (Streams such as Arte's .m3u8 need the Windows app.)
+- **Player:** speed 0.5 – 1.5× in steps, repeat ∞ / 2× / 3× / 5× / 10×, audio files (podcasts) play with a cover,
+  **Space** = play/pause and ← → = 5 s on a keyboard.
+- Release builds are now started by hand (Actions ▸ Build APK) after `android-check` (every push) and
+  `android-emulator` (the app on an Android 14 emulator, screenshots of every new screen) have passed.
+
+
+**2.6**
 - **Google Play version** (`SubPlayer-GooglePlay.aab`, package `com.behrouz.subplayer.play`): yearly subscription with a
   10-day free trial through Google Play Billing (Billing Library 8.3). Same features, minus the Vosk "Fast" engine and
   video-link downloads. No activation codes or Telegram in that version (Play rules). Step-by-step publishing guide,
@@ -220,7 +245,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 40 Android unit tests (+ 50 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 49 Android unit tests (+ 50 Windows tests) — broadcaster subtitles (TTML/VTT, 10:00:00 offset), word levels (lowest base word, rare = C2), where-else across videos incl. forms, a video's vocabulary, catalogue and podcast parsing, time fields; — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 

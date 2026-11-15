@@ -72,9 +72,20 @@ def tap(label, contains=False, timeout=12, required=True):
 
 
 def shot(name):
+    """Saves the screen, and prints it as a JPEG in base64 between markers (the log can be read where artifacts can't)."""
     time.sleep(1.0)
-    with open(os.path.join(OUT, name + ".png"), "wb") as f:
+    png = os.path.join(OUT, name + ".png")
+    with open(png, "wb") as f:
         f.write(subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True, timeout=60).stdout)
+    jpg = os.path.join(OUT, name + ".jpg")
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", png, "-vf", "scale=720:-2", "-q:v", "4", jpg], check=False)
+    if os.path.exists(jpg):
+        import base64
+        b = base64.b64encode(open(jpg, "rb").read()).decode()
+        print(f"=====SHOT {name}=====")
+        for i in range(0, len(b), 4000):
+            print(b[i:i + 4000])
+        print(f"=====END {name}=====")
     print("  shot", name)
 
 
