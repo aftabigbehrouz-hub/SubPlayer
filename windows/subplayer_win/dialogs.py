@@ -528,7 +528,7 @@ class HelpDialog(QDialog):
 
 # ==================================================================== new in 2.0
 class LinkDialog(QDialog):
-    """Paste a web link: Tagesschau pages or a direct .mp4 / .webm."""
+    """Paste a web link: broadcaster pages (ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix, Tagesschau) or a direct video / stream."""
 
     def __init__(self, main):
         super().__init__(main)
@@ -539,16 +539,18 @@ class LinkDialog(QDialog):
         v = QVBoxLayout(self)
         v.setContentsMargins(26, 20, 26, 20)
         v.addWidget(title("Open a video link"))
-        v.addWidget(hint("A Tagesschau page or any direct .mp4 / .webm link. SubPlayer saves the video to Videos\\SubPlayer "
-                         "(so it works offline) and opens it, ready for subtitles."))
+        v.addWidget(hint("A page of the ARD Mediathek, ZDF, 3sat, Arte, DW, KiKA, phoenix or Tagesschau — or any direct .mp4 / "
+                         ".webm / .m3u8 link. SubPlayer saves the video to Videos\\SubPlayer (so it works offline) and opens it; "
+                         "the broadcaster's subtitles come along when it has them."))
         clip = linkimport.first_link(QGuiApplication.clipboard().text()) or ""
-        self.field = QLineEdit(clip, placeholderText="https://www.tagesschau.de/…")
+        self.field = QLineEdit(clip, placeholderText="https://www.ardmediathek.de/…  ·  zdf.de  ·  arte.tv  ·  dw.com  ·  tagesschau.de")
         self.field.setMinimumHeight(40)
         v.addWidget(self.field)
         self.err = hint("")
         self.err.setStyleSheet(f"color:{theme.MAGENTA}")
         v.addWidget(self.err)
-        v.addWidget(QLabel("YouTube, Netflix, Instagram, TikTok and similar are refused: their terms don't allow downloading.",
+        v.addWidget(QLabel("YouTube, Netflix, Instagram, TikTok and similar are refused: their terms don't allow downloading. "
+                           "Can't find a programme's page? Discover (Ctrl+F) searches them all by name.",
                            objectName="small", wordWrap=True))
         row = QHBoxLayout()
         row.addStretch(1)
