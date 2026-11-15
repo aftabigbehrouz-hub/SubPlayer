@@ -19,6 +19,23 @@
 - [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
 
 
+**Windows 2.1**
+- **Discover** (Ctrl+F): search the free libraries of **ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix** and the regional
+  stations, filter by channel, length and **“With subtitles”**, or start with **suggestions by level** (logo!, Die Sendung
+  mit der Maus, Checker, tagesschau, Terra X, Quarks, WISO, 3sat science, ARTE — always the newest episodes).
+  *Download & open* saves the programme to Videos\SubPlayer (quality: normal / HD / small).
+- **The broadcasters' own subtitles** come along (ARD, ZDF, 3sat, KiKA, Arte): no transcription needed — click words at once.
+- **Link** now opens pages of the ARD Mediathek, ZDF/ZDFheute, 3sat, Arte, DW, KiKA, phoenix and Tagesschau, and HLS
+  streams (.m3u8) — copied into an MP4 without re-encoding, with the normal German sound (not *Klare Sprache*).
+- **Player:** clickable **transcript** (T) with search · subtitle **size** and **timing** (G earlier / H later, saved per
+  video) · **listening mode** (text hidden while playing) · **translation line** under each subtitle in English or
+  Persian (online) · **repeat count** ∞/2×/3×/5× (with Loop line: every line N times, then the next) · speed 0.5–1.5× in
+  small steps ([ and ]) · **volume** and mute (M, mouse wheel on the video) · click anywhere on the time bar.
+- **Internet connection** (Settings): Windows' proxy settings, your VPN app's local proxy (e.g. v2rayN 127.0.0.1:10809)
+  or direct — with *Test connection*. Programmes that only play in Germany need a VPN server in Germany.
+- YouTube, Instagram, TikTok, Netflix… stay refused: their terms forbid downloading, and in Germany getting around their
+  download protection is not allowed (§ 95a UrhG; OLG Hamburg 2024).
+
 **Windows 2.0**
 - **New look:** a living space backdrop (stars, nebula, aurora; pauses by itself while a video plays or in Settings),
   glass panels, a side rail (Player · My Words · Review · Practice · Sync · Settings · Help), crisp line icons, Persian
@@ -125,7 +142,7 @@ site as a fallback. The app checks every file's SHA‑256 fingerprint and refuse
 *Open* a video → *Subtitles* → language and quality → *Start* (progress at the bottom, *Cancel* stops).
 Pause and **click a word** — the word card is on the right. **Shift+click** first and last word = phrase,
 **Ctrl+click** = whole sentence. Keys: Space play/pause, ←/→ 5 s, ↑/↓ previous/next line, **A**/**B** loop, **L** loop line,
-Esc stop loop, **S** shadowing, F / F11 full screen, Ctrl+O open, **Ctrl+L video link**, Ctrl+G subtitles, F1 help.
+Esc stop loop, **S** shadowing, **R** repeat count, **T** transcript, **V** listening mode, Ctrl+T translation line, **G/H** subtitle timing, **[ ]** speed, **M** mute, Ctrl+ +/− subtitle size, F / F11 full screen, Ctrl+O open, **Ctrl+L video link**, **Ctrl+F Discover**, Ctrl+G subtitles, F1 help.
 *Link* opens a Tagesschau page or a direct .mp4/.webm link; *Save clip* (after A and B) saves that part as MP4.
 *My Words*, *Review* (Space = show meaning, then Got it / Again) and *Practice* are in the side rail.
 
@@ -180,7 +197,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 37 Android unit tests (+ 24 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 40 Android unit tests (+ 41 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
