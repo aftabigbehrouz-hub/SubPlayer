@@ -1,6 +1,7 @@
 package com.behrouz.subplayer.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,8 +90,13 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
             if (!s.loading && s.sentence.isNotBlank()) {
                 Section("In the video")
                 Text(s.sentence, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
-                Row(Modifier.padding(top = 6.dp)) {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("Translate whole sentence") { vm.openSentenceOfSheet() }
+                }
+            }
+            if (!s.loading) {
+                Row(Modifier.padding(top = 10.dp)) {
+                    Pill("Where else is it used?", icon = Icons.Search) { vm.openUses(s.entries.firstOrNull()?.takeIf { it.lemma.equals(s.word, true) }?.lemma ?: s.word, s.lang) }
                 }
             }
             if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence, s.lang)
@@ -117,6 +123,14 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
         Text(e.posDe, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+        val lv = remember(e.lemma, e.lang) { vm.levels.level(e.lemma, e.lang) }
+        if (lv > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text(com.behrouz.subplayer.learn.Levels.NAMES[lv] + if (e.lang == "de") " ≈" else "",
+                color = androidx.compose.ui.graphics.Color(0xFF0B0A1A), fontWeight = FontWeight.Bold, fontSize = 12.sp,
+                modifier = Modifier.background(androidx.compose.ui.graphics.Color(com.behrouz.subplayer.learn.Levels.COLORS[lv]), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 1.dp))
+        }
         if (e.ipa.isNotEmpty()) {
             Spacer(Modifier.width(10.dp))
             Text(e.ipa, fontFamily = FontFamily.Serif, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -291,6 +305,7 @@ fun PhraseSheet(vm: AppViewModel, s: Sheet.Phrase) {
                 }
                 OutlinedButton(onClick = { vm.speak(s.text, slow = true, lang = s.lang) }) { Text("Slow") }
             }
+            Row(Modifier.padding(top = 8.dp)) { Pill("Where else is it used?", icon = Icons.Search) { vm.openUses(s.text, s.lang) } }
             when {
                 s.busy -> Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

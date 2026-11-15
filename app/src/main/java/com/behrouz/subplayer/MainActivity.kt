@@ -79,9 +79,23 @@ class MainActivity : ComponentActivity() {
                     vm = vm,
                     fullscreen = fullscreen,
                     onToggleFullscreen = { if (fullscreen) exitFullscreen() else enterFullscreen() },
-                    onOpenVideo = { pickVideo.launch(arrayOf("video/*")) },
+                    onOpenVideo = { pickVideo.launch(arrayOf("video/*", "audio/*")) },
                     onLoadSrt = { pickSrt.launch(arrayOf("*/*")) }
                 )
+    }
+
+    /** Keyboard (or a TV remote): Space = play/pause, ← → = 5 seconds — on the player, when no text field is open. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val onPlayer = vm.screen == Screen.PLAYER && vm.videoUri != null && vm.sheet == null
+        if (onPlayer && event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_SPACE, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { vm.togglePlay(); vm.touch(); return true }
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { vm.skip(-5000); vm.touch(); return true }
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { vm.skip(5000); vm.touch(); return true }
+            }
+        }
+        if (onPlayer && event.keyCode == android.view.KeyEvent.KEYCODE_SPACE) return true   // the key-up of Space too
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {

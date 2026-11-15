@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -101,6 +102,8 @@ fun PlayerScreen(
             vm.screen == Screen.WORDS -> WordsScreen(vm)
             vm.screen == Screen.REVIEW -> ReviewScreen(vm)
             vm.screen == Screen.PRACTICE -> PracticeScreen(vm)
+            vm.screen == Screen.DISCOVER -> DiscoverScreen(vm)
+            vm.screen == Screen.STUDY -> StudyScreen(vm)
             fullscreen && vm.videoUri != null -> Box(Modifier.fillMaxSize().background(Color.Black)) {
                 VideoSurface(vm, fullscreen = true, onToggleFullscreen = onToggleFullscreen, onOpenVideo = onOpenVideo)
             }
@@ -135,6 +138,12 @@ fun PlayerScreen(
         Sheet.SubFile -> SubFileSheet(vm, onLoadSrt)
         is Sheet.Link -> LinkSheet(vm, s)
         is Sheet.AddSentences -> AddSentencesSheet(vm, s)
+        is Sheet.Uses -> UsesSheet(vm, s)
+        is Sheet.EditCue -> EditCueSheet(vm, s)
+        Sheet.Transcript -> TranscriptSheet(vm)
+        Sheet.PlayerOptions -> PlayerOptionsSheet(vm)
+        is Sheet.FilmInfo -> FilmInfoSheet(vm, s)
+        Sheet.WordsExport -> WordsExportSheet(vm)
         null -> {}
     }
     if (vm.showTour) Tour(vm)
@@ -176,6 +185,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
             }
         }
         BarIcon(Icons.Star, "My words", badge = vm.dueCount) { vm.screen = Screen.WORDS }
+        if (!com.behrouz.subplayer.BuildConfig.PLAY) BarIcon(Icons.Explore, "Discover programmes") { vm.openDiscover() }
         BarIcon(Icons.Folder, "Open a video") { onOpenVideo() }
         BarIcon(Icons.History, "Recent videos") { vm.sheet = Sheet.Videos }
         BarIcon(Icons.Help, "How it works") { vm.sheet = Sheet.Help }
@@ -225,7 +235,11 @@ private fun Home(vm: AppViewModel, onOpenVideo: () -> Unit, modifier: Modifier) 
             Spacer(Modifier.height(18.dp))
             GlowButton("Open a video", icon = Icons.Folder, onClick = onOpenVideo)
             Spacer(Modifier.height(10.dp))
-            if (!com.behrouz.subplayer.BuildConfig.PLAY) Pill("Paste a video link (Tagesschau, .mp4 …)", icon = Icons.Download) { vm.openLinkSheet() }
+            if (!com.behrouz.subplayer.BuildConfig.PLAY) {
+                Pill("Discover: ARD, ZDF, BBC, VOA, NASA …", icon = Icons.Explore) { vm.openDiscover() }
+                Spacer(Modifier.height(8.dp))
+                Pill("Paste a video link (Tagesschau, .mp4 …)", icon = Icons.Download) { vm.openLinkSheet() }
+            }
         }
 
         if (vm.words.isNotEmpty()) {
@@ -297,6 +311,15 @@ private fun BoxScope.VideoSurface(vm: AppViewModel, fullscreen: Boolean, onToggl
         onRelease = { it.player = null },
         modifier = Modifier.fillMaxSize()
     )
+    if (vm.audioOnly) {
+        // podcasts and other audio: no picture, so a calm cover instead of a black screen
+        Column(Modifier.align(Alignment.Center).padding(bottom = 60.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(90.dp).shadow(30.dp, CircleShape, ambientColor = Neon.Cyan, spotColor = Neon.Violet).background(Neon.hot, CircleShape),
+                contentAlignment = Alignment.Center) { Text("🎧", fontSize = 40.sp) }
+            Text(vm.videoName, color = White.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 10.dp, start = 24.dp, end = 24.dp))
+        }
+    }
     // tap = play/pause (full screen: show/hide controls); double-tap left/right third = -5 s / +5 s
     Box(
         Modifier.matchParentSize().pointerInput(fullscreen) {
@@ -338,6 +361,7 @@ private fun BoxScope.VideoSurface(vm: AppViewModel, fullscreen: Boolean, onToggl
             }
             if (idx >= 0 && idx < vm.cues.size) {
                 SubtitleLine(vm, idx, big = fullscreen)
+                if (vm.showTranslation) TranslationLine(vm, idx, big = fullscreen)
                 if (!vm.playing) {
                     Text(
                         if (vm.phraseMode) "Now tap the last word of the phrase"
@@ -444,9 +468,10 @@ private fun SubtitleLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
             val selected = vm.selCue == cueIndex && vm.selStart >= 0 &&
                 i in minOf(vm.selStart, vm.selEnd)..maxOf(vm.selStart, vm.selEnd)
             val known = vm.isKnownWord(w)
+            val lv = vm.levelOf(w)
             Text(
                 w,
-                color = when { selected -> Ink; known -> Neon.Gold; else -> White },
+                color = when { selected -> Ink; lv > 0 -> Color(com.behrouz.subplayer.learn.Levels.COLORS[lv]); known -> Neon.Gold; else -> White },
                 fontSize = if (big) 24.sp else 21.sp,
                 fontWeight = FontWeight.Medium,
                 textDecoration = if (known && !selected) TextDecoration.Underline else null,
@@ -461,6 +486,21 @@ private fun SubtitleLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
                     .padding(horizontal = 3.dp, vertical = 2.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun TranslationLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
+    LaunchedEffect(cueIndex, vm.showTranslation) { vm.ensureTranslation(cueIndex) }
+    val t = vm.translationFor(cueIndex) ?: return
+    val rtl = vm.trLang() == "fa"
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides
+        if (rtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
+        Text(
+            t, color = Neon.Gold.copy(alpha = 0.95f), fontSize = if (big) 18.sp else 16.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp).widthIn(max = 760.dp).clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -539,7 +579,7 @@ private fun RepeatRow(vm: AppViewModel) {
             }
         }
         Spacer(Modifier.weight(1f))
-        Pill(speedLabel(vm.speed), active = vm.speed < 1f) { vm.cycleSpeed(); vm.touch() }
+        Pill(speedLabel(vm.speed), active = vm.speed != 1f) { vm.cycleSpeed(); vm.touch() }
     }
 }
 
@@ -562,9 +602,17 @@ private fun ControlPanel(vm: AppViewModel, onToggleFullscreen: () -> Unit, onLoa
             IconButton(onClick = { vm.nextLine() }) { Icon(Icons.Next, "Next line", tint = White) }
         }
         RepeatRow(vm)
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Pill("Pause each line", active = vm.autoPause) { vm.toggleAutoPause() }
             Pill("🎙 Shadowing", active = vm.shadowing) { vm.toggleShadowing() }
+            Pill("A1–C2", active = vm.showLevels) { vm.toggleLevels() }
+            Pill("Translation", active = vm.showTranslation) { vm.toggleTranslation() }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            ActionButton(Icons.Edit, "Edit line") { vm.editCurrentLine() }
+            ActionButton(Icons.Notes, "Transcript") { if (vm.cues.isEmpty()) vm.message = "No subtitles yet — tap Subtitles first" else vm.sheet = Sheet.Transcript }
+            ActionButton(Icons.School, "Study video") { vm.openStudy() }
+            ActionButton(Icons.Tune, "Options") { vm.sheet = Sheet.PlayerOptions }
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             ActionButton(Icons.Subtitles, "Subtitles") { vm.sheet = Sheet.Generate }
@@ -590,7 +638,7 @@ private fun ActionButton(icon: ImageVector, label: String, dim: Boolean = false,
     }
 }
 
-private fun speedLabel(s: Float) = when (s) { 0.75f -> "0.75×"; 0.5f -> "0.5×"; else -> "1×" }
+fun speedLabel(s: Float) = if (s == s.toInt().toFloat()) "${s.toInt()}×" else "${s}×"
 
 fun fmt(ms: Long): String {
     val s = (ms.coerceAtLeast(0) / 1000)

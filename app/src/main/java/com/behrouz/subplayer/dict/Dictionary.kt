@@ -51,6 +51,38 @@ class Dictionary(file: File) {
         return emptyList()
     }
 
+    /** Base words (lemmas) of a word form, names and abbreviations left out (for word levels). */
+    fun lemmasFor(key: String): List<String> {
+        val out = ArrayList<String>()
+        db.rawQuery("SELECT DISTINCT e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? " +
+            "AND e.pos NOT IN ('name','abbrev','symbol','letter','character') LIMIT 30", arrayOf(key.lowercase())).use { c ->
+            while (c.moveToNext()) c.getString(0)?.let { out.add(it) }
+        }
+        return out
+    }
+
+    /** The word and its other forms (gehen → geht, ging, gegangen …), only from its own base word, not every homograph. */
+    fun formsOf(raw: String): Set<String> {
+        val w = normalize(raw).lowercase()
+        val forms = linkedSetOf(w)
+        if (w.isEmpty()) return forms
+        runCatching {
+            val base = lookup(raw).firstOrNull { it.pos != "name" }?.lemma?.lowercase() ?: ""
+            val keep = ArrayList<Long>()
+            db.rawQuery("SELECT DISTINCT e.id, e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? AND e.pos!='name' LIMIT 8",
+                arrayOf(w)).use { c -> while (c.moveToNext()) { val lem = (c.getString(1) ?: "").lowercase(); if (lem == w || lem == base) keep.add(c.getLong(0)) } }
+            if (keep.isNotEmpty()) {
+                db.rawQuery("SELECT key FROM lookup WHERE id IN (${keep.joinToString(",")})", emptyArray()).use { c ->
+                    while (c.moveToNext()) {
+                        val k = (c.getString(0) ?: "").lowercase()
+                        if (k.isNotEmpty() && ' ' !in k && k.length in maxOf(2, w.length / 2)..40) forms.add(k)
+                    }
+                }
+            }
+        }
+        return forms
+    }
+
     private fun query(key: String): List<Entry> {
         val out = ArrayList<Entry>()
         db.rawQuery(

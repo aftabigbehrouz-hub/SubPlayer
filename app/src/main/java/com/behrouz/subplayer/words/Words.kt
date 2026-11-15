@@ -298,7 +298,7 @@ class Recents(ctx: Context) {
     fun get(uri: String) = list().firstOrNull { it.uri == uri }
 
     fun put(item: Item) {
-        val items = (listOf(item) + list().filter { it.uri != item.uri }).take(12)
+        val items = (listOf(item) + list().filter { it.uri != item.uri }).take(40)
         prefs.edit().putString("items", items.joinToString("\n") {
             listOf(it.uri, it.name.replace('\t', ' ').replace('\n', ' '), it.positionMs, it.durationMs, it.opened).joinToString("\t")
         }).apply()

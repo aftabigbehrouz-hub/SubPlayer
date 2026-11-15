@@ -6,6 +6,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -70,6 +74,15 @@ private val W = Color.White
 fun WordsScreen(vm: AppViewModel) {
     BackHandler { vm.screen = Screen.PLAYER }
     val now = System.currentTimeMillis()
+    LaunchedEffect(vm.words.size) { vm.loadWordInfo() }
+    var cat by remember { mutableStateOf("All") }
+    var video by remember { mutableStateOf<String?>(null) }
+    var day by remember { mutableStateOf<Long?>(null) }
+    var showCal by remember { mutableStateOf(false) }
+    val filtered = vm.words.filter { w ->
+        (cat == "All" || vm.category(w) == cat) && (video == null || w.videoName == video) && (day == null || dayOf(w.created) == day)
+    }
+    vm.exportList = filtered
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp)
@@ -111,6 +124,27 @@ fun WordsScreen(vm: AppViewModel) {
             Spacer(Modifier.height(12.dp))
             ReminderCard(vm)
             Spacer(Modifier.height(10.dp))
+            if (vm.words.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("YOUR WORDS · ${filtered.size}", color = Neon.Cyan, fontSize = 12.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Pill(if (day != null) "📅 " + dayLabel(day!!) else "📅 Calendar", active = showCal || day != null) { if (day != null) { day = null; showCal = false } else showCal = !showCal }
+                    Spacer(Modifier.width(6.dp))
+                    Pill("Export", icon = Icons.Share) { vm.sheet = com.behrouz.subplayer.Sheet.WordsExport }
+                }
+                if (showCal) MonthCalendar(vm.words.map { dayOf(it.created) }, day) { d -> day = if (day == d) null else d }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("All", "Nouns", "Verbs", "Adjectives", "Phrases", "Other").forEach { c ->
+                        val n = if (c == "All") vm.words.size else vm.words.count { vm.category(it) == c }
+                        if (n > 0 || c == "All") Pill("$c $n", active = cat == c) { cat = c }
+                    }
+                }
+                val videos = vm.words.map { it.videoName }.filter { it.isNotEmpty() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+                if (videos.size > 1) Row(Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill("All videos", active = video == null) { video = null }
+                    videos.take(25).forEach { (v, n) -> Pill(v.substringBeforeLast('.').take(28) + " · $n", active = video == v) { video = if (video == v) null else v } }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
             if (vm.words.isEmpty()) {
                 Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.StarOutline, null, tint = Neon.Gold, modifier = Modifier.size(40.dp))
@@ -121,7 +155,7 @@ fun WordsScreen(vm: AppViewModel) {
                 }
             }
         }
-        items(vm.words, key = { it.id }) { w -> WordCard(vm, w, now) }
+        items(filtered, key = { it.id }) { w -> WordCard(vm, w, now) }
     }
 }
 
@@ -185,6 +219,21 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
         }
         AnimatedVisibility(open, enter = expandVertically() + fadeIn()) {
             Column(Modifier.padding(top = 12.dp)) {
+                var snap by remember(w.uid) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                LaunchedEffect(w.uid) {
+                    vm.snapshot(w)?.let { f -> snap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() } }
+                }
+                snap?.let { b ->
+                    Box(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp)).clickable { vm.playClip(w, stayOnScreen = false) }) {
+                        androidx.compose.foundation.Image(b, "The video at ${fmt(w.startMs)}", Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        Text("▶ ${fmt(w.startMs)}", color = W, fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+                Text("${vm.category(w)} · saved ${java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US).format(java.util.Date(w.created))}",
+                    color = Neon.Cyan.copy(alpha = 0.8f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
                 if (w.ipa.isNotEmpty()) Text(w.ipa, color = W.copy(alpha = 0.7f), fontSize = 15.sp)
                 Text(highlight(w.sentence, w.text), color = W.copy(alpha = 0.9f), fontStyle = FontStyle.Italic,
                     modifier = Modifier.padding(vertical = 8.dp))
@@ -217,6 +266,7 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                     else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, lw, w.sentence, w.lang) }
                     Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, lw, w.sentence, w.lang) }
                     Pill("＋ Add sentences", active = true) { vm.openAddSentences(w) }
+                    Pill("Where else?", icon = Icons.Search) { vm.openUses(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, w.lang) }
                 }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill("Play in video", icon = Icons.Play) { vm.playClip(w, stayOnScreen = false) }
@@ -236,6 +286,63 @@ private fun StrengthRing(p: Float) {
         CircularProgressIndicator(progress = { p.coerceAtLeast(0.04f) }, modifier = Modifier.size(38.dp),
             color = if (p >= 0.7f) Neon.Gold else Neon.Cyan, strokeWidth = 4.dp, trackColor = Color.Transparent)
         Text("${(p * 100).toInt()}", color = W, fontSize = 10.sp)
+    }
+}
+
+fun dayOf(ms: Long): Long = (ms + java.util.TimeZone.getDefault().getOffset(ms)) / 86_400_000L
+
+private fun dayLabel(d: Long): String = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+    .format(java.util.Date(d * 86_400_000L))
+
+/** A month of the calendar: how many words were saved each day; tap a day to see its words. */
+@Composable
+private fun MonthCalendar(days: List<Long>, selected: Long?, onPick: (Long) -> Unit) {
+    var offset by remember { mutableIntStateOf(0) }
+    val counts = remember(days) { days.groupingBy { it }.eachCount() }
+    val utc = java.util.TimeZone.getTimeZone("UTC")
+    val cal = java.util.Calendar.getInstance(utc).apply {
+        timeInMillis = dayOf(System.currentTimeMillis()) * 86_400_000L
+        set(java.util.Calendar.DAY_OF_MONTH, 1); add(java.util.Calendar.MONTH, offset)
+    }
+    val first = cal.timeInMillis / 86_400_000L
+    val daysIn = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+    val lead = (cal.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7          // Monday first
+    val title = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.US).apply { timeZone = utc }.format(cal.time)
+    val max = (0 until daysIn).maxOfOrNull { counts[first + it] ?: 0 }?.coerceAtLeast(1) ?: 1
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).glass(RoundedCornerShape(20.dp)).padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { offset-- }) { Text("‹", color = W, fontSize = 22.sp) }
+            Text(title, color = W, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            IconButton(onClick = { if (offset < 0) offset++ }) { Text("›", color = if (offset < 0) W else W.copy(alpha = 0.2f), fontSize = 22.sp) }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su").forEach { Text(it, color = W.copy(alpha = 0.5f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)) }
+        }
+        val cells = lead + daysIn
+        for (row in 0 until (cells + 6) / 7) {
+            Row(Modifier.fillMaxWidth()) {
+                for (col in 0 until 7) {
+                    val k = row * 7 + col - lead
+                    Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp), contentAlignment = Alignment.Center) {
+                        if (k in 0 until daysIn) {
+                            val d = first + k; val n = counts[d] ?: 0
+                            val bg = when {
+                                d == selected -> Neon.Gold
+                                n > 0 -> Neon.Violet.copy(alpha = 0.25f + 0.6f * n / max)
+                                else -> Color.Transparent
+                            }
+                            Column(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(bg).clickable(enabled = n > 0) { onPick(d) },
+                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Text("${k + 1}", color = if (d == selected) Color(0xFF0B0A1A) else if (n > 0) W else W.copy(alpha = 0.4f), fontSize = 13.sp,
+                                    fontWeight = if (n > 0) FontWeight.Bold else FontWeight.Normal)
+                                if (n > 0) Text("$n", color = if (d == selected) Color(0xFF0B0A1A) else Neon.Cyan, fontSize = 9.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Explain("${days.count { it in first until first + daysIn }} words saved this month · tap a day to see them", Modifier.padding(top = 4.dp))
     }
 }
 

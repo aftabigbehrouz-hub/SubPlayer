@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,9 @@ import com.behrouz.subplayer.dict.Speaker
 import com.behrouz.subplayer.dict.Translator
 import com.behrouz.subplayer.export.ClipExporter
 import com.behrouz.subplayer.licence.Licence
+import com.behrouz.subplayer.learn.Levels
+import com.behrouz.subplayer.learn.Library
+import com.behrouz.subplayer.net.Catalog
 import com.behrouz.subplayer.sync.GistSync
 import com.behrouz.subplayer.sync.SSub
 import com.behrouz.subplayer.sync.SyncDoc
@@ -103,14 +107,24 @@ sealed class Sheet {
     object Help : Sheet()
     object Settings : Sheet()
     object Videos : Sheet()
+    // 2.7
+    data class Uses(val word: String, val lang: String, val busy: Boolean = true, val uses: List<com.behrouz.subplayer.learn.Library.Use> = emptyList(),
+                    val files: Int = 0, val note: String = "") : Sheet()
+    data class EditCue(val index: Int) : Sheet()
+    object Transcript : Sheet()
+    object PlayerOptions : Sheet()
+    data class FilmInfo(val film: com.behrouz.subplayer.net.Catalog.Film) : Sheet()
+    object WordsExport : Sheet()
 }
 
-enum class Screen { PLAYER, WORDS, REVIEW, PRACTICE }
+enum class Screen { PLAYER, WORDS, REVIEW, PRACTICE, DISCOVER, STUDY }
 
-enum class PracticeMode(val title: String, val explain: String) {
+enum class PracticeMode(val title: String, val explain: String, val fromVideo: Boolean = false) {
     GAPS("Fill the gap", "A sentence with one of your words missing. Choose or type it."),
     DICTATION("Dictation", "Hear the line from the video and type what you hear. Every word is checked."),
-    ARTICLES("der · die · das", "Your saved nouns: pick the right article.")
+    ARTICLES("der · die · das", "Your saved nouns: pick the right article."),
+    TEXT_GAPS("Gaps from the video", "Lines of this video with a word of your level missing.", true),
+    TEXT_DICTATION("Dictation from the video", "Lines of this video: listen and type.", true)
 }
 
 sealed class Question {
@@ -202,6 +216,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var heldCue by mutableIntStateOf(-1); private set
     private var shadowResumeAt = 0L
     private var lastCueIdx = -1
+    /** A–B / loop line: 0 = repeat until stopped, otherwise play on after this many times. */
+    var loopTimes by mutableIntStateOf(0)
+    private var loopsDone = 0
 
     // ---- Google Play subscription (play build) — a no-op in the direct build
     val playStore = com.behrouz.subplayer.store.PlayStore(app)
@@ -248,6 +265,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         player.pause(); player.seekTo(pointA); position = pointA
                         shadowResumeAt = nowMs + ((pointB - pointA) * 1.2).toLong() + 600
                         shadowWaiting = true
+                    } else if (loopTimes > 0 && ++loopsDone >= loopTimes) {
+                        loopsDone = 0; pointA = -1; pointB = -1          // repeated often enough: play on
                     } else {
                         player.seekTo(pointA); position = pointA
                     }
@@ -271,14 +290,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- video
 
-    fun openVideo(uri: Uri, resume: Boolean = true) {
+    fun openVideo(uri: Uri, resume: Boolean = true, preferLang: String? = null) {
         rememberPosition()
         videoUri = uri
         videoName = displayName(uri)
         clearAB()
         clearSelection()
         cues = emptyList(); cueInfo = ""
-        for (lang in listOf("de", "en")) {
+        for (lang in (listOfNotNull(preferLang) + listOf("de", "en")).distinct()) {
             val f = srtFile(uri, lang)
             if (f.exists()) {
                 cues = Srt.parse(f.readText()); cueLang = lang
@@ -360,9 +379,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cycleSpeed() {
-        speed = when (speed) { 1f -> 0.75f; 0.75f -> 0.5f; else -> 1f }
-        player.setPlaybackSpeed(speed)
+        setSpeed(when (speed) { 1f -> 0.75f; 0.75f -> 0.5f; else -> 1f })
     }
+
+    fun setSpeed(v: Float) { speed = v; player.setPlaybackSpeed(v) }
 
     // ------------------------------------------------------------- A-B
 
@@ -383,7 +403,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         player.seekTo(pointA); player.play()
     }
 
-    fun clearAB() { pointA = -1; pointB = -1; shadowResumeAt = 0; shadowWaiting = false }
+    fun clearAB() { pointA = -1; pointB = -1; shadowResumeAt = 0; shadowWaiting = false; loopsDone = 0 }
 
     // ---------------------------------------------------- word selection
 
@@ -566,9 +586,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun loadSrt(uri: Uri) {
         try {
             val text = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
-            val parsed = Srt.parse(text)
+            val parsed = com.behrouz.subplayer.subs.Ttml.parseAny(text)
             if (parsed.isEmpty()) { message = "No subtitles found in that file"; return }
-            cues = parsed; cueLang = "de"; cueInfo = "Loaded ${displayName(uri)}"
+            val lang = com.behrouz.subplayer.subs.Ttml.guessLang(parsed)
+            cues = parsed; cueLang = lang; cueInfo = "Loaded ${displayName(uri)}"
+            // kept with the video, so it is there next time and appears in "where else is this word used"
+            videoUri?.let { v -> runCatching { srtFile(v, lang).also { it.parentFile?.mkdirs() }.writeText(Srt.write(parsed)) }; scheduleSync() }
             message = "${parsed.size} subtitle lines loaded"
         } catch (e: Exception) {
             message = "Could not read file: ${e.message}"
@@ -936,13 +959,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             task = Task("Video link", "Looking for the video…", -1)
             try {
                 val found = LinkImporter.resolve(url)
-                task = Task("Downloading", found.title, 0)
-                val uri = LinkImporter.download(ctx, found, { }) { p, bytes ->
-                    ui { task = Task("Downloading", "${found.title} · ${bytes / 1_048_576} MB" + if (p >= 0) " · $p%" else "", p) }
-                }
-                openVideo(uri, resume = false)
-                message = "Saved to Movies/SubPlayer — tap Subtitles to transcribe it"
-                sheet = Sheet.Generate
+                downloadFound(found)
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Throwable) {
@@ -953,11 +970,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private suspend fun downloadFound(found: LinkImporter.Found) {
+        if (Regex("""\.m3u8(\?|$)""", RegexOption.IGNORE_CASE).containsMatchIn(found.videoUrl))
+            throw java.io.IOException("This programme is offered only as a stream, which the phone app can't save (the Windows app can).")
+        task = Task("Downloading", found.title, 0)
+        val uri = LinkImporter.download(ctx, found, { }) { p, bytes ->
+            ui { task = Task("Downloading", "${found.title} · ${bytes / 1_048_576} MB" + if (p >= 0) " · $p%" else "", p) }
+        }
+        // the broadcaster's own subtitles (ARD, ZDF, NASA …) come along when it has them
+        var got = 0
+        if (found.subtitleUrl.isNotEmpty()) {
+            task = Task("Subtitles", "Getting the broadcaster's subtitles…", -1)
+            LinkImporter.subtitles(found.subtitleUrl)?.let { list ->
+                val lang = com.behrouz.subplayer.subs.Ttml.guessLang(list)
+                withContext(Dispatchers.IO) { srtFile(uri, lang).also { it.parentFile?.mkdirs() }.writeText(Srt.write(list)) }
+                got = list.size
+            }
+        }
+        openVideo(uri, resume = false)
+        val where = if (found.audio) "Music/SubPlayer" else "Movies/SubPlayer"
+        if (got > 0) { message = "Saved to $where — with the broadcaster's subtitles ($got lines)"; scheduleSync() }
+        else { message = "Saved to $where — tap Subtitles to transcribe it"; sheet = Sheet.Generate }
+    }
+
     /** Something was shared to SubPlayer: a video file or text containing a link. */
     fun handleShared(i: Intent) {
         val stream = if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
                      else @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-        if (stream != null && (i.type ?: "").startsWith("video")) { openVideo(stream); return }
+        if (stream != null && ((i.type ?: "").startsWith("video") || (i.type ?: "").startsWith("audio"))) { openVideo(stream); return }
         val text = i.getStringExtra(Intent.EXTRA_TEXT) ?: return
         if (!com.behrouz.subplayer.BuildConfig.PLAY && Regex("""https?://\S+""").containsMatchIn(text)) sheet = Sheet.Link(text)
     }
@@ -1094,9 +1134,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         PracticeMode.GAPS -> words.count { w -> sentencesOf(w).any { Practice.cloze(w, it.de) != null } }
         PracticeMode.DICTATION -> words.count { it.sentence.isNotBlank() && it.endMs > it.startMs }
         PracticeMode.ARTICLES -> words.count { it.lang == "de" && it.article in setOf("der", "die", "das") }
+        PracticeMode.TEXT_GAPS, PracticeMode.TEXT_DICTATION -> 0
     }
 
     fun startPractice(mode: PracticeMode) {
+        if (mode.fromVideo) { startTextPractice(mode); return }
         val rnd = kotlin.random.Random(System.currentTimeMillis())
         // weakest and most overdue words first, then a little randomness
         val pool = words.sortedWith(compareBy<SavedWord> { it.box }.thenBy { it.due }).take(30).shuffled(rnd)
@@ -1108,6 +1150,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             PracticeMode.DICTATION -> pool.filter { it.sentence.isNotBlank() }.map { Question.Dictation(it) }
             PracticeMode.ARTICLES -> pool.filter { it.lang == "de" && it.article in setOf("der", "die", "das") }.map { Question.Article(it) }
+            PracticeMode.TEXT_GAPS, PracticeMode.TEXT_DICTATION -> emptyList()
         }.take(10)
         if (qs.isEmpty()) {
             message = when (mode) {
@@ -1160,7 +1203,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (qIndex < questions.size) prepareQuestion() else { clearAB(); player.pause() }
     }
 
-    fun endPractice() { clearAB(); player.pause(); practiceMode = null; feedback = null }
+    fun endPractice() {
+        val back = practiceMode?.fromVideo == true
+        clearAB(); player.pause(); practiceMode = null; feedback = null
+        if (back) screen = Screen.STUDY
+    }
 
     fun replayDictation() {
         (questions.getOrNull(qIndex) as? Question.Dictation)?.let { playClip(it.word) }
@@ -1240,6 +1287,560 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 message = "Saving the clip failed — " + describe(e)
             } finally {
                 task = null
+            }
+        }
+    }
+
+    // ======================================================================= 2.7
+    // Word levels, translation line, "where else is this word used", subtitle editing, Discover, study screen,
+    // My Words categories / calendar / snapshots / export — the features of the Windows app.
+
+    // ---- word levels (A1…C2 colours in the subtitles)
+    val levels = Levels { name -> runCatching { ctx.assets.open(name).bufferedReader(Charsets.UTF_8).use { it.readText() } }.getOrNull() }
+    var showLevels by mutableStateOf(uiPrefs.getBoolean("levels", false)); private set
+    var minLevel by mutableIntStateOf(uiPrefs.getInt("min_level", 1)); private set
+    var wordLevels by mutableStateOf<Map<String, Int>>(emptyMap()); private set
+    private var levelJob: Job? = null
+
+    fun toggleLevels() {
+        showLevels = !showLevels
+        uiPrefs.edit().putBoolean("levels", showLevels).apply()
+        if (showLevels) {
+            computeLevels()
+            message = if (dictionaryReady(wordLang())) "Word levels on: A1 green · A2 cyan · B1 blue · B2 violet · C1 orange · C2 pink"
+                      else "Word levels on. Download the ${langName(wordLang())} dictionary for better levels of word forms (ging → gehen)"
+        }
+    }
+
+    fun setMinLevel(l: Int) { minLevel = l.coerceIn(1, 6); uiPrefs.edit().putInt("min_level", minLevel).apply() }
+
+    /** Level 1..6 of a subtitle token, 0 = no colour (names, numbers, below the chosen level, or levels off). */
+    fun levelOf(token: String): Int {
+        if (!showLevels) return 0
+        val lv = wordLevels[Dictionary.normalize(token).lowercase()] ?: 0
+        return if (lv >= minLevel) lv else 0
+    }
+
+    private fun lemmaFn(d: Dictionary?): ((String) -> List<String>)? = d?.let { dd -> { w: String -> dd.lemmasFor(w) } }
+
+    private fun computeLevels() {
+        levelJob?.cancel()
+        val list = cues; val lang = wordLang()
+        if (list.isEmpty()) { wordLevels = emptyMap(); return }
+        levelJob = viewModelScope.launch {
+            val d = dictionaryOrNull(lang)
+            val map = withContext(Dispatchers.Default) {
+                val out = HashMap<String, Int>()
+                for (c in list) for (t in tokens(c.text)) {
+                    val w = Dictionary.normalize(t); val k = w.lowercase()
+                    if (k.isEmpty() || k in out) continue
+                    out[k] = levels.level(w, lang, lemmaFn(d))
+                }
+                out
+            }
+            wordLevels = map
+        }
+    }
+
+    // ---- translation line under the subtitles, and the whole file translated before watching
+    var showTranslation by mutableStateOf(uiPrefs.getBoolean("tr_line", false)); private set
+    var trTarget by mutableStateOf(uiPrefs.getString("tr_target", "fa") ?: "fa"); private set
+    var trLines by mutableStateOf<List<String>>(emptyList()); private set
+    var trAllDone by mutableStateOf(false); private set
+    val liveTr = mutableStateMapOf<Int, String>()
+    private val liveAsked = HashSet<Int>()
+
+    fun langLabel(code: String) = when (code) { "fa" -> "فارسی"; "en" -> "English"; else -> "Deutsch" }
+
+    /** The translation language actually used (never the language of the subtitles themselves). */
+    fun trLang(): String = if (trTarget == cueLangOrDe()) (if (cueLangOrDe() == "en") "de" else "en") else trTarget
+
+    private fun trFile(): File? {
+        val u = videoUri ?: return null
+        val f = srtFile(u, cueLangOrDe())
+        return File(f.parentFile, f.name.removeSuffix(".srt") + ".tr-${trLang()}.srt")
+    }
+
+    fun translationFor(i: Int): String? = trLines.getOrNull(i)?.takeIf { it.isNotBlank() } ?: liveTr[i]
+
+    fun toggleTranslation() {
+        showTranslation = !showTranslation
+        uiPrefs.edit().putBoolean("tr_line", showTranslation).apply()
+        if (showTranslation) {
+            loadTranslations()
+            if (!trAllDone && cues.isNotEmpty()) message = "Each line is translated as it comes (needs internet). ⋯ Options › Translate all for the whole video at once."
+        }
+    }
+
+    fun setTranslationTarget(t: String) {
+        trTarget = t; uiPrefs.edit().putString("tr_target", t).apply()
+        loadTranslations()
+    }
+
+    private fun loadTranslations() {
+        liveTr.clear(); liveAsked.clear()
+        val f = trFile(); val list = cues
+        if (f == null || !f.exists() || list.isEmpty()) { trLines = emptyList(); trAllDone = false; return }
+        val tr = runCatching { Srt.parse(f.readText()) }.getOrDefault(emptyList())
+        trLines = list.map { c -> CueBuilder.indexAt(tr, (c.startMs + c.endMs) / 2).let { k -> if (k >= 0) tr[k].text else "" } }
+        trAllDone = trLines.count { it.isNotBlank() } * 10 >= list.size * 9
+    }
+
+    private fun writeTranslations(f: File?, list: List<Cue>, lines: List<String>) {
+        if (f == null) return
+        runCatching {
+            f.parentFile?.mkdirs()
+            f.writeText(Srt.write(list.mapIndexedNotNull { i, c -> lines.getOrNull(i)?.takeIf { it.isNotBlank() }?.let { Cue(c.startMs, c.endMs, it) } }))
+        }
+    }
+
+    /** The line on screen is translated on the fly when the whole file isn't translated yet. */
+    fun ensureTranslation(i: Int) {
+        if (!showTranslation || i !in cues.indices || translationFor(i) != null || !liveAsked.add(i)) return
+        val text = cues[i].text.replace('\n', ' '); val from = cueLangOrDe(); val to = trLang()
+        viewModelScope.launch {
+            runCatching { Translator.translate(text, from, to).text }
+                .onSuccess { if (cues.getOrNull(i)?.text?.replace('\n', ' ') == text) liveTr[i] = it }
+                .onFailure { liveAsked.remove(i) }
+        }
+    }
+
+    fun translateAll() {
+        if (cues.isEmpty()) { message = "No subtitles to translate yet — tap Subtitles first"; return }
+        if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        val list = cues; val from = cueLangOrDe(); val to = trLang(); val uri = videoUri; val f = trFile()
+        sheet = null
+        job = viewModelScope.launch {
+            val title = "Translating subtitles → ${langLabel(to)}"
+            task = Task(title, "0 / ${list.size} lines", 0)
+            try {
+                val out = Translator.translateLines(list.map { it.text }, from, to) { n ->
+                    ui { task = Task(title, "$n / ${list.size} lines", n * 100 / list.size) }
+                }
+                withContext(Dispatchers.IO) { writeTranslations(f, list, out) }
+                if (videoUri == uri) {
+                    loadTranslations()
+                    if (!showTranslation) { showTranslation = true; uiPrefs.edit().putBoolean("tr_line", true).apply() }
+                }
+                message = "${list.size} lines translated — shown under each line, also offline (switch off in ⋯ Options)"
+            } catch (e: CancellationException) {
+                message = "Cancelled"
+            } catch (e: Exception) {
+                message = "Translation failed (needs internet) — " + describe(e)
+            } finally {
+                task = null
+            }
+        }
+    }
+
+    fun deleteTranslation() {
+        trFile()?.delete(); loadTranslations(); message = "Saved translation removed"
+    }
+
+    // ---- your library: where else is a word used?
+    private fun videoMap(): Map<String, Pair<String, String>> {
+        val m = HashMap<String, Pair<String, String>>()
+        words.forEach { w -> if (w.videoUri.isNotEmpty()) m[videoKey(w.videoName)] = w.videoUri to w.videoName }
+        recents.list().forEach { r -> m[videoKey(r.name)] = r.uri to r.name }
+        return m
+    }
+
+    fun library(): List<Library.Item> = Library.scan(subsDir(), syncedSubsDir(), videoMap())
+
+    private var usesJob: Job? = null
+
+    fun openUses(word: String, lang: String = wordLang()) {
+        val w = Dictionary.normalize(word).ifEmpty { word.trim() }
+        if (w.isEmpty()) return
+        player.pause()
+        sheet = Sheet.Uses(w, lang)
+        usesJob?.cancel()
+        usesJob = viewModelScope.launch {
+            val d = if (w.contains(' ')) null else dictionaryOrNull(lang)
+            val (uses, n) = withContext(Dispatchers.IO) {
+                val forms = if (w.contains(' ')) setOf(w.lowercase()) else d?.formsOf(w) ?: setOf(w.lowercase())
+                Library.findUses(w, lang, library(), forms)
+            }
+            update<Sheet.Uses> {
+                if (it.word != w) it else it.copy(busy = false, uses = uses, files = n,
+                    note = if (d == null && !w.contains(' ')) "Only this exact form. With the ${langName(lang)} dictionary other forms are found too (geht, ging, gegangen …)." else "")
+            }
+        }
+    }
+
+    fun canOpen(u: Library.Use): Boolean = u.item.uri?.let { canRead(Uri.parse(it)) } ?: false
+
+    fun openUse(u: Library.Use) {
+        val uri = u.item.uri?.let { Uri.parse(it) }
+        if (uri == null || !canRead(uri)) {
+            message = "“${u.item.name}” isn't among your recent videos on this phone — open it once with the folder button, then it plays from here."
+            return
+        }
+        sheet = null
+        if (videoUri?.toString() != uri.toString() || cueLang != u.item.lang) openVideo(uri, resume = false, preferLang = u.item.lang)
+        screen = Screen.PLAYER
+        loopsDone = 0
+        pointA = (u.startMs - 200).coerceAtLeast(0); pointB = u.endMs + 300
+        player.seekTo(pointA); player.play()
+    }
+
+    // ---- editing subtitles (when something was transcribed wrongly)
+    private fun applyCues(list: List<Cue>, tr: List<String>) {
+        val u = videoUri ?: return
+        val f = trFile()
+        if (f != null && (f.exists() || tr.any { it.isNotBlank() })) writeTranslations(f, list, tr)
+        runCatching { srtFile(u, cueLangOrDe()).also { it.parentFile?.mkdirs() }.writeText(Srt.write(list)) }
+            .onFailure { message = "Could not save the subtitles — " + describe(it) }
+        clearSelection()
+        cues = list
+        scheduleSync()
+    }
+
+    private fun trCopy() = cues.indices.map { trLines.getOrNull(it) ?: "" }.toMutableList()
+
+    fun saveCue(i: Int, text: String, startMs: Long, endMs: Long) {
+        val t = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+        if (i !in cues.indices) return
+        if (t.isEmpty()) { deleteCue(i); return }
+        if (endMs <= startMs) { message = "The end must be after the start"; return }
+        val list = cues.toMutableList(); val tr = trCopy()
+        if (list[i].text != t) tr[i] = ""
+        list[i] = Cue(startMs.coerceAtLeast(0), endMs, t)
+        val order = list.indices.sortedBy { list[it].startMs }
+        applyCues(order.map { list[it] }, order.map { tr[it] })
+        sheet = null
+        message = "Line saved"
+    }
+
+    fun deleteCue(i: Int) {
+        if (i !in cues.indices) return
+        val list = cues.toMutableList(); val tr = trCopy()
+        list.removeAt(i); tr.removeAt(i)
+        applyCues(list, tr)
+        sheet = null
+        message = "Line deleted"
+    }
+
+    fun insertCueAfter(i: Int) {
+        if (i !in cues.indices) return
+        val c = cues[i]; val next = cues.getOrNull(i + 1)
+        val s = c.endMs + 100; val e = next?.let { minOf(it.startMs - 100, s + 3000) } ?: (s + 2500)
+        if (e - s < 300) { message = "No room after this line — shorten it first"; return }
+        val list = cues.toMutableList(); val tr = trCopy()
+        list.add(i + 1, Cue(s, e, "…")); tr.add(i + 1, "")
+        applyCues(list, tr)
+        sheet = Sheet.EditCue(i + 1)
+    }
+
+    /** Moves every line earlier (negative) or later — for subtitles that don't match the picture. */
+    fun shiftAll(deltaMs: Long) {
+        if (cues.isEmpty()) return
+        applyCues(cues.map { it.copy(startMs = (it.startMs + deltaMs).coerceAtLeast(0), endMs = (it.endMs + deltaMs).coerceAtLeast(100)) }, trCopy())
+        message = "All lines ${if (deltaMs > 0) "later" else "earlier"} by %.1f s".format(java.util.Locale.US, kotlin.math.abs(deltaMs) / 1000.0)
+    }
+
+    /** The line to edit: the selected one, the one on screen, or the last one before now. */
+    fun editCurrentLine() {
+        val i = listOf(selCue, currentCue, heldCue).firstOrNull { it in cues.indices } ?: CueBuilder.indexBefore(cues, player.currentPosition)
+        if (i !in cues.indices) { message = "No subtitle line here"; return }
+        player.pause()
+        sheet = Sheet.EditCue(i)
+    }
+
+    fun playCue(i: Int) {
+        val c = cues.getOrNull(i) ?: return
+        loopsDone = 0
+        pointA = (c.startMs - 150).coerceAtLeast(0); pointB = c.endMs + 250
+        player.seekTo(pointA); player.play()
+    }
+
+    // ---- study screen of the video: its words by level, your words from it, practice from its whole text
+    var studyWords by mutableStateOf<List<Library.Word>>(emptyList()); private set
+    var studyBusy by mutableStateOf(false); private set
+    var textMinLevel by mutableIntStateOf(uiPrefs.getInt("text_level", 3))
+
+    fun openStudy() {
+        if (cues.isEmpty()) { message = "This video has no subtitles yet — tap Subtitles first"; return }
+        player.pause()
+        screen = Screen.STUDY
+        studyBusy = true
+        val list = cues; val lang = wordLang()
+        viewModelScope.launch {
+            val d = dictionaryOrNull(lang)
+            studyWords = withContext(Dispatchers.Default) {
+                Library.vocabulary(list, lang).onEach { it.level = levels.level(it.shown, lang, lemmaFn(d)) }
+            }
+            studyBusy = false
+        }
+    }
+
+    /** Opens the word card at the first line where the word is said (to save it with its sentence and moment). */
+    fun studyWordCard(word: String) {
+        val i = Library.firstLine(cues, word)
+        if (i < 0) return
+        val (sent, cs, ce) = sentenceAround(i)
+        selCue = i
+        openWord(word, sent, cs, ce)
+    }
+
+    fun videoWords(): List<SavedWord> = words.filter { it.videoUri == videoUri?.toString() }
+
+    fun startTextPractice(mode: PracticeMode, minLevel: Int = textMinLevel) {
+        val u = videoUri?.toString() ?: return
+        if (studyBusy) { message = "One moment — the words of the video are being sorted"; return }
+        textMinLevel = minLevel; uiPrefs.edit().putInt("text_level", minLevel).apply()
+        val list = cues; val lang = wordLang()
+        val rnd = kotlin.random.Random(System.currentTimeMillis())
+        val lv = studyWords.associate { it.shown.lowercase() to it.level }
+        fun fake(text: String, c: Cue) = SavedWord(id = -1, text = text, lemma = text, sentence = c.text.replace('\n', ' '), videoUri = u,
+            videoName = videoName, startMs = c.startMs, endMs = c.endMs, created = 0, due = 0, lang = lang)
+        val qs: List<Question> = when (mode) {
+            PracticeMode.TEXT_GAPS -> {
+                val pool = studyWords.filter { it.level >= minLevel }.map { it.shown }
+                list.shuffled(rnd).mapNotNull { c ->
+                    val cands = Library.TOKEN.findAll(c.text).map { it.value.trim('\'', '’', '-') }
+                        .filter { t -> t.length >= 3 && (lv[t.lowercase()] ?: 0) >= minLevel }.toList()
+                    val w = cands.randomOrNull(rnd) ?: return@mapNotNull null
+                    val fw = fake(w, c)
+                    Practice.cloze(fw, fw.sentence)?.let { cl -> Question.Gap(cl, Practice.choices(cl.answer, pool, rnd)) }
+                }.take(10)
+            }
+            PracticeMode.TEXT_DICTATION -> list.filter { it.text.split(Regex("\\s+")).size in 3..16 }.shuffled(rnd).take(10)
+                .map { Question.Dictation(fake(it.text.replace('\n', ' '), it)) }
+            else -> emptyList()
+        }
+        if (qs.isEmpty()) {
+            message = if (mode == PracticeMode.TEXT_GAPS) "No ${Levels.NAMES[minLevel]}+ words in this video — choose a lower level" else "No lines to practise"
+            return
+        }
+        questions = qs; qIndex = 0; feedback = null; practiceScore = 0; practiceMode = mode
+        screen = Screen.PRACTICE
+        prepareQuestion()
+    }
+
+    // ---- My Words: categories, calendar, video snapshots, export
+    var wordPos by mutableStateOf<Map<Long, String>>(emptyMap()); private set
+    /** The words the My Words list shows now (its filters), for Export. */
+    var exportList: List<SavedWord> = emptyList()
+
+    /** Phrases · Nouns · Verbs · Adjectives · Other (word type from the dictionary when it is downloaded). */
+    fun category(w: SavedWord): String {
+        if (w.text.trim().contains(' ')) return "Phrases"
+        if (w.article.isNotEmpty()) return "Nouns"
+        return when (wordPos[w.id]) {
+            "noun", "name" -> "Nouns"
+            "verb" -> "Verbs"
+            "adj" -> "Adjectives"
+            null -> {
+                val l = w.lemma.ifEmpty { w.text }
+                when {
+                    w.lang == "de" && l.firstOrNull()?.isUpperCase() == true -> "Nouns"
+                    w.lang == "de" && (l.endsWith("en") || l.endsWith("ern") || l.endsWith("eln")) -> "Verbs"
+                    else -> "Other"
+                }
+            }
+            else -> "Other"
+        }
+    }
+
+    fun loadWordInfo() {
+        viewModelScope.launch {
+            val out = HashMap(wordPos)
+            for (lang in listOf("de", "en")) {
+                val d = dictionaryOrNull(lang) ?: continue
+                val todo = words.filter { it.lang == lang && it.id !in out && !it.text.contains(' ') }
+                if (todo.isEmpty()) continue
+                withContext(Dispatchers.IO) {
+                    for (w in todo) runCatching { d.lookup(w.lemma.ifEmpty { w.text }).firstOrNull()?.pos }.getOrNull()?.let { out[w.id] = it }
+                }
+            }
+            wordPos = out
+        }
+    }
+
+    private val snapFails = HashSet<String>()
+
+    /** A small picture of the video at the moment the word is said (made once, kept in the app's folder). */
+    suspend fun snapshot(w: SavedWord): File? = withContext(Dispatchers.IO) {
+        val f = File(ctx.filesDir, "snaps/${w.uid}.jpg")
+        if (f.exists()) return@withContext f
+        if (w.videoUri.isEmpty() || synchronized(snapFails) { w.uid in snapFails }) return@withContext null
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(ctx, Uri.parse(w.videoUri))
+            val t = (w.startMs + w.endMs) / 2 * 1000
+            val bmp = (if (android.os.Build.VERSION.SDK_INT >= 27) r.getScaledFrameAtTime(t, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 360, 360)
+                       else r.getFrameAtTime(t, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)) ?: throw java.io.IOException("no picture")
+            val out = if (bmp.width > 400) android.graphics.Bitmap.createScaledBitmap(bmp, 360, (360L * bmp.height / bmp.width).toInt().coerceAtLeast(1), true) else bmp
+            f.parentFile?.mkdirs()
+            f.outputStream().use { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
+            f
+        } catch (e: Exception) {
+            synchronized(snapFails) { snapFails.add(w.uid) }
+            null
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    private fun csv(v: Any?) = "\"" + v.toString().replace("\"", "\"\"").replace('\n', ' ') + "\""
+
+    /** CSV (Excel), plain text, or Anki (tab-separated, front/back) of the given words. */
+    fun wordsExport(format: String, list: List<SavedWord>): Triple<String, String, String> {
+        val df = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        return when (format) {
+            "csv" -> Triple("SubPlayer-words.csv", "text/csv", "﻿" + (listOf(listOf("Word", "Base form", "Article", "Type", "Meaning", "Persian",
+                "Sentence", "Video", "Time", "Saved on", "Reviews").joinToString(";") { csv(it) }) + list.map { w ->
+                listOf(w.text, w.lemma, w.article, category(w), w.english, w.persian, w.sentence, w.videoName,
+                    com.behrouz.subplayer.ui.fmt(w.startMs), df.format(java.util.Date(w.created)), w.reviews).joinToString(";") { csv(it) }
+            }).joinToString("\r\n") + "\r\n")
+            "anki" -> Triple("SubPlayer-anki.txt", "text/plain", "#separator:tab\n#html:false\n" + list.joinToString("\n") { w ->
+                val front = ((if (w.article.isNotEmpty()) w.article + " " else "") + w.lemma.ifEmpty { w.text } + " — " + w.sentence).replace('\t', ' ').replace('\n', ' ')
+                val back = listOf(w.english, w.persian).filter { it.isNotBlank() }.joinToString(" · ").replace('\t', ' ').replace('\n', ' ')
+                "$front\t$back"
+            } + "\n")
+            else -> Triple("SubPlayer-words.txt", "text/plain", list.joinToString("\n\n") { w ->
+                listOfNotNull(
+                    (if (w.article.isNotEmpty()) w.article + " " else "") + w.lemma.ifEmpty { w.text } + (if (w.lemma.isNotEmpty() && w.lemma != w.text) "  (${w.text})" else ""),
+                    w.english.takeIf { it.isNotBlank() }, w.persian.takeIf { it.isNotBlank() },
+                    "„${w.sentence.replace('\n', ' ')}“", "${w.videoName} · ${com.behrouz.subplayer.ui.fmt(w.startMs)} · ${df.format(java.util.Date(w.created))}"
+                ).joinToString("\n")
+            } + "\n")
+        }
+    }
+
+    fun shareWords(format: String, list: List<SavedWord>) {
+        if (list.isEmpty()) { message = "No words to export"; return }
+        val (name, mime, text) = wordsExport(format, list)
+        try {
+            val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
+            val f = File(dir, name); f.writeText(text)
+            val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+            val send = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).putExtra(Intent.EXTRA_SUBJECT, "SubPlayer words")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ctx.startActivity(Intent.createChooser(send, "Export words").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: Exception) {
+            message = "Could not export — " + describe(e)
+        }
+    }
+
+    fun saveWordsToDownloads(format: String, list: List<SavedWord>) {
+        if (list.isEmpty()) { message = "No words to export"; return }
+        val (name, mime, text) = wordsExport(format, list)
+        message = try { "Saved to " + saveToDownloads(name, mime, text.toByteArray(Charsets.UTF_8)) } catch (e: Exception) { "Could not save — " + describe(e) }
+    }
+
+    private fun saveToDownloads(name: String, mime: String, bytes: ByteArray): String =
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, mime)
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/SubPlayer")
+            }
+            val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw java.io.IOException("could not create the file")
+            ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: throw java.io.IOException("could not write")
+            "Download/SubPlayer/$name"
+        } else {
+            val dir = File(ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "SubPlayer").apply { mkdirs() }
+            File(dir, name).writeBytes(bytes)
+            File(dir, name).absolutePath
+        }
+
+    // ---- Discover: programmes to download (German broadcasters, VOA, NASA, podcasts)
+    var discoverLang by mutableStateOf(uiPrefs.getString("discover_lang", "de") ?: "de"); private set
+    val shelfFilms = mutableStateMapOf<String, List<Catalog.Film>>()
+    val shelfErrors = mutableStateMapOf<String, String>()
+    var searchResults by mutableStateOf<List<Catalog.Film>?>(null); private set
+    var searchBusy by mutableStateOf(false); private set
+    var searchError by mutableStateOf(""); private set
+    var discoverQuery by mutableStateOf("")
+    var subsOnly by mutableStateOf(false)
+    private var searchJob: Job? = null
+
+    fun shelves() = if (discoverLang == "en") Catalog.ENGLISH else Catalog.GERMAN
+
+    fun openDiscover() {
+        player.pause()
+        screen = Screen.DISCOVER
+        loadShelves()
+    }
+
+    fun setDiscoverLanguage(l: String) {
+        if (l == discoverLang) return
+        discoverLang = l; uiPrefs.edit().putString("discover_lang", l).apply()
+        searchResults = null; searchError = ""
+        loadShelves()
+    }
+
+    private fun netError(e: Throwable): String = when (generateSequence(e) { it.cause }.last()) {
+        is java.net.UnknownHostException -> "No internet connection"
+        is java.net.SocketTimeoutException -> "The site didn't answer in time"
+        else -> e.message ?: e.javaClass.simpleName
+    }
+
+    fun loadShelves(force: Boolean = false) {
+        for (sh in shelves()) {
+            if (!force && shelfFilms.containsKey(sh.title)) continue
+            shelfErrors.remove(sh.title)
+            viewModelScope.launch {
+                runCatching { withContext(Dispatchers.IO) { Catalog.shelfFilms(sh, 10) } }
+                    .onSuccess { shelfFilms[sh.title] = it }
+                    .onFailure { shelfErrors[sh.title] = netError(it) }
+            }
+        }
+    }
+
+    fun searchDiscover() {
+        val q = discoverQuery.trim()
+        if (q.isEmpty()) { searchResults = null; return }
+        searchJob?.cancel()
+        searchBusy = true; searchError = ""
+        val lang = discoverLang; val subs = subsOnly
+        searchJob = viewModelScope.launch {
+            try {
+                searchResults = withContext(Dispatchers.IO) {
+                    if (lang == "en") Catalog.searchEnglish(q, 30) else Catalog.searchGerman(text = q, size = 40, subtitlesOnly = subs).first
+                }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                searchError = netError(e); searchResults = emptyList()
+            } finally { searchBusy = false }
+        }
+    }
+
+    fun importFilm(f: Catalog.Film) {
+        if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        sheet = null
+        screen = Screen.PLAYER
+        job = viewModelScope.launch {
+            task = Task("Getting the programme", f.title, -1)
+            try {
+                val found = if (f.urlVideo.isNotEmpty()) LinkImporter.fromFilm(f) else LinkImporter.resolve(f.urlWebsite)
+                downloadFound(found)
+            } catch (e: CancellationException) {
+                message = "Cancelled"
+            } catch (e: Throwable) {
+                message = "Download failed — " + describe(e)
+            } finally {
+                task = null
+            }
+        }
+    }
+
+    // ---- audio files (podcasts) have no picture
+    var audioOnly by mutableStateOf(false); private set
+
+    init {
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                audioOnly = !tracks.isEmpty && !tracks.containsType(androidx.media3.common.C.TRACK_TYPE_VIDEO)
+            }
+        })
+        // new subtitles (opened, made, loaded, edited): their saved translation and word levels
+        viewModelScope.launch {
+            androidx.compose.runtime.snapshotFlow { cues to cueLang }.collect {
+                loadTranslations()
+                if (showLevels) computeLevels() else wordLevels = emptyMap()
             }
         }
     }

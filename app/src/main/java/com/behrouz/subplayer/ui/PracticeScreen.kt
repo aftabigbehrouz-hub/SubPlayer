@@ -101,12 +101,12 @@ private fun Hub(vm: AppViewModel) {
             StatBox("Words", "${vm.words.size}", Modifier.weight(1f))
         }
         Spacer(Modifier.height(14.dp))
-        PracticeMode.values().forEach { m ->
+        PracticeMode.values().filter { !it.fromVideo }.forEach { m ->
             val n = vm.available(m)
             Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).glass(RoundedCornerShape(24.dp)).padding(18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(44.dp).background(Neon.brush, CircleShape), contentAlignment = Alignment.Center) {
-                        Text(when (m) { PracticeMode.GAPS -> "_ _"; PracticeMode.DICTATION -> "✎"; PracticeMode.ARTICLES -> "d·d" },
+                        Text(when (m) { PracticeMode.GAPS -> "_ _"; PracticeMode.DICTATION -> "✎"; PracticeMode.ARTICLES -> "d·d"; else -> "▶" },
                             color = Color(0xFF0B0A1A), fontWeight = FontWeight.Black)
                     }
                     Spacer(Modifier.width(14.dp))

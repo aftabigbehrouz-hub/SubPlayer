@@ -32,6 +32,26 @@ object Translator {
         throw IOException("No connection to a translation service (${errors.joinToString("; ")})")
     }
 
+    /**
+     * Translates many subtitle lines: lines are sent in batches of about 1,800 characters, one line per row; if a batch
+     * comes back with a different number of rows, its lines are translated one by one. [progress] gets lines done.
+     */
+    suspend fun translateLines(lines: List<String>, from: String, to: String, progress: (Int) -> Unit = {}): List<String> {
+        val out = ArrayList<String>(lines.size)
+        var i = 0
+        while (i < lines.size) {
+            var j = i; var len = 0
+            while (j < lines.size && (j == i || len + lines[j].length < 1800)) { len += lines[j].length + 1; j++ }
+            val batch = lines.subList(i, j).map { it.replace('\n', ' ').trim() }
+            val rows = runCatching { translate(batch.joinToString("\n"), from, to).text.split('\n').map { it.trim() } }.getOrNull()
+            if (rows != null && rows.size == batch.size) out.addAll(rows)
+            else for (b in batch) out.add(if (b.isBlank()) "" else runCatching { translate(b, from, to).text }.getOrElse { if (out.isEmpty()) throw it else "" })
+            i = j
+            progress(i)
+        }
+        return out
+    }
+
     private fun google(text: String, from: String, to: String): Result {
         val q = URLEncoder.encode(text, "UTF-8")
         val body = get("https://translate.googleapis.com/translate_a/single?client=gtx&sl=$from&tl=$to&dt=t&q=$q")
