@@ -214,6 +214,7 @@ def clock():
     ts = [n["text"] for n in nodes() if re.fullmatch(r"\d+:\d\d", n["text"] or "")]
     return ts[0] if ts else "?"
 time.sleep(4)                                # let the video load and play
+print("  before Space:", clock())
 adb("shell", "input", "keyevent", "62")      # Space = pause (keyboard)
 time.sleep(1.5); a = clock(); time.sleep(2.5); b = clock()
 print(f"  Space pauses: {'yes' if a == b and a != '?' else 'NO'} ({a} → {b})")
