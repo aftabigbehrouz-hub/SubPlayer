@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import subtitles
 
-VIDEO_EXT = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts")
+VIDEO_EXT = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts", ".mp3", ".m4a", ".ogg", ".opus", ".wav")
 
 
 @dataclass

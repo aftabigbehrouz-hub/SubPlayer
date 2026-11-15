@@ -3,6 +3,8 @@ English programmes for Discover — free to download:
   VOA Learning English (Voice of America — US government work, public domain; lessons made for learners, A2–B2;
   "Let's Learn English with Anna" is only on YouTube, so it is not offered)
   NASA video library (images.nasa.gov — public domain; most videos come with English .srt subtitles)
+  Podcasts (audio) the broadcasters publish for download: BBC Learning English (6 Minute English / Grammar / Vocabulary),
+  BBC World Service, PBS NewsHour, TED Talks Daily, NPR — for personal listening, as in any podcast app
 Both are listed with the same Film type as the German catalogue; the video file is found when you download.
 """
 from __future__ import annotations
@@ -27,9 +29,33 @@ class EnShelf:
     level: str
     why: str
     feed: str = ""            # VOA RSS path
+    podcast: str = ""         # podcast RSS address
     nasa: str = ""            # NASA search words
     channels: list = field(default_factory=list)
 
+
+PODCASTS = [
+    EnShelf("BBC 6 Minute English", "B1–B2", "Two presenters, one topic, useful words — BBC Learning English (audio)",
+            podcast="https://podcasts.files.bbci.co.uk/p02pc9tn.rss", channels=["BBC"]),
+    EnShelf("BBC 6 Minute Grammar", "B1", "One grammar point in six minutes (audio)", podcast="https://podcasts.files.bbci.co.uk/p02pc9wq.rss",
+            channels=["BBC"]),
+    EnShelf("BBC 6 Minute Vocabulary", "B1–B2", "Words and phrases explained (audio)", podcast="https://podcasts.files.bbci.co.uk/p02pc9xz.rss",
+            channels=["BBC"]),
+    EnShelf("BBC Global News Podcast", "C1", "The world's news from the BBC World Service, twice a day (audio)",
+            podcast="https://podcasts.files.bbci.co.uk/p02nq0gn.rss", channels=["BBC"]),
+    EnShelf("BBC Witness History", "B2–C1", "History told by the people who were there (audio)",
+            podcast="https://podcasts.files.bbci.co.uk/p004t1hd.rss", channels=["BBC"]),
+    EnShelf("BBC The Documentary", "C1", "Award-winning documentaries from the World Service (audio)",
+            podcast="https://podcasts.files.bbci.co.uk/p02nq0lx.rss", channels=["BBC"]),
+    EnShelf("BBC Business Daily", "C1", "Money, work and the economy (audio)", podcast="https://podcasts.files.bbci.co.uk/p002vsxs.rss",
+            channels=["BBC"]),
+    EnShelf("PBS NewsHour", "C1", "The full US evening news programme (audio)", podcast="https://www.pbs.org/newshour/feeds/rss/podcasts/show",
+            channels=["PBS"]),
+    EnShelf("TED Talks Daily", "B2–C1", "Ideas worth spreading, one talk a day (audio)", podcast="https://feeds.feedburner.com/TEDTalks_audio",
+            channels=["TED"]),
+    EnShelf("NPR News Now", "B2–C1", "Five-minute news summary, every hour (audio)", podcast="https://feeds.npr.org/500005/podcast.xml",
+            channels=["NPR"]),
+]
 
 SHELVES = [
     EnShelf("English in a Minute", "A2–B1", "One expression explained in a minute", feed="/api/zjk-rl-vomx-tpebpqqo"),
@@ -39,7 +65,7 @@ SHELVES = [
     EnShelf("VOA60: Watch & Learn", "B1", "Short reports with simple narration", feed="/api/zyk-il-vomx-tpetpqqm"),
     EnShelf("NASA — space & science", "B2–C1", "Real English from scientists and engineers, with subtitles", nasa="Artemis Moon"),
     EnShelf("NASA — Earth & climate", "B2–C1", "How our planet works, explained by NASA", nasa="Earth climate"),
-]
+] + PODCASTS[:4] + PODCASTS[7:9]
 
 
 def _session(session):
@@ -115,16 +141,86 @@ def nasa_search(text: str, size: int = 20, page: int = 1, session=None) -> tuple
     return out, total
 
 
+def _secs(t: str) -> int:
+    t = (t or "").strip()
+    if t.isdigit():
+        return int(t)
+    parts = [int(x) for x in t.split(":") if x.isdigit()]
+    n = 0
+    for p_ in parts:
+        n = n * 60 + p_
+    return n
+
+
+def podcast_feed(url: str, size: int = 15, session=None, channel: str = "") -> list[Film]:
+    """A podcast's newest episodes (the audio file is the episode's own download)."""
+    r = _session(session).get(url, headers={"User-Agent": UA}, timeout=(8, 25))
+    r.raise_for_status()
+    show = re.search(r"<channel>.*?<title>(.*?)</title>", r.text, re.S)
+    show_t = _clean((show.group(1) if show else "").replace("<![CDATA[", "").replace("]]>", ""))
+    ch = channel or ("BBC" if "bbc" in url else "PBS" if "pbs.org" in url else "TED" if "TED" in url else "NPR" if "npr" in url
+                     else "Podcast")
+    out = []
+    for it in re.findall(r"<item>(.*?)</item>", r.text, re.S)[:size]:
+        def tag(n):
+            m = re.search(rf"<{n}[^>]*>(.*?)</{n}>", it, re.S)
+            return _clean(m.group(1).replace("<![CDATA[", "").replace("]]>", "")) if m else ""
+        enc = re.search(r'<enclosure[^>]*\burl="([^"]+)"', it)
+        if not enc:
+            continue
+        audio = html.unescape(enc.group(1))
+        ts = 0
+        try:
+            ts = int(parsedate_to_datetime(tag("pubDate")).timestamp())
+        except Exception:
+            pass
+        link = tag("link") or url
+        out.append(Film(channel=ch, topic=show_t or ch, title=tag("title"), description=tag("description")[:900], timestamp=ts,
+                        duration=_secs(tag("itunes:duration")), size=0, url_website=link, url_subtitle="", url_video=audio))
+    return out
+
+
 def shelf_films(sh: EnShelf, size: int = 10, session=None) -> list[Film]:
+    if sh.podcast:
+        return podcast_feed(sh.podcast, size, session, sh.channels[0] if sh.channels else "")
     if sh.feed:
         return voa_feed(sh.feed, size, session)
     films, _ = nasa_search(sh.nasa, size, session=session)
     return films
 
 
+_PODCAST_CACHE: dict = {}
+
+
+def podcast_search(text: str, size: int = 40, session=None) -> list[Film]:
+    """Episodes of all the podcasts whose title or description contain the words (feeds kept for 15 minutes)."""
+    from concurrent.futures import ThreadPoolExecutor
+    now = time.time()
+
+    def one(sh):
+        hit = _PODCAST_CACHE.get(sh.podcast)
+        if hit and now - hit[0] < 900:
+            return hit[1]
+        try:
+            fs = podcast_feed(sh.podcast, 60, session, sh.channels[0] if sh.channels else "")
+        except Exception:
+            fs = []
+        _PODCAST_CACHE[sh.podcast] = (now, fs)
+        return fs
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        allf = [f for fs in ex.map(one, PODCASTS) for f in fs]
+    words = [w for w in text.lower().split() if w]
+    hits = [f for f in allf if all(w in (f.title + " " + f.description + " " + f.topic).lower() for w in words)]
+    return sorted(hits, key=lambda f: -f.timestamp)[:size]
+
+
 def search(text: str, channels: list[str] | None = None, size: int = 30, offset: int = 0, session=None) -> tuple[list[Film], int]:
-    chans = channels or ["VOA", "NASA"]
+    chans = channels or ["VOA", "NASA", "Podcasts"]
     films, total = [], 0
+    if "Podcasts" in chans and offset == 0:
+        f = podcast_search(text, size, session)
+        films += f
+        total += len(f)
     if "NASA" in chans:
         f, t = nasa_search(text, size, page=offset // size + 1, session=session)
         films += f

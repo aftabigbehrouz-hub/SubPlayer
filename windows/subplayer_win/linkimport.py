@@ -16,7 +16,8 @@ REFUSED = ["youtube.com", "youtu.be", "instagram.com", "tiktok.com", "facebook.c
            "netflix.com", "x.com", "twitter.com", "disneyplus.com", "primevideo.com", "joyn.de"]
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubPlayer"
 
-DIRECT = re.compile(r"\.(mp4|m4v|webm|mov)(\?.*)?$", re.I)
+DIRECT = re.compile(r"\.(mp4|m4v|webm|mov|mp3|m4a|aac|ogg|opus|wav)(\?.*)?$", re.I)
+AUDIO = re.compile(r"\.(mp3|m4a|aac|ogg|opus|wav)(\?.*)?$", re.I)
 VIDEO_URL = re.compile(r"""https?://[^"'\s<>\\]+\.(?:mp4|m4v|webm)(?:\?[^"'\s<>\\]*)?(?=["'\s<>\\]|$)""", re.I)
 TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 OG_TITLE = re.compile(r"""<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)""", re.I)
@@ -338,12 +339,15 @@ GEO_HINT = ("This programme can only be watched from Germany (or Austria/Switzer
 def download(found: Found, folder: Path | None = None, progress=lambda done, total: None, cancelled=lambda: False) -> Path:
     import requests
     folder = folder or videos_dir()
-    dest = folder / safe_name(found.title)
+    m = AUDIO.search(found.video_url.split("#")[0])
+    ext = "." + m.group(1).lower() if m else ".mp4"
+    stem = Path(safe_name(found.title)).stem
+    dest = folder / f"{stem}{ext}"
     k = 2
     while dest.exists():
-        dest = folder / f"{Path(safe_name(found.title)).stem} ({k}).mp4"
+        dest = folder / f"{stem} ({k}){ext}"
         k += 1
-    tmp = dest.with_name(dest.stem + ".part.mp4")
+    tmp = dest.with_name(dest.stem + ".part" + dest.suffix)
     if found.hls:
         _download_hls(found, tmp, progress, cancelled)
         tmp.replace(dest)

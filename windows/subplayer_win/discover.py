@@ -15,9 +15,10 @@ from .cosmos import GradientLabel
 
 CH_COLOR = {"ARD": "#3B7BFF", "ZDF": "#FF8A1F", "3sat": "#E8364F", "Arte": "#FF5A36", "DW": "#19B6FF", "KiKA": "#7CCB2B",
             "phoenix": "#22B8D8", "BR": "#4AA3FF", "SWR": "#3FD0B0", "WDR": "#4F86FF", "NDR": "#2F7DE1", "MDR": "#5C9DFF",
-            "HR": "#3C8CFF", "RBB": "#E84B6B", "ORF": "#E8364F", "SRF": "#E8364F", "VOA": "#3D8BFF", "NASA": "#FF5A3C"}
+            "HR": "#3C8CFF", "RBB": "#E84B6B", "ORF": "#E8364F", "SRF": "#E8364F", "VOA": "#3D8BFF", "NASA": "#FF5A3C", "BBC": "#FF4F6D",
+            "PBS": "#3FA9FF", "TED": "#FF3B30", "NPR": "#7CA6FF", "Podcasts": "#FFB347"}
 DE_CHANNELS = ("ARD", "ZDF", "3sat", "Arte", "DW", "KiKA", "phoenix")
-EN_CHANNELS = ("VOA", "NASA")
+EN_CHANNELS = ("VOA", "NASA", "Podcasts")
 
 
 def ibtn(*a, **k):
@@ -55,7 +56,8 @@ class FilmCard(QFrame):
             cc.setToolTip("Comes with the broadcaster's own subtitles — no transcription needed")
             top.addWidget(cc)
         top.addStretch(1)
-        top.addWidget(QLabel(film.length, objectName="small"))
+        audio = film.channel in ("BBC", "PBS", "TED", "NPR", "Podcast")
+        top.addWidget(QLabel(("🎧 " if audio else "") + film.length, objectName="small"))
         v.addLayout(top)
         t = QLabel()
         t.setWordWrap(True)
@@ -210,7 +212,7 @@ class DiscoverPage(QWidget):
             if not b.isVisible():
                 b.setChecked(False)
         self.length.setVisible(not en)
-        self.sub_lbl.setText("Free English programmes: VOA Learning English and NASA — download, then learn with subtitles" if en
+        self.sub_lbl.setText("Free English programmes: VOA, NASA videos and BBC / PBS / TED / NPR podcasts — then learn with subtitles" if en
                              else "Free programmes from ARD, ZDF, 3sat, Arte, DW and more — download, then learn with subtitles")
         self.cc_only.setVisible(not en)
         self.q.setPlaceholderText("Search programmes — e.g. grammar, Mars, interview, climate, Thanksgiving" if en else
@@ -343,7 +345,8 @@ class DiscoverPage(QWidget):
         self.shelves_loaded = True
         self.status.setText("Suggestions by level — always the newest episodes. Click a programme to see it; "
                             "<b style='color:#5BE38F'>CC</b> = comes with the broadcaster's subtitles." if self.lang == "de" else
-                            "Suggestions by level: VOA Learning English lessons (made for learners) and NASA science videos.")
+                            "Suggestions by level: VOA lessons, NASA videos, and podcasts from BBC Learning English, the BBC World "
+                            "Service, PBS and TED (🎧 = audio).")
         cols, cw = self._cols()
         shown = 0
         for sh, films in shelves:
@@ -471,7 +474,7 @@ class DiscoverPage(QWidget):
 
     def _show_info(self, f: mediathek.Film | None):
         self.dl_btn.setEnabled(f is not None)
-        self.q_btn.setEnabled(f is not None and f.channel not in ("VOA", "NASA"))
+        self.q_btn.setEnabled(f is not None and f.channel not in ("VOA", "NASA", "BBC", "PBS", "TED", "NPR", "Podcast"))
         self.web_btn.setEnabled(bool(f and f.url_website))
         if f is None and self.lang == "en":
             self.info.setHtml(f"<p style='font-size:19pt;font-weight:800;color:{theme.CYAN};margin-bottom:6px'>Pick a programme</p>"
@@ -480,6 +483,10 @@ class DiscoverPage(QWidget):
                               "pronunciation. VOA stopped publishing in 2025, so these are its archive.</p>"
                               f"<p style='color:{theme.DIM};line-height:150%'><b>NASA</b> — science and space videos (public domain); "
                               "most bring English subtitles.</p>"
+                              f"<p style='color:{theme.DIM};line-height:150%'><b>Podcasts</b> (audio) — BBC Learning English "
+                              "(6 Minute English, Grammar, Vocabulary), BBC World Service, PBS NewsHour, TED Talks Daily, NPR: "
+                              "episodes the broadcasters offer for download. BBC's videos can't be downloaded (its player doesn't "
+                              "allow it), so they aren't here.</p>"
                               f"<p style='color:{theme.DIM};line-height:150%'>Download & open saves the video to "
                               "<b>Videos\\SubPlayer</b>; videos without subtitles get them with <b>Subtitles</b>.</p>")
             return
@@ -495,7 +502,11 @@ class DiscoverPage(QWidget):
                               "Settings ▸ Internet connection.</p>")
             return
         col = CH_COLOR.get(f.label, theme.VIOLET)
-        if f.channel in ("VOA", "NASA"):
+        if f.channel in ("BBC", "PBS", "TED", "NPR", "Podcast"):
+            cc = (f"<span style='color:{theme.GOLD};font-weight:700'>🎧 audio (podcast)</span><span style='color:{theme.DIM}'>"
+                  " — offered for download by the broadcaster for personal listening; SubPlayer makes subtitles after "
+                  "downloading</span>")
+        elif f.channel in ("VOA", "NASA"):
             cc = (f"<span style='color:{theme.DIM}'>NASA videos usually bring English subtitles — they come along when there are</span>"
                   if f.channel == "NASA" else f"<span style='color:{theme.DIM}'>no subtitle file — SubPlayer makes them after "
                                               "downloading (VOA's lessons are slow and clear)</span>")

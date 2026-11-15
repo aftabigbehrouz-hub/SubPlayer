@@ -468,8 +468,17 @@ class ReviewPage(QWidget):
         self.view = QTextBrowser(openLinks=False)
         self.view.setMinimumHeight(340)
         bv.addWidget(self.view)
+        from PySide6.QtMultimediaWidgets import QVideoWidget
+        self.vw = QVideoWidget()                 # the moment plays right here, inside the card
+        self.vw.setMinimumHeight(260)
+        self.vw.setStyleSheet("background:#000")
+        self.vw.hide()
+        bv.addWidget(self.vw)
+        self.vmsg = QLabel("", objectName="hint", alignment=Qt.AlignCenter, wordWrap=True)
+        self.vmsg.hide()
+        bv.addWidget(self.vmsg)
         row = QHBoxLayout()
-        self.b_play = ibtn("play", "Play the video moment", self.play, kind="", text=" Play the moment")
+        self.b_play = ibtn("play", "Play the video moment (here in the card)", self.play, kind="", text=" Play the moment")
         self.b_speak = ibtn("volume", "Speak the sentence", lambda: self.cur and self.main.speak(self.sent[0] if self.sent else self.cur.text, lang=self.cur.lang),
                             kind="", text=" Speak")
         self.b_reveal = ibtn("sparkles", "Show the meaning (Space)", self.reveal, kind="", text=" Show meaning", color="#FFFFFF")
@@ -495,6 +504,7 @@ class ReviewPage(QWidget):
         self.show_card()
 
     def show_card(self):
+        self.stop_video()
         self.revealed = False
         self.cur = self.queue[self.i] if self.i < len(self.queue) else None
         if not self.cur:
@@ -545,9 +555,31 @@ class ReviewPage(QWidget):
             super().keyPressEvent(e)
 
     def play(self):
-        if self.cur:
-            self.main.play_clip(self.cur)
-            self.main.msg("Playing the moment — come back with 🎓 Review")
+        if not self.cur:
+            return
+        path = self.main.find_video(self.cur)
+        if not path:
+            self.vmsg.setText(f"The video “{self.cur.video_name}” isn't on this PC (or was renamed). Put it in Videos, "
+                              "Downloads or a folder you opened before — SubPlayer finds it by its file name.")
+            self.vmsg.show()
+            return
+        self.vmsg.hide()
+        self.main.player.setVideoOutput(self.vw)
+        self.view.setMinimumHeight(120)
+        self.view.setMaximumHeight(170)
+        self.vw.show()
+        self.main.play_clip(self.cur, quiet=True)
+
+    def stop_video(self):
+        """Gives the picture back to the player page."""
+        if self.vw.isVisible():
+            self.main.player.pause()
+            self.main.clear_ab()
+            self.vw.hide()
+            self.view.setMaximumHeight(16777215)
+            self.view.setMinimumHeight(340)
+            self.main.player.setVideoOutput(self.main.vw)
+        self.vmsg.hide()
 
     def reveal(self):
         self.revealed = True
@@ -804,7 +836,7 @@ class PracticePage(QWidget):
     def listen(self):
         w, c, ch = self.qs[self.k]
         if self.mode == "dictation":
-            if not self.main.play_clip(w):
+            if not self.main.play_clip(w, quiet=True):
                 self.main.speak(w.sentence, lang=w.lang)
         elif c:
             self.main.speak(c.sentence, lang=w.lang)

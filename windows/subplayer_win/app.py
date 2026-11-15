@@ -452,7 +452,16 @@ class Main(QMainWindow):
         self.vw.mousePressEvent = lambda e: self.toggle_play()
         self.vw.mouseDoubleClickEvent = lambda e: self.toggle_fullscreen()
         self.vw.wheelEvent = self._video_wheel
-        vf.addWidget(self.vw)
+        self.vstack = QStackedWidget()
+        self.vstack.addWidget(self.vw)
+        self.audio_cover = QLabel(alignment=Qt.AlignCenter)
+        self.audio_cover.setWordWrap(True)
+        self.audio_cover.setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1B1240,stop:1 #0B2A3A);"
+                                       "border-radius:16px;color:#E8E6FF;font-size:15pt;padding:24px")
+        self.audio_cover.mousePressEvent = lambda e: self.toggle_play()
+        self.vstack.addWidget(self.audio_cover)
+        self.player.hasVideoChanged.connect(self._has_video)
+        vf.addWidget(self.vstack)
         theme.glow(self.vframe, theme.VIOLET, 40, 110)
         v.addWidget(self.vframe, 1)
 
@@ -609,6 +618,8 @@ class Main(QMainWindow):
             self.practice_page.start()
         elif key == "discover":
             self.discover_page.activate()
+        if key != "review" and hasattr(self, "review_page"):
+            self.review_page.stop_video()
         if key != "player":
             self.player.pause()
         else:
@@ -664,7 +675,7 @@ class Main(QMainWindow):
         btn = getattr(self, "recent_btn", None)
         m.exec(btn.mapToGlobal(btn.rect().bottomLeft()) if btn else self.cursor().pos())
 
-    def open_video(self, path: str, at_ms: int | None = None, play: bool = True):
+    def open_video(self, path: str, at_ms: int | None = None, play: bool = True, switch: bool = True):
         if self.video and self.video != path:
             self.remember_position()
         self.video = path
@@ -684,7 +695,8 @@ class Main(QMainWindow):
         self.setWindowTitle(f"SubPlayer — {self.video_name}")
         self.title_lbl.setText(Path(path).stem)
         self.remember_position()
-        self.show_page("player")
+        if switch:
+            self.show_page("player")
 
     def srt_path(self, lang: str) -> Path:
         return syncer.subs_dir() / f"{subtitles.video_key(self.video_name)}.{lang}.srt"
@@ -2153,8 +2165,7 @@ class Main(QMainWindow):
 
     def make_snapshot(self, w: SavedWord, done=None):
         """A small picture of the video where the word is said (made in the background)."""
-        path = w.video_uri if w.video_uri and os.path.exists(w.video_uri) else \
-            next((r["path"] for r in self.recents() if r["name"].lower() == w.video_name.lower() and os.path.exists(r["path"])), None)
+        path = self.find_video(w)
         out = self.snap_path(w)
         if not path or w.start_ms < 0 or out.exists():
             return False
@@ -2177,15 +2188,52 @@ class Main(QMainWindow):
         self.study_page.load(self.video, self.video_name, list(self.cues), self.cue_lang)
         self.show_page("study")
 
-    def play_clip(self, w: SavedWord, after=None):
+    def _has_video(self, has: bool):
+        """Audio files (podcasts) show a cover instead of a black picture."""
+        if has or not self.video:
+            self.vstack.setCurrentIndex(0)
+            return
+        self.audio_cover.setText(f"<div style='font-size:46pt'>🎧</div><div style='font-weight:800;font-size:17pt'>"
+                                 f"{html.escape(Path(self.video).stem)}</div><div style='color:#9A98B5;font-size:11pt;margin-top:8px'>"
+                                 "Audio — click words in the subtitles as usual. No subtitles yet? Click Subtitles to make them."
+                                 "</div>")
+        self.vstack.setCurrentIndex(1)
+
+    def find_video(self, w: SavedWord) -> str | None:
+        """The word's video: where it was, or — if it moved — the same file name in recent videos or your video folders."""
+        if w.video_uri and os.path.exists(w.video_uri):
+            return w.video_uri
+        name = (w.video_name or Path(w.video_uri or "").name).lower()
+        if not name:
+            return None
+        hit = next((r["path"] for r in self.recents() if r["name"].lower() == name and os.path.exists(r["path"])), None)
+        if hit:
+            return hit
+        cache = getattr(self, "_found_videos", {})
+        if name in cache and os.path.exists(cache[name]):
+            return cache[name]
+        from . import library
+        for folder in library.video_folders(self.settings):
+            for root, dirs, files in os.walk(folder):
+                dirs[:] = [d for d in dirs if not d.startswith((".", "$"))]
+                for f in files:
+                    if f.lower() == name:
+                        cache[name] = os.path.join(root, f)
+                        self._found_videos = cache
+                        return cache[name]
+                if root.count(os.sep) - str(folder).count(os.sep) >= 3:
+                    dirs[:] = []
+        return None
+
+    def play_clip(self, w: SavedWord, after=None, quiet: bool = False):
         """Plays the saved word's video moment (finds the video by name if it moved)."""
-        path = w.video_uri if w.video_uri and os.path.exists(w.video_uri) else \
-            next((r["path"] for r in self.recents() if r["name"].lower() == w.video_name.lower() and os.path.exists(r["path"])), None)
+        path = self.find_video(w)
         if not path:
-            self.msg(f"Video “{w.video_name}” not found on this PC — open it once (same file name) and try again", 9000)
+            self.msg(f"Video “{w.video_name}” not found on this PC — put it in Videos, Downloads or a folder you opened "
+                     "before (same file name)", 9000)
             return False
         if self.video != path:
-            self.open_video(path, at_ms=max(0, w.start_ms), play=False)
+            self.open_video(path, at_ms=max(0, w.start_ms), play=False, switch=not quiet)
         self.a, self.b = max(0, w.start_ms - 200), w.end_ms + 300
         self._ab_label()
         self.player.setPosition(self.a)
