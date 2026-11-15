@@ -379,10 +379,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cycleSpeed() {
-        setSpeed(when (speed) { 1f -> 0.75f; 0.75f -> 0.5f; else -> 1f })
+        changeSpeed(when (speed) { 1f -> 0.75f; 0.75f -> 0.5f; else -> 1f })
     }
 
-    fun setSpeed(v: Float) { speed = v; player.setPlaybackSpeed(v) }
+    fun changeSpeed(v: Float) { speed = v; player.setPlaybackSpeed(v) }
 
     // ------------------------------------------------------------- A-B
 
@@ -1312,7 +1312,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setMinLevel(l: Int) { minLevel = l.coerceIn(1, 6); uiPrefs.edit().putInt("min_level", minLevel).apply() }
+    fun chooseMinLevel(l: Int) { minLevel = l.coerceIn(1, 6); uiPrefs.edit().putInt("min_level", minLevel).apply() }
 
     /** Level 1..6 of a subtitle token, 0 = no colour (names, numbers, below the chosen level, or levels off). */
     fun levelOf(token: String): Int {

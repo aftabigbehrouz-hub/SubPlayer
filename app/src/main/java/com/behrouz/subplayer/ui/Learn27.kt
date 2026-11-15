@@ -276,7 +276,7 @@ fun PlayerOptionsSheet(vm: AppViewModel) {
 
             Title("Speed")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0.5f, 0.6f, 0.75f, 0.9f, 1f, 1.25f, 1.5f).forEach { v -> Pill(speedLabel(v), active = vm.speed == v) { vm.setSpeed(v) } }
+                listOf(0.5f, 0.6f, 0.75f, 0.9f, 1f, 1.25f, 1.5f).forEach { v -> Pill(speedLabel(v), active = vm.speed == v) { vm.changeSpeed(v) } }
             }
 
             Title("Repeat (A–B and Loop line)")
@@ -294,7 +294,7 @@ fun PlayerOptionsSheet(vm: AppViewModel) {
                 (1..6).forEach { lv ->
                     Text(Levels.NAMES[lv], color = if (vm.minLevel <= lv) Dark else L.copy(alpha = 0.5f), fontWeight = FontWeight.Bold,
                         modifier = Modifier.clip(RoundedCornerShape(50)).background(if (vm.minLevel <= lv) levelColor(lv) else Color.White.copy(alpha = 0.08f))
-                            .clickable { vm.setMinLevel(lv) }.padding(horizontal = 12.dp, vertical = 6.dp))
+                            .clickable { vm.chooseMinLevel(lv) }.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
             }
             Explain("Tap a level to colour only words from that level up (B1 = hide the easy A1/A2 colours). " +

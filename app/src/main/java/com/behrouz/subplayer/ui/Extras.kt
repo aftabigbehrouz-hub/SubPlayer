@@ -99,6 +99,35 @@ private val HELP = listOf(
         "My Words ▸ Practice: Fill the gap (your sentences with the word missing), Dictation (hear the video line, type it, " +
             "every word is checked) and der·die·das for your nouns. Up to 10 questions, weakest words first; " +
             "every answer counts towards your daily 🔥 streak."),
+    HelpItem(Icons.Tune, "Word levels A1 – C2",
+        "Tap “A1–C2” under the video: every subtitle word gets the colour of its level — A1 green, A2 cyan, B1 blue, " +
+            "B2 violet, C1 orange, C2 pink. ⋯ Options ▸ tap a level to colour only words from that level up. English levels come " +
+            "from CEFR-J and the Octanove profile; for German no official free list exists, so the level is an estimate from how " +
+            "common the base word is. With the dictionary downloaded, forms count as their base word (ging = gehen)."),
+    HelpItem(Icons.Subtitles, "Translation line",
+        "Tap “Translation”: under each subtitle its translation into Persian, English or German (choose in ⋯ Options). " +
+            "Lines are translated as they come; “Translate all now” translates the whole video before you watch and keeps it, " +
+            "so it works offline too. Switch it off any time."),
+    HelpItem(Icons.Search, "Where else is a word used?",
+        "In a word card tap “Where else is it used?”: every line of all your subtitled videos (made or loaded in SubPlayer, " +
+            "also on your other devices) where the word or one of its forms is said. Tap a line to watch that moment. " +
+            "Videos you opened recently play straight away; others need to be opened once with the folder button."),
+    HelpItem(Icons.Edit, "Correct the subtitles",
+        "Something heard wrongly? “Edit line” (or ✎ in the Transcript) changes the text and times, deletes a line or adds " +
+            "one. ⋯ Options ▸ Subtitle timing moves all lines earlier or later. Saved with the video and synced."),
+    HelpItem(Icons.School, "Study a video",
+        "“Study video”: all the words of the video sorted by level and how often they are said — tap one to see it and " +
+            "save it with its moment; your saved words from this video; and practice built from the whole text: gaps with " +
+            "words of your level and dictation of its lines."),
+    HelpItem(Icons.Explore, "Discover",
+        "The compass at the top: programmes you may download. Deutsch — ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix and the " +
+            "regional stations (CC = with the broadcaster's own subtitles, loaded automatically). English — VOA Learning " +
+            "English, NASA videos with subtitles, and BBC Learning English, BBC World Service, PBS, TED and NPR podcasts " +
+            "(🎧 audio, saved to Music/SubPlayer — transcribe them like a video). Or search by name."),
+    HelpItem(Icons.Calendar, "My Words: types, calendar, pictures, export",
+        "My Words sorts your words into nouns, verbs, adjectives and phrases and by video. 📅 Calendar shows how many words " +
+            "you saved each day — tap a day. Open a word to see a picture of the video at its moment. Export writes them as " +
+            "a spreadsheet (.csv), text, or Anki cards."),
     HelpItem(Icons.Volume, "Pause each line & Shadowing",
         "Pause each line stops the video after every subtitle so you can read and tap words, then ▶ to go on. " +
             "Shadowing plays the line, pauses long enough for you to repeat it aloud, and plays it again — " +
@@ -259,7 +288,10 @@ fun SettingsSheet(vm: AppViewModel) {
                 Text("About", color = W, fontWeight = FontWeight.Bold)
                 Explain("SubPlayer · speech recognition: Whisper (OpenAI, via whisper.cpp)" +
                     (if (com.behrouz.subplayer.asr.VoskEngine.AVAILABLE) " and Vosk" else "") + " · dictionaries: German and English " +
-                    "Wiktionary via kaikki.org (CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online only).", Modifier.padding(top = 4.dp))
+                    "Wiktionary via kaikki.org (CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online only) · word levels: " +
+                    "CEFR-J Vocabulary Profile 1.5 (Tono Laboratory, TUFS), Octanove Vocabulary Profile C1/C2 (CC BY-SA 4.0), German estimated from " +
+                    "FrequencyWords 2018 by Hermit Dave (CC BY-SA 4.0) · Discover: MediathekViewWeb catalogue, VOA Learning English and NASA " +
+                    "(public domain), podcasts of BBC, PBS, TED and NPR (for personal listening).", Modifier.padding(top = 4.dp))
                 TextButton(onClick = { vm.sheet = null; vm.showTour = true }) { Text("Replay the intro tour", color = Neon.Cyan) }
             }
         }
