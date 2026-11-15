@@ -169,7 +169,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
             if (com.behrouz.subplayer.BuildConfig.STORE_BILLING && !ps.subscribed && ps.trialLeft > 0) {
                 // Cafe Bazaar / Myket: the app's own 10-day trial, then subscribe in the store
                 Text(
-                    "Free trial · ${ps.trialLeft} day${if (ps.trialLeft == 1) "" else "s"} left — Subscribe",
+                    "Trial: ${ps.trialLeft} day${if (ps.trialLeft == 1) "" else "s"} · Subscribe",
                     color = if (ps.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(50))
@@ -178,7 +178,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
             }
             if (!com.behrouz.subplayer.BuildConfig.STORE_BILLING && vm.licence == null && vm.trialLeft > 0) {
                 Text(
-                    "Free trial · ${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} left — Buy",
+                    "Trial: ${vm.trialLeft} day${if (vm.trialLeft == 1) "" else "s"} · Buy",
                     color = if (vm.trialLeft <= 3) Neon.Pink else Neon.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(50))

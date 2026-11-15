@@ -54,7 +54,15 @@ def nodes():
 def find(label, contains=False, timeout=12):
     end = time.time() + timeout
     while time.time() < end:
-        for n in nodes():
+        ns = nodes()
+        anr = next((n for n in ns if "isn't responding" in n["text"]), None)
+        if anr:                                      # a slow emulator: "… isn't responding" — wait for it
+            w = next((n for n in ns if n["text"] == "Wait"), None)
+            if w:
+                adb("shell", "input", "tap", str(w["x"]), str(w["y"]))
+                time.sleep(3)
+                continue
+        for n in ns:
             for v in (n["text"], n["desc"]):
                 if v and (v == label or (contains and label.lower() in v.lower())):
                     return n
@@ -154,8 +162,8 @@ print("install")
 adb("install", "-r", "-g", APK, timeout=300)
 adb("logcat", "-c")
 adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
-time.sleep(6)
-if find("Skip", timeout=15):
+time.sleep(10)
+if find("Skip", timeout=40):
     shot("00_tour")
     tap("Skip")
 shot("01_home")
@@ -179,24 +187,20 @@ if tap("Discover programmes"):
 print("video")
 subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i",
                 "sine=frequency=330", "-t", "40", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "/tmp/Wetterbericht.mp4"], check=True)
-uri = f"file://{FILES}/Wetterbericht.mp4"
+uri = f"file:///data/user/0/{PKG}/files/Wetterbericht.mp4"
 open("/tmp/a.srt", "w", encoding="utf-8").write(SRT)
 open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
-# the files are copied by the app's own user (run-as: debug build), so the app owns them like files it made itself
-def place(local, dest):
+# The files go into the app's own private folder, written by the app's user (run-as works for the debug build): the video,
+# and the subtitles as if synced from another device (files/synced_subs/<name>.de.srt) — the app picks them up by file name.
+def place(local, rel):
     tmp = "/data/local/tmp/" + os.path.basename(local)
     adb("push", local, tmp)
-    adb("shell", "chmod", "644", tmp)
-    r = subprocess.run(["adb", "shell", f"run-as {PKG} sh -c 'mkdir -p {os.path.dirname(dest)} && cp {tmp} {dest}'"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        print("   run-as copy failed:", r.stdout, r.stderr, "— pushing directly")
-        adb("shell", "mkdir", "-p", os.path.dirname(dest))
-        adb("push", local, dest)
-place("/tmp/Wetterbericht.mp4", f"{FILES}/Wetterbericht.mp4")
-place("/tmp/a.srt", f"{FILES}/subtitles/Wetterbericht_{java_hash(uri)}.de.srt")
-place("/tmp/b.srt", f"{FILES}/subtitles/Tagesschau_Wetter_1a2b3c.de.srt")
-print(adb("shell", f"run-as {PKG} ls -la {FILES} {FILES}/subtitles", check=False))
+    d = os.path.dirname(rel)
+    adb("shell", f"cat {tmp} | run-as {PKG} sh -c 'mkdir -p {d or '.'} && cat > {rel}'")
+place("/tmp/Wetterbericht.mp4", "files/Wetterbericht.mp4")
+place("/tmp/a.srt", "files/synced_subs/Wetterbericht.de.srt")
+place("/tmp/b.srt", "files/synced_subs/Tagesschau_Wetter.de.srt")
+print(adb("shell", f"run-as {PKG} ls -laR files", check=False)[:2000])
 adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", uri, "-t", "video/mp4", "-n", f"{PKG}/.MainActivity")
 time.sleep(4)
 tap("A1–C2")
