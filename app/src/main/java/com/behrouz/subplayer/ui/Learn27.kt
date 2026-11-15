@@ -201,7 +201,7 @@ fun EditCueSheet(vm: AppViewModel, s: Sheet.EditCue) {
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Pill("Start = now") { start = fmtMs(vm.player.currentPosition) }
                 Pill("End = now") { end = fmtMs(vm.player.currentPosition) }
-                Pill("▶ Play", icon = Icons.Play) { vm.playCue(s.index) }
+                Pill("Play", icon = Icons.Play) { vm.playCue(s.index) }
             }
             Spacer(Modifier.height(14.dp))
             GlowButton("Save", Modifier.fillMaxWidth(), icon = Icons.Check) {

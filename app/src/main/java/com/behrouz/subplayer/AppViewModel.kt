@@ -357,7 +357,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun touch() { lastInteraction = System.currentTimeMillis(); controlsVisible = true }
 
     fun togglePlay() {
-        if (player.isPlaying) player.pause() else {
+        // playWhenReady, not isPlaying: a tap while the video is still loading must pause it, not be lost
+        if (player.playWhenReady && player.playbackState != androidx.media3.common.Player.STATE_ENDED) player.pause() else {
             if (player.playbackState == androidx.media3.common.Player.STATE_ENDED) player.seekTo(0)
             player.play()
         }
