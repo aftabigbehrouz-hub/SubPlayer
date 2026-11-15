@@ -50,6 +50,8 @@ class Film:
 
     @property
     def length(self) -> str:
+        if not self.duration:
+            return ""
         m = self.duration // 60
         return f"{m // 60} h {m % 60:02d} min" if m >= 60 else (f"{m} min" if m else f"{self.duration} s")
 

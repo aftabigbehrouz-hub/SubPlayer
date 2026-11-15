@@ -32,6 +32,7 @@ class Found:
     subtitle_text: str = ""      # subtitles found inside a stream (already .srt)
 
 
+ENGLISH_SITES = ("learningenglish.voanews.com", "voanews.com", "images.nasa.gov", "nasa.gov")
 BROADCASTERS = ("ardmediathek.de", "ard.de", "tagesschau.de", "sportschau.de", "zdf.de", "zdfheute.de", "3sat.de", "arte.tv",
                 "dw.com", "kika.de", "phoenix.de", "br.de", "swr.de", "wdr.de", "ndr.de", "mdr.de", "hr.de", "rbb-online.de",
                 "rbb24.de", "sr.de", "radiobremen.de", "funk.net", "orf.at", "srf.ch", "zdftivi.de", "planet-wissen.de", "quarks.de")
@@ -75,6 +76,12 @@ def score(u: str) -> int:
         s = 30
     else:
         s = 45
+    if "_hq.mp4" in l:                          # VOA: 720p — clear picture, sensible size
+        s += 12
+    elif "_fullhd.mp4" in l:
+        s -= 8
+    if "download=1" in l:
+        s -= 1
     if "h264" in l:
         s += 3
     if "trailer" in l or "teaser" in l:
@@ -232,6 +239,14 @@ def resolve(url: str, session=None) -> Found:
     if HLS.search(path_q):
         return Found(u, Path(parsed.path).stem or "video", hls=True)
     s = session or requests.Session()
+    nm = re.search(r"images\.nasa\.gov/details/([^/?#]+)", u)
+    if nm:
+        from . import english
+        nid = urllib.parse.unquote(nm.group(1))
+        mp4, sub = english.nasa_asset(nid, s)
+        if not mp4:
+            raise ValueError("This NASA item has no video file")
+        return Found(mp4, nid, sub)
     am = ARTE_ID.search(u)
     if am:
         return arte_item(am.group(1).lower(), am.group(2).upper(), s)

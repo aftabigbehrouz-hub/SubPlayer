@@ -10,12 +10,14 @@ from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
                                QScrollArea, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget)
 
-from . import mediathek, theme
+from . import english, mediathek, theme
 from .cosmos import GradientLabel
 
 CH_COLOR = {"ARD": "#3B7BFF", "ZDF": "#FF8A1F", "3sat": "#E8364F", "Arte": "#FF5A36", "DW": "#19B6FF", "KiKA": "#7CCB2B",
             "phoenix": "#22B8D8", "BR": "#4AA3FF", "SWR": "#3FD0B0", "WDR": "#4F86FF", "NDR": "#2F7DE1", "MDR": "#5C9DFF",
-            "HR": "#3C8CFF", "RBB": "#E84B6B", "ORF": "#E8364F", "SRF": "#E8364F"}
+            "HR": "#3C8CFF", "RBB": "#E84B6B", "ORF": "#E8364F", "SRF": "#E8364F", "VOA": "#3D8BFF", "NASA": "#FF5A3C"}
+DE_CHANNELS = ("ARD", "ZDF", "3sat", "Arte", "DW", "KiKA", "phoenix")
+EN_CHANNELS = ("VOA", "NASA")
 
 
 def ibtn(*a, **k):
@@ -85,6 +87,7 @@ class DiscoverPage(QWidget):
         self.mode = "shelves"
         self.selected: FilmCard | None = None
         self.shelves_loaded = False
+        self.lang = main.settings.get("discover_lang", "de")
         self.relay = _Relay()
         self.relay.done.connect(self._done)
         self.relay.failed.connect(self._failed)
@@ -107,6 +110,15 @@ class DiscoverPage(QWidget):
         lv.addLayout(head)
 
         row = QHBoxLayout()
+        self.lang_btns = {}
+        for code, label in (("de", "Deutsch"), ("en", "English")):
+            b = QPushButton(label, checkable=True)
+            b.setProperty("kind", "chip")
+            b.setToolTip("German programmes (ARD, ZDF, 3sat, Arte, DW…)" if code == "de" else
+                         "English programmes (VOA Learning English, NASA)")
+            b.clicked.connect(lambda _=False, c=code: self.set_lang(c))
+            self.lang_btns[code] = b
+            row.addWidget(b)
         self.q = QLineEdit(placeholderText="Search programmes — e.g. Terra X, Tatort, Wirtschaft, Klimawandel, logo!")
         self.q.returnPressed.connect(lambda: self.search(new=True))
         row.addWidget(self.q, 1)
@@ -120,7 +132,7 @@ class DiscoverPage(QWidget):
         f = QHBoxLayout()
         f.setSpacing(6)
         self.ch_btns = {}
-        for ch in ("ARD", "ZDF", "3sat", "Arte", "DW", "KiKA", "phoenix"):
+        for ch in DE_CHANNELS + EN_CHANNELS:
             b = QPushButton(ch, checkable=True)
             b.setProperty("kind", "chip")
             b.setToolTip(f"Only {ch} (several can be ticked; none = all channels)")
@@ -173,6 +185,33 @@ class DiscoverPage(QWidget):
         rv.addLayout(r2)
         root.addWidget(right)
         self.quality = "normal"
+        self._apply_lang()
+        self._show_info(None)
+
+    # ------------------------------------------------------------------ German / English
+    def set_lang(self, code: str):
+        if code == self.lang:
+            self.lang_btns[code].setChecked(True)
+            return
+        self.lang = code
+        self.main.settings["discover_lang"] = code
+        self.main.save_settings()
+        self._apply_lang()
+        self.shelves_loaded = False
+        self.show_shelves()
+
+    def _apply_lang(self):
+        en = self.lang == "en"
+        for c, b in self.lang_btns.items():
+            b.setChecked(c == self.lang)
+        for ch, b in self.ch_btns.items():
+            b.setVisible(ch in (EN_CHANNELS if en else DE_CHANNELS))
+            if not b.isVisible():
+                b.setChecked(False)
+        self.length.setVisible(not en)
+        self.cc_only.setVisible(not en)
+        self.q.setPlaceholderText("Search programmes — e.g. grammar, Mars, interview, climate, Thanksgiving" if en else
+                                  "Search programmes — e.g. Terra X, Tatort, Wirtschaft, Klimawandel, logo!")
         self._show_info(None)
 
     # ------------------------------------------------------------------ background calls
@@ -277,15 +316,16 @@ class DiscoverPage(QWidget):
         self._clear()
         self.bv.addStretch(1)
         self.status.setText("Loading suggestions…")
-        shelves = mediathek.SHELVES
+        src = english if self.lang == "en" else mediathek
+        shelves = src.SHELVES
 
         def job():
             from concurrent.futures import ThreadPoolExecutor
-            first = mediathek.shelf_films(shelves[0], 10)          # fails fast when there is no connection
+            first = src.shelf_films(shelves[0], 10)          # fails fast when there is no connection
 
             def one(sh):
                 try:
-                    return sh, mediathek.shelf_films(sh, 10)
+                    return sh, src.shelf_films(sh, 10)
                 except Exception as e:
                     return sh, e
             with ThreadPoolExecutor(max_workers=4) as ex:
@@ -332,6 +372,11 @@ class DiscoverPage(QWidget):
 
     def search_shelf(self, sh):
         self.mode = "search"
+        if self.lang == "en":
+            self.q.setText(getattr(sh, "nasa", "") or "")
+            self._shelf = sh
+            self.search(new=True, shelf=sh)
+            return
         self.q.setText(sh.text or sh.topic or sh.title_q)
         for c, b in self.ch_btns.items():
             b.setChecked(c in sh.channels)
@@ -354,7 +399,15 @@ class DiscoverPage(QWidget):
         off = self.offset
         self.status.setText("Searching…")
 
+        en = self.lang == "en"
+
         def job():
+            if en:
+                if shelf is not None and getattr(shelf, "feed", ""):
+                    films = english.voa_feed(shelf.feed, 40) if off == 0 else []
+                    return "search", (films, len(films), new)
+                films, total = english.search(text or getattr(shelf, "nasa", ""), chans, 30, off)
+                return "search", (films, total, new)
             if shelf is not None:
                 films, total = mediathek.search(shelf.text, shelf.channels, shelf.topic, shelf.title_q, length if any(length) else shelf.length,
                                                 off, 30, cc)
@@ -414,8 +467,18 @@ class DiscoverPage(QWidget):
 
     def _show_info(self, f: mediathek.Film | None):
         self.dl_btn.setEnabled(f is not None)
-        self.q_btn.setEnabled(f is not None)
+        self.q_btn.setEnabled(f is not None and f.channel not in ("VOA", "NASA"))
         self.web_btn.setEnabled(bool(f and f.url_website))
+        if f is None and self.lang == "en":
+            self.info.setHtml(f"<p style='font-size:19pt;font-weight:800;color:{theme.CYAN};margin-bottom:6px'>Pick a programme</p>"
+                              f"<p style='color:{theme.DIM};line-height:150%'><b>VOA Learning English</b> — lessons made for "
+                              "learners by Voice of America (public domain): Let's Learn English, English in a Minute, grammar, "
+                              "pronunciation. VOA stopped publishing in 2025, so these are its archive.</p>"
+                              f"<p style='color:{theme.DIM};line-height:150%'><b>NASA</b> — science and space videos (public domain); "
+                              "most bring English subtitles.</p>"
+                              f"<p style='color:{theme.DIM};line-height:150%'>Download & open saves the video to "
+                              "<b>Videos\\SubPlayer</b>; videos without subtitles get them with <b>Subtitles</b>.</p>")
+            return
         if f is None:
             self.info.setHtml(f"<p style='font-size:19pt;font-weight:800;color:{theme.CYAN};margin-bottom:6px'>Pick a programme</p>"
                               f"<p style='color:{theme.DIM};line-height:150%'>Everything here is offered free by the broadcasters "
@@ -428,15 +491,21 @@ class DiscoverPage(QWidget):
                               "Settings ▸ Internet connection.</p>")
             return
         col = CH_COLOR.get(f.label, theme.VIOLET)
-        cc = (f"<span style='color:{theme.MINT};font-weight:700'>✓ with the broadcaster's subtitles</span>" if f.has_subtitles
-              else f"<span style='color:{theme.DIM}'>no subtitles from the broadcaster — SubPlayer can make them</span>")
+        if f.channel in ("VOA", "NASA"):
+            cc = (f"<span style='color:{theme.DIM}'>NASA videos usually bring English subtitles — they come along when there are</span>"
+                  if f.channel == "NASA" else f"<span style='color:{theme.DIM}'>no subtitle file — SubPlayer makes them after "
+                                              "downloading (VOA's lessons are slow and clear)</span>")
+        else:
+            cc = (f"<span style='color:{theme.MINT};font-weight:700'>✓ with the broadcaster's subtitles</span>" if f.has_subtitles
+                  else f"<span style='color:{theme.DIM}'>no subtitles from the broadcaster — SubPlayer can make them</span>")
         size = f" · about {f.size / 1e6:,.0f} MB" if f.size else ""
         desc = html.escape(f.description or "").replace("\n", "<br>")
         self.info.setHtml(
             f"<p style='margin:0'><span style='color:{col};font-weight:800'>{html.escape(f.label)}</span>"
             f"<span style='color:{theme.DIM}'> · {html.escape(f.topic)}</span></p>"
             f"<p style='font-size:16pt;font-weight:800;margin:6px 0 8px 0'>{html.escape(f.title)}</p>"
-            f"<p style='color:{theme.DIM};margin:0'>{f.date} · {f.length}{size}</p><p style='margin:6px 0 12px 0'>{cc}</p>"
+            f"<p style='color:{theme.DIM};margin:0'>{' · '.join(x for x in (f.date, f.length) if x)}{size}</p>"
+            f"<p style='margin:6px 0 12px 0'>{cc}</p>"
             f"<p style='line-height:150%'>{desc or '<i>No description.</i>'}</p>")
 
     def quality_menu(self):

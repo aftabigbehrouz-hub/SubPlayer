@@ -1685,6 +1685,14 @@ class Main(QMainWindow):
         """A programme picked in Discover: its MP4 (and the broadcaster's subtitles) straight from the broadcaster."""
         from . import linkimport
         title = film.title if film.topic.lower() in film.title.lower() else f"{film.topic} – {film.title}"
+        if not film.video(quality):                    # English sources: the file is found on the page when downloading
+            def job():
+                self._bg_progress(0, "Looking for the video…")
+                f = linkimport.resolve(film.url_website)
+                f.title = title
+                return self._fetch_found(f)
+            self.run_bg("link", job, cancellable=True, label=f"Downloading {title}…")
+            return
         found = linkimport.Found(film.video(quality), title, film.url_subtitle, duration=film.duration)
         found.hls = bool(linkimport.HLS.search(found.video_url.split("?")[0]))
         self.run_bg("link", lambda: self._fetch_found(found), cancellable=True, label=f"Downloading {title}…")

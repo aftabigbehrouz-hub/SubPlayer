@@ -1,46 +1,31 @@
-"""English sources: VOA Learning English feeds + search, NASA search (run by probe-media.yml)."""
-import re, sys, traceback, time
+"""Live check of the Windows app's English sources (VOA Learning English, NASA)."""
+import sys, time, traceback
+sys.path.insert(0, "windows")
 import requests
-s = requests.Session(); UA = {"User-Agent": "SubPlayer (language-learning video player)"}
-def get(u, **k): return s.get(u, headers=UA, timeout=30, **k)
-print("== VOA feeds with video")
-try:
-    page = get("https://learningenglish.voanews.com/rssfeeds").text
-    feeds = list(dict.fromkeys(re.findall(r'href="(/api/[^"]+)"', page)))
-    for u in feeds:
-        try:
-            x = get("https://learningenglish.voanews.com" + u).text
-        except Exception as e:
-            print("  ", u, "ERR", e); continue
-        t = re.search(r"<channel>.*?<title>(.*?)</title>", x, re.S)
-        items = re.findall(r"<item>(.*?)</item>", x, re.S)
-        vids = [i for i in items if re.search(r'type="video', i)]
-        first = items[0] if items else ""
-        ti = re.search(r"<title>(.*?)</title>", first, re.S)
-        enc = re.search(r'<enclosure[^>]+>', first)
-        print(f"  {u:34} {(t.group(1) if t else '')[:40]!r:44} items={len(items):3} video={len(vids):3} | {(ti.group(1) if ti else '')[:40]!r} | {(enc.group(0) if enc else '')[:120]}")
-except Exception: traceback.print_exc()
-print("\n== VOA search")
-for url in ("https://learningenglish.voanews.com/s?k=grammar&tab=video", "https://learningenglish.voanews.com/s?k=grammar"):
+from subplayer_win import english as E, linkimport as L, subtitles as S
+s = requests.Session()
+print("== English shelves")
+for sh in E.SHELVES:
     try:
-        r = get(url); links = re.findall(r'<a[^>]+href="(/a/[^"]+\.html)"[^>]*>(.*?)</a>', r.text, re.S)
-        print(url, r.status_code, len(r.text), "links", len(links))
-        for l, t in links[:6]:
-            print("   ", l, "|", re.sub(r"<[^>]+>|\s+", " ", t).strip()[:70])
+        t0 = time.time(); fs = E.shelf_films(sh, 8, session=s)
+        print(f"{sh.title[:32]:32} {len(fs):2} {time.time()-t0:.1f}s  {[f.title[:30] for f in fs[:2]]}")
+    except Exception as e:
+        print(sh.title, "FAILED", e)
+print("\n== search 'grammar' (VOA + NASA) and 'Mars' (NASA)")
+for q, ch in (("grammar", None), ("Mars", ["NASA"])):
+    try:
+        fs, total = E.search(q, ch, 10, 0, s); print(q, total, [(f.channel, f.title[:30]) for f in fs[:4]])
     except Exception: traceback.print_exc()
-print("\n== NASA search speed + asset endpoint")
-try:
-    t0 = time.time(); j = get("https://images-api.nasa.gov/search", params={"q": "Artemis", "media_type": "video", "page_size": 20}).json()
-    print("search", round(time.time() - t0, 2), "s", j["collection"]["metadata"].get("total_hits"))
-    nid = j["collection"]["items"][0]["data"][0]["nasa_id"]
-    a = get(f"https://images-api.nasa.gov/asset/{requests.utils.quote(nid)}").json()
-    hrefs = [i["href"] for i in a["collection"]["items"]]
-    print("asset", nid, [h.rsplit("/", 1)[-1] for h in hrefs][:10])
-    srt = next((h for h in hrefs if h.endswith(".srt")), None)
-    if srt:
-        r = get(srt.replace("http://", "https://")); print("srt", r.status_code, r.text[:160].replace("\n", " / "))
-    med = next((h for h in hrefs if "~medium.mp4" in h or "~mobile.mp4" in h), None)
-    if med:
-        r = get(med.replace("http://", "https://"), headers={"Range": "bytes=0-1023"}); print("mp4", r.status_code, r.headers.get("Content-Range"))
-except Exception: traceback.print_exc()
+print("\n== resolve + download check")
+for sh in (E.SHELVES[0], E.SHELVES[3], E.SHELVES[6]):
+    try:
+        f = E.shelf_films(sh, 3, session=s)[0]
+        t0 = time.time(); found = L.resolve(f.url_website, s)
+        r = s.get(found.video_url, headers={"User-Agent": L.UA, "Range": "bytes=0-2047"}, timeout=30, stream=True)
+        print(f"{sh.title[:28]:28} {time.time()-t0:.1f}s -> {r.status_code} {r.headers.get('Content-Range')} {found.video_url[-60:]}")
+        if found.subtitle_url:
+            srt = L.subtitle_srt(found.subtitle_url, s); n = len(S.parse(srt)) if srt else 0
+            print(f"{'':28} subtitles: {n} lines" + (f", lang {S.guess_lang(S.parse(srt))}: {S.parse(srt)[1].text[:60]!r}" if n > 2 else ""))
+    except Exception as e:
+        print(sh.title, "FAIL", type(e).__name__, str(e)[:150])
 print("DONE")
