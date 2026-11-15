@@ -119,9 +119,12 @@ def _walk(o, path=()):
         yield path, o
 
 
+ALT_VERSION = re.compile(r"(audiodeskription|/ad/|_ad_|-ad-|_ad\.|gebaerdensprache|_dgs|klaresprache|klare-sprache|_ks_)", re.I)
+
+
 def _pick_mp4(cands: list[tuple[str, int]]) -> str:
     """(url, height) — the best file up to 720p (good picture, sensible size); otherwise the smallest bigger one."""
-    cands = [(u, h) for u, h in cands if not re.search(r"(audiodeskription|/ad/|_ad_|-ad-|gebaerdensprache|_dgs)", u, re.I)] or cands
+    cands = [(u, h) for u, h in cands if not ALT_VERSION.search(u)] or cands
     upto = [c for c in cands if 0 < c[1] <= 720]
     if upto:
         return max(upto, key=lambda c: c[1])[0]
@@ -180,6 +183,33 @@ def ard_item(item_id: str, session) -> Found:
     raise ValueError("This ARD video isn't available (it may have expired, or be a live stream)")
 
 
+ARTE_ID = re.compile(r"arte\.tv/(de|fr|en|es|pl|it)/videos/(\d{6}-\d{3}-[A-Z])", re.I)
+
+
+def arte_item(lang: str, pid: str, session) -> Found:
+    """Arte: the player configuration lists the streams; the German original version is preferred (no burnt-in subtitles,
+    no audio description)."""
+    r = session.get(f"https://api.arte.tv/api/player/v2/config/{lang}/{pid}", headers={"User-Agent": UA}, timeout=30)
+    r.raise_for_status()
+    attrs = (r.json().get("data") or {}).get("attributes") or {}
+    streams = attrs.get("streams") or []
+    if not streams:
+        raise ValueError("This Arte programme isn't available (expired, not yet online, or not offered in this country)")
+
+    def rank(st):
+        vs = st.get("versions") or [{}]
+        label = " ".join(str(v.get("label", "")) + " " + str(v.get("shortLabel", "")) for v in vs).lower()
+        code = " ".join(str(v.get("eStat", {}).get("ml5", "")) for v in vs).upper()
+        bad = any(k in label for k in ("hörfilm", "audiodeskription", "untertitel", "sous-titr", "ut ", "st ", "sme"))
+        german = "deutsch" in label or code.startswith(("VA", "VOA")) or "DE" in code
+        return (german, not bad, -int(st.get("mainQuality", {}).get("code", "XQ") != "XQ"))
+    best = max(streams, key=rank)
+    meta = attrs.get("metadata") or {}
+    title = " – ".join(x for x in (meta.get("title"), meta.get("subtitle")) if x) or pid
+    dur = int((meta.get("duration") or {}).get("seconds") or 0)
+    return Found(best["url"], title, "", hls=True, duration=dur)
+
+
 def resolve(url: str, session=None) -> Found:
     import requests
     u = url.strip()
@@ -192,6 +222,9 @@ def resolve(url: str, session=None) -> Found:
     if HLS.search(path_q):
         return Found(u, Path(parsed.path).stem or "video", hls=True)
     s = session or requests.Session()
+    am = ARTE_ID.search(u)
+    if am:
+        return arte_item(am.group(1).lower(), am.group(2).upper(), s)
     aid = ard_id(u)
     if aid:
         try:
@@ -272,6 +305,12 @@ def download(found: Found, folder: Path | None = None, progress=lambda done, tot
         tmp.replace(dest)
         return dest
     with requests.get(found.video_url, headers={"User-Agent": UA}, stream=True, timeout=60) as r:
+        if "mpegurl" in r.headers.get("Content-Type", "").lower():          # a stream playlist behind a plain-looking link
+            r.close()
+            found.hls = True
+            _download_hls(found, tmp, progress, cancelled)
+            tmp.replace(dest)
+            return dest
         if r.status_code in (403, 451) or (r.status_code == 404 and re.search(r"/(de|dach)/|geo", found.video_url, re.I)):
             raise PermissionError(GEO_HINT)
         r.raise_for_status()
@@ -292,7 +331,7 @@ def download(found: Found, folder: Path | None = None, progress=lambda done, tot
     return dest
 
 
-def _download_hls(found: Found, tmp: Path, progress, cancelled):
+def _download_hls(found: Found, tmp: Path, progress, cancelled, stop_at: float = 0):
     """Copies an HLS stream (the best video up to 720p + its audio) into an MP4 without re-encoding."""
     import av
     opts = {"user_agent": UA, "reconnect": "1", "reconnect_streamed": "1", "reconnect_delay_max": "5"}
@@ -320,6 +359,8 @@ def _download_hls(found: Found, tmp: Path, progress, cancelled):
             for pkt in src.demux([x for x in (v, a) if x is not None]):
                 if cancelled():
                     raise RuntimeError("Cancelled")
+                if stop_at and pkt.pts is not None and pkt.time_base is not None and float(pkt.pts * pkt.time_base) > stop_at:
+                    break
                 if pkt.dts is None:
                     continue
                 pkt.stream = mapping[pkt.stream.index]

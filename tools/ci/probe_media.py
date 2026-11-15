@@ -70,6 +70,49 @@ for ch, films in picked.items():
             print(f"         video {found.video_url[:100]} -> {st}")
         except Exception as e:
             print(f"{ch:8} FAIL {f.url_website[:100]}\n         {type(e).__name__}: {str(e)[:160]}")
+            try:
+                import re as _re
+                pg = s.get(f.url_website, headers={"User-Agent": L.UA}, timeout=30).text
+                mt = L.OG_TITLE.search(pg) or L.TITLE.search(pg)
+                print("         page title:", repr(mt.group(1)[:120]) if mt else None, " catalogue title:", repr(f.title[:80]))
+                print("         queries:", M._title_queries(mt.group(1) if mt else ""))
+                print("         mp4/m3u8 in page:", len(_re.findall(r"\.mp4", pg)), len(_re.findall(r"\.m3u8", pg)), " len", len(pg))
+            except Exception as e2:
+                print("         (page fetch failed)", e2)
+
+print("\n== shelf candidates")
+for kind, q, chans in M.SHELF_TRIALS:
+    try:
+        fs, total = M.search(text=q if kind == "text" else "", topic=q if kind == "topic" else "", channels=chans, size=10, session=s)
+        print(f"{kind:5} {q!r:22} {chans} total={total} sub={sum(f.has_subtitles for f in fs)}/{len(fs)} {[f.title[:24] for f in fs[:2]]}")
+    except Exception as e:
+        print(q, "FAILED", e)
+
+print("\n== Arte stream copy (20 s)")
+try:
+    fs, _ = M.search(channels=["Arte"], length=(600, 3600), size=5, session=s)
+    f = fs[0]
+    found = L.resolve(f.url_website, s)
+    print("resolved:", found.hls, found.title[:60], found.duration, found.video_url[:90])
+    import pathlib, av
+    out = pathlib.Path("/tmp/arte.part.mp4")
+    seen = {"t": 0}
+    def prog(d, t): seen["t"] = d
+    L._download_hls(found, out, prog, lambda: False, stop_at=20)
+    c = av.open(str(out))
+    print("sample:", out.stat().st_size, "bytes", [(st.type, st.codec_context.name) for st in c.streams], "duration", c.duration / 1e6 if c.duration else None)
+    nfr = sum(1 for _ in c.decode(video=0))
+    print("decoded video frames:", nfr)
+    c.close()
+    # cancelled deletes the file: run again keeping it by copying logic quickly
+    src = av.open(found.video_url, options={"user_agent": L.UA})
+    print("streams:", [(st.type, st.codec_context.name, getattr(st.codec_context, 'height', None), (st.metadata or {}).get('language')) for st in src.streams][:12])
+    src.close()
+    # catalogue manifest link (no .m3u8 ending) -> detected by content type?
+    r = s.get(f.video(), headers={"User-Agent": L.UA}, stream=True, timeout=30)
+    print("catalogue link content-type:", r.headers.get("Content-Type")); r.close()
+except Exception as e:
+    traceback.print_exc()
 
 print("\n== tagesschau page")
 try:

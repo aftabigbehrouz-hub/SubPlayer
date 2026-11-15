@@ -157,18 +157,25 @@ class Shelf:
 
 
 SHELVES = [
-    Shelf("Nicos Weg — German course", "A1–B1", "DW's video course: a story told in clear, slow German", topic="Nicos Weg", channels=["DW"]),
     Shelf("logo! — news for kids", "A2–B1", "Today's news in short, simple sentences", topic="logo!", channels=["ZDF"], length=(120, 20 * 60)),
     Shelf("Die Sendung mit der Maus", "A2–B1", "How things work, explained slowly and clearly", topic="Die Sendung mit der Maus"),
-    Shelf("tagesschau in 100 Sekunden", "B1", "The day's news in 100 seconds — perfect for daily practice",
-          title_q="100 Sekunden", topic="tagesschau", channels=["ARD"], length=(60, 5 * 60)),
+    Shelf("Kinder & Wissen", "A2–B1", "Clear explanations for young viewers: Checker, pur+, Wissen macht Ah!",
+          text="Checker", channels=["KiKA"], length=(5 * 60, 0)),
+    Shelf("tagesschau — the news", "B1", "Short news programmes, several times a day", topic="tagesschau", channels=["ARD"],
+          length=(60, 20 * 60)),
     Shelf("Terra X", "B1–B2", "History, nature and science with a narrator", topic="Terra X", channels=["ZDF"]),
     Shelf("Quarks", "B2", "Science questions of everyday life", topic="Quarks", channels=["WDR"]),
-    Shelf("Wirtschaft & Geld", "B2–C1", "Consumer and money magazines: WISO, plusminus", text="WISO plusminus"),
-    Shelf("3sat Dokumentationen", "B2–C1", "Long documentaries — real, natural German", topic="Dokumentation", channels=["3sat"],
-          length=(20 * 60, 0)),
+    Shelf("WISO — money & consumers", "B2–C1", "Prices, contracts, taxes and jobs — everyday economic German", topic="WISO",
+          channels=["ZDF"]),
+    Shelf("3sat Wissenschaft", "B2–C1", "Science documentaries — real, natural German", topic="Wissenschaftsdoku", channels=["3sat"],
+          length=(15 * 60, 0)),
     Shelf("ARTE auf Deutsch", "B2–C1", "Culture, society and history from ARTE", channels=["Arte"], length=(10 * 60, 0)),
 ]
+
+# candidates checked live by tools/ci/probe_media.py (kept here so the probe can compare)
+SHELF_TRIALS = [("topic", "Wissen macht Ah!", []), ("topic", "pur+", ["ZDF"]), ("text", "Checker", ["KiKA"]), ("topic", "neuneinhalb", []),
+                ("topic", "WISO", ["ZDF"]), ("topic", "plusminus", ["ARD"]), ("topic", "Wissenschaftsdoku", ["3sat"]),
+                ("topic", "nano", ["3sat"]), ("topic", "tagesschau", ["ARD"]), ("topic", "Nicos Weg", []), ("text", "Deutsch lernen", ["DW"])]
 
 
 def shelf_films(sh: Shelf, size: int = 8, session=None) -> list[Film]:
@@ -182,29 +189,49 @@ def _norm_url(u: str) -> str:
     return u.split("?")[0].split("#")[0].rstrip("/")
 
 
+def _title_queries(page_title: str) -> list[str]:
+    """Search phrases from a page title: the whole title cleaned, then its parts (titles are often "Show – Episode | ZDF")."""
+    t = re.sub(r"\s*\|\s*[^|]*$", "", page_title or "") if "|" in (page_title or "") else (page_title or "")
+    t = re.sub(r"\b(ZDFmediathek|ARD Mediathek|Mediathek|ZDFheute|ARTE|3sat|KiKA|phoenix|DW)\b\s*$", "", t, flags=re.I).strip(" -–|:")
+    parts = [p.strip() for p in re.split(r"\s+[|–-]\s+|:\s+", t) if len(p.strip()) >= 4]
+    out = []
+
+    def add(x):
+        x = " ".join(re.sub(r"[^\w\s]", " ", x).split()[:7])
+        if len(x) >= 4 and x.lower() not in [o.lower() for o in out]:
+            out.append(x)
+    add(t)
+    for p in sorted(parts, key=len, reverse=True):
+        add(p)
+    return out[:4]
+
+
 def lookup(page_url: str, page_title: str, session=None) -> Film | None:
     """The catalogue entry for a broadcaster page: same web address, or else the closest title."""
-    t = re.sub(r"\s*[|–-]\s*(ARD|ZDF|3sat|ARTE|DW|Mediathek|ZDFmediathek|ARD Mediathek)[^|–-]*$", "", page_title or "", flags=re.I)
-    t = re.sub(r"[^\w\s]", " ", t).strip()
-    if not t:
-        return None
-    words = " ".join(t.split()[:8])
-    films, _ = search(title=words, size=40, session=session)
-    if not films:
-        return None
     want = _norm_url(page_url)
-    for f in films:
-        if _norm_url(f.url_website) == want:
-            return f
-    # last path part (the broadcaster's id) appears in the catalogue link?
     tail = want.rsplit("/", 1)[-1]
-    if len(tail) >= 6:
-        for f in films:
-            if tail in _norm_url(f.url_website):
-                return f
+    pool: list[Film] = []
+    for q in _title_queries(page_title):
+        for fields in ("title", "both"):
+            try:
+                films, _ = search(text=q if fields == "both" else "", title=q if fields == "title" else "", size=50, session=session)
+            except Exception:
+                continue
+            for f in films:
+                u = _norm_url(f.url_website)
+                if u == want or (len(tail) >= 6 and u.rsplit("/", 1)[-1] == tail):
+                    return f
+            pool += films
+            if films:
+                break
+    if not pool:
+        return None
 
     def sim(a: str, b: str) -> float:
         A, B = set(re.findall(r"\w+", a.lower())), set(re.findall(r"\w+", b.lower()))
         return len(A & B) / max(1, len(A | B))
-    best = max(films, key=lambda f: sim(f.title, t))
-    return best if sim(best.title, t) >= 0.6 else None
+    host = want.split("/", 1)[0]
+    same_site = [f for f in pool if _norm_url(f.url_website).split("/", 1)[0] == host] or pool
+    best = max(same_site, key=lambda f: max(sim(f.title, page_title), sim(f"{f.topic} {f.title}", page_title)))
+    score = max(sim(best.title, page_title), sim(f"{best.topic} {best.title}", page_title))
+    return best if score >= 0.55 else None

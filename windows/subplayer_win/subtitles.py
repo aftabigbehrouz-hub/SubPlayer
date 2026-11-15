@@ -245,7 +245,7 @@ def parse_ttml(xml_text: str) -> list[Cue]:
             continue
         body = "\n".join(" ".join(l.split()) for l in text_of(p).split("\n"))
         body = "\n".join(l for l in body.split("\n") if l).strip()
-        if body and en > s:
+        if body and en > s and re.search(r"\w", body):
             cues.append(Cue(s, en, body))
     cues.sort(key=lambda c: c.start_ms)
     if cues and cues[0].start_ms >= 36_000_000:          # broadcast timecode that starts at 10:00:00
