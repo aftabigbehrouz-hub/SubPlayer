@@ -2198,7 +2198,8 @@ def selftest(out: str) -> int:
     lines, ok = [], True
     for mod in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "numpy", "PySide6.QtMultimedia", "PySide6.QtTextToSpeech",
                 "PySide6.QtSvg", "cryptography", "requests", "socks", "urllib3.contrib.socks", "subplayer_win.discover",
-                "subplayer_win.mediathek", "subplayer_win.netcfg"):
+                "subplayer_win.mediathek", "subplayer_win.netcfg", "subplayer_win.english", "subplayer_win.study",
+                "subplayer_win.library", "subplayer_win.levels"):
         try:
             __import__(mod)
             lines.append(f"OK   {mod}")
@@ -2238,6 +2239,11 @@ def selftest(out: str) -> int:
         if "hls" not in av.formats_available:
             raise ValueError("FFmpeg has no HLS reader")
         lines.append("OK   broadcaster subtitles + HLS streams")
+        from .levels import Levels
+        lv = Levels()
+        if not (lv.level("warum", "de") == 1 and lv.level("journey", "en") == 2 and len(lv.table("de")) > 20000):
+            raise ValueError("word level lists missing")
+        lines.append(f"OK   word levels ({len(lv.table('de'))} German, {len(lv.table('en'))} English)")
     except Exception as e:
         ok = False
         lines.append(f"FAIL broadcaster subtitles / HLS: {e}")

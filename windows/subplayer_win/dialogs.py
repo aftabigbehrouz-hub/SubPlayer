@@ -354,7 +354,10 @@ class SettingsDialog(QDialog):
                           "faster-whisper · dictionaries: German and English Wiktionary via kaikki.org (CC BY-SA 4.0) · pronunciation "
                           "recordings: Wikimedia Commons · sentence translation: Google Translate / MyMemory (online) · Discover: the "
                           "MediathekViewWeb catalogue (MediathekView film list); programmes and their subtitles come straight "
-                          "from the broadcasters (ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix…) and remain theirs · video: FFmpeg "
+                          "from the broadcasters (ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix…) and remain theirs · English programmes: "
+                          "VOA Learning English and NASA (public domain) · word levels: English — CEFR-J Vocabulary Profile 1.5 "
+                          "(Tono Laboratory, TUFS) and Octanove Vocabulary Profile C1/C2 (CC BY-SA 4.0); German — estimated from "
+                          "FrequencyWords 2018 by Hermit Dave (OpenSubtitles, CC BY-SA 4.0), not an official list · video: FFmpeg "
                           "via PyAV, Qt · Persian font: Vazirmatn (SIL Open Font License)."))
         links = QHBoxLayout()
         for ic, text, url in (("link", " Project page", GITHUB), ("file", " Privacy policy", PRIVACY),
@@ -463,6 +466,23 @@ HELP = [
     ("Video links", "Link (Ctrl+L): paste a page of the ARD Mediathek, ZDF, 3sat, Arte, DW, KiKA, phoenix or Tagesschau, or any "
                     "direct .mp4 / .webm / .m3u8 link. The broadcaster's subtitles come along when it has them. YouTube, Netflix, "
                     "Instagram, TikTok… are refused: their terms don't allow downloading."),
+    ("Word levels", "The bars button beside the subtitle (K) colours every word by level: A1 green, A2 cyan, B1 blue, B2 violet, "
+                    "C1 orange, C2 pink; saved words are underlined. Right-click it to colour only harder words (e.g. B2+). "
+                    "English levels come from the CEFR-J list; German levels are estimated from how common a word is — "
+                    "Goethe's and Oxford's own lists are copyrighted."),
+    ("Where else?", "On the word card, “Where else is it used in my videos?” lists every line in your subtitled videos with the word "
+                    "or its other forms (gehen → geht, ging, gegangen). Double-click to play that moment."),
+    ("Correct subtitles", "Wrong word in a subtitle? The pencil beside it (E), or right-click a transcript line: fix the text and "
+                          "the timing, delete a line or add one. Saved into the video's subtitles; the first version is kept."),
+    ("Translate all", "Transcript ▸ Translate all translates every line at once (English or Persian — Aa button) and saves it: "
+                      "the translation line then works offline. The translate button beside the subtitle turns it on and off."),
+    ("Study a video", "Transcript ▸ Study this video: all its words by level (filter, save with the moment), the words you saved "
+                      "from it, and practice with its whole text — gaps at your level and dictation of its lines."),
+    ("My Words", "Grouped into phrases, nouns, verbs, adjectives; filter by video; the calendar shows the days you saved words "
+                 "(click a day); each word keeps a picture of the video moment; Export makes a CSV (Excel), a text list or an "
+                 "Anki file."),
+    ("English videos", "Discover ▸ English: VOA Learning English lessons (A1–B2, made for learners) and NASA science videos "
+                       "(most with subtitles) — both free to download (public domain)."),
     ("Only in Germany?", "Some programmes are blocked outside Germany (or Austria/Switzerland) by the broadcaster. From other "
                          "countries use a VPN with a server in Germany: Settings ▸ Internet connection — Automatic works with most "
                          "VPN apps; otherwise enter the VPN app's local proxy port (v2rayN HTTP: 127.0.0.1:10809)."),
