@@ -2,10 +2,12 @@ name: Build APK
 
 # Runs only for commits pushed to main by the owner (or started by hand).
 # It never runs for pull requests from other people.
+# A release is built when the version changes (app/build.gradle.kts) or by hand; work in progress is checked by
+# android-check.yml, which publishes nothing.
 on:
   push:
     branches: [main]
-    paths-ignore: ['tools/**', '.github/workflows/data.yml', '.github/workflows/data-en.yml', '.github/workflows/data-win.yml', 'README.md', 'PRIVACY.md', 'TERMS.md', 'play-store/**', 'iran-stores/**', 'windows/**', '.github/workflows/windows.yml', '.github/workflows/probe-media.yml']
+    paths: ['app/build.gradle.kts']
   workflow_dispatch:
 
 permissions:
