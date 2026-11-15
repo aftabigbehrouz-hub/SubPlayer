@@ -34,7 +34,12 @@
 - **My Words:** phrases · nouns · verbs · adjectives · others, filter by video, a **calendar** of the days you saved
   words, a **picture of the video moment** for every word, **export** to CSV (Excel), text or Anki.
 - **Discover ▸ English:** VOA Learning English (English in a Minute, How to Pronounce, Everyday Grammar, News Words,
-  VOA60) and NASA science videos (most with subtitles) — public domain.
+  VOA60) and NASA science videos (most with subtitles) — public domain; **podcasts** (audio) the broadcasters offer for
+  download: BBC Learning English (6 Minute English / Grammar / Vocabulary), BBC World Service (Global News, Witness
+  History, The Documentary, Business Daily), PBS NewsHour, TED Talks Daily, NPR News Now. Audio files play with a cover
+  and get subtitles like videos. (BBC's *videos* can't be downloaded — its player doesn't allow it.)
+- **Review ▸ Play the moment** now plays the clip inside the review card; videos that were moved are found by their file
+  name in Videos, Downloads and folders you opened before.
 - **Space** pauses and plays everywhere, even after clicking a button.
 
 **Windows 2.1**

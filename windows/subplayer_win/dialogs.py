@@ -481,8 +481,13 @@ HELP = [
     ("My Words", "Grouped into phrases, nouns, verbs, adjectives; filter by video; the calendar shows the days you saved words "
                  "(click a day); each word keeps a picture of the video moment; Export makes a CSV (Excel), a text list or an "
                  "Anki file."),
-    ("English videos", "Discover ▸ English: VOA Learning English lessons (A1–B2, made for learners) and NASA science videos "
-                       "(most with subtitles) — both free to download (public domain)."),
+    ("English videos", "Discover ▸ English: VOA Learning English lessons (made for learners) and NASA science videos "
+                       "(most with subtitles) — public domain — plus podcasts the broadcasters offer for download: BBC 6 Minute "
+                       "English / Grammar / Vocabulary, BBC World Service, PBS NewsHour, TED Talks Daily, NPR. Audio plays with "
+                       "a cover; make subtitles and learn as with a video."),
+    ("Where are my videos?", "Keep videos anywhere. A saved word remembers its video's place; if you move or rename it, SubPlayer "
+                             "looks for the same file name in Videos, Downloads and the folders you opened before (Settings "
+                             "doesn't need changing). Downloads from Discover and Link go to Videos\\SubPlayer."),
     ("Only in Germany?", "Some programmes are blocked outside Germany (or Austria/Switzerland) by the broadcaster. From other "
                          "countries use a VPN with a server in Germany: Settings ▸ Internet connection — Automatic works with most "
                          "VPN apps; otherwise enter the VPN app's local proxy port (v2rayN HTTP: 127.0.0.1:10809)."),
