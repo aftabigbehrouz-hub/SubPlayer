@@ -1,0 +1,64 @@
+"""
+Word levels (A1…C2) for colouring subtitles.
+English: CEFR-J Vocabulary Profile 1.5 (Tono Laboratory, TUFS) + Octanove Vocabulary Profile C1/C2 (CC BY-SA 4.0); words in
+neither list are estimated from their frequency. German: no freely licensed CEFR list exists, so the level is an ESTIMATE
+from how common the base word is (FrequencyWords 2018 by Hermit Dave, OpenSubtitles, CC BY-SA 4.0). Built by
+tools/levels/build_levels.py.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+NAMES = ["", "A1", "A2", "B1", "B2", "C1", "C2"]
+COLORS = ["#FFFFFF", "#5BE38F", "#3EF0FF", "#5B8CFF", "#B07CFF", "#FFB347", "#FF5C8A"]
+SOURCE = {"en": "CEFR-J / Octanove (C1–C2); others estimated", "de": "estimated from word frequency (not an official list)"}
+_DATA = Path(__file__).with_name("data")
+
+
+class Levels:
+    def __init__(self):
+        self._tables: dict[str, dict[str, int]] = {}
+        self._cache: dict[tuple, int] = {}
+
+    def table(self, lang: str) -> dict[str, int]:
+        t = self._tables.get(lang)
+        if t is None:
+            t = {}
+            f = _DATA / f"levels-{lang}.tsv"
+            if f.exists():
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    w, _, lv = line.partition("\t")
+                    if lv.isdigit():
+                        t[w] = int(lv)
+            self._tables[lang] = t
+        return t
+
+    def level(self, word: str, lang: str, dictionary=None) -> int:
+        """1..6, or 0 for names, numbers and words nobody knows."""
+        w = word.strip().lower().strip("'’-")
+        if not w or not re.search(r"[^\W\d_]", w):
+            return 0
+        key = (w, lang)
+        if key in self._cache:
+            return self._cache[key]
+        t = self.table(lang)
+        lv = t.get(w, 0)
+        if dictionary is not None:
+            try:
+                rows = dictionary.db.execute("SELECT DISTINCT e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? "
+                                             "AND e.pos NOT IN ('name','abbrev','symbol','letter','character') LIMIT 30",
+                                             (w,)).fetchall()
+            except Exception:
+                rows = []
+            if rows:
+                found = [t[r[0].lower()] for r in rows if r[0] and r[0].lower() in t]
+                if lv:
+                    found.append(lv)
+                lv = min(found) if found else 6                               # known word, but rare: C2
+            elif not lv and word[:1].isupper() and lang == "en":
+                lv = 0                                                         # probably a name
+        self._cache[key] = lv
+        if len(self._cache) > 200_000:
+            self._cache.clear()
+        return lv

@@ -205,3 +205,34 @@ def export_clip(src: str, a_ms: int, b_ms: int, cues, burn: bool, out: Path,
     tmp.replace(out)
     progress(1.0, "Clip saved")
     return out
+
+
+def snapshot(video: str, at_ms: int, out, width: int = 360) -> bool:
+    """Saves a small JPEG of the video frame at `at_ms`."""
+    import av
+    from pathlib import Path
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with av.open(video) as c:
+        st = c.streams.video[0]
+        st.thread_type = "AUTO"
+        target = max(0, at_ms) / 1000
+        c.seek(int(target / st.time_base) if st.time_base else int(target * 1_000_000), stream=st, backward=True, any_frame=False)
+        frame = None
+        for fr in c.decode(st):
+            frame = fr
+            if fr.time is None or fr.time >= target:
+                break
+        if frame is None:
+            return False
+        h = max(2, int(frame.height * width / max(1, frame.width)) // 2 * 2)
+        import numpy as np
+        img = np.ascontiguousarray(frame.reformat(width=width, height=h, format="rgb24").to_ndarray())
+    q = QImage(img.data, img.shape[1], img.shape[0], 3 * img.shape[1], QImage.Format_RGB888).copy()
+    tmp = out.with_suffix(".part.jpg")
+    ok = q.save(str(tmp), "JPG", 82)
+    if ok:
+        tmp.replace(out)
+    return ok

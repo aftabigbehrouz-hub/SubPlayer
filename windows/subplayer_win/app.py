@@ -70,6 +70,7 @@ class JumpSlider(QSlider):
 
 
 SPEEDS = (0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5)
+from .levels import COLORS as LV_COLORS, NAMES as LV_NAMES   # noqa: E402
 SUB_SIZES = {"Small": 16, "Medium": 21, "Large": 26, "Extra large": 32}
 REPEATS = (0, 2, 3, 5)                      # 0 = until you stop it
 
@@ -133,6 +134,8 @@ class Main(QMainWindow):
         self.shadow_resume = 0.0
         self.held_cue = -1
         self.sub_offset = 0                                  # ms; + = subtitles appear later (G / H)
+        from .levels import Levels
+        self.levels = Levels()
         self.hide_text = False                               # listening mode
         self.show_tr = False                                 # translation line under the subtitle
         self.tr_cache: dict = {}
@@ -179,7 +182,9 @@ class Main(QMainWindow):
         self.review_page = ReviewPage(self)
         self.practice_page = PracticePage(self)
         self.discover_page = DiscoverPage(self)
-        for p in (self.words_page, self.review_page, self.practice_page, self.discover_page):
+        from .study import StudyPage
+        self.study_page = StudyPage(self)
+        for p in (self.words_page, self.review_page, self.practice_page, self.discover_page, self.study_page):
             self.stack.addWidget(p)
         bl.addWidget(self.stack, 1)
         bl.addWidget(self._panel())
@@ -301,10 +306,20 @@ class Main(QMainWindow):
         self.transcript.itemClicked.connect(self._transcript_click)
         self.transcript.itemDoubleClicked.connect(self._transcript_loop)
         self.transcript.verticalScrollBar().valueChanged.connect(self._transcript_scrolled)
+        self.transcript.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.transcript.customContextMenuRequested.connect(self._transcript_menu)
         tv.addWidget(self.transcript, 1)
         self.tr_info = QLabel("", objectName="small")
         self.tr_info.setWordWrap(True)
         tv.addWidget(self.tr_info)
+        trow = QHBoxLayout()
+        self.study_btn = ibtn("study", "Study this video: its words by level, your saved words from it, practice with its whole text",
+                              lambda: self.open_study(), kind="", text=" Study this video", size=15)
+        self.trall_btn = ibtn("translate", "Translate every line now (English or Persian) — then the translation line works offline",
+                              lambda: self.translate_all(), kind="", text=" Translate all", size=15)
+        trow.addWidget(self.study_btn)
+        trow.addWidget(self.trall_btn)
+        tv.addLayout(trow)
         self.panel_stack.addWidget(tr_page)
         v.addWidget(self.panel_stack, 1)
         self.panel_tab(0)
@@ -355,7 +370,7 @@ class Main(QMainWindow):
                         ("F", self.toggle_fullscreen), ("F11", self.toggle_fullscreen),
                         ("G", lambda: self.shift_subs(-100)), ("H", lambda: self.shift_subs(100)), ("V", lambda: self.hide_btn.click()),
                         ("Ctrl+T", lambda: self.trl_btn.click()), ("T", lambda: self.panel_tab(1 if self.panel_stack.currentIndex() == 0 else 0, show=True)),
-                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
+                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("K", lambda: self.lvl_btn.click()), ("E", lambda: self.edit_cue()), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
                         ("Ctrl+=", lambda: self.step_sub_size(1)), ("Ctrl++", lambda: self.step_sub_size(1)), ("Ctrl+-", lambda: self.step_sub_size(-1))):
             QShortcut(QKeySequence(key), page, activated=fn, context=Qt.WidgetWithChildrenShortcut)
         self.ticker = QTimer(self, interval=40, timeout=self._tick)
@@ -457,7 +472,12 @@ class Main(QMainWindow):
         self.trl_btn = ibtn("translate", "Show a translation of each line underneath (online) — English or Persian (Ctrl+T)",
                             self.toggle_translation_line, checkable=True, size=17)
         self.trs_btn = ibtn("list", "Transcript: all lines, click to jump (T)", lambda: self.panel_tab(1, show=True), size=17)
-        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.trs_btn):
+        self.lvl_btn = ibtn("bars", "Word levels in colour: A1 green · A2 cyan · B1 blue · B2 violet · C1 orange · C2 pink (K) — "
+                                    "right-click to show only harder words", self.toggle_levels, checkable=True, size=17)
+        self.lvl_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lvl_btn.customContextMenuRequested.connect(lambda _: self.level_menu())
+        self.edit_btn = ibtn("edit", "Correct this subtitle line (E) — text and timing", lambda: self.edit_cue(), size=17)
+        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.lvl_btn, self.edit_btn, self.trs_btn):
             tools.addWidget(b)
         tools.addStretch(1)
         sl.addLayout(tools)
@@ -541,6 +561,9 @@ class Main(QMainWindow):
         if self.settings.get("show_tr"):
             self.trl_btn.setChecked(True)
             self.show_tr = True
+        if self.settings.get("show_levels"):
+            self.lvl_btn.setChecked(True)
+        QApplication.instance().installEventFilter(self)
         self._apply_sub_height()
         left = self.lic.check_trial()
         if self.lic.holder is None and left <= 0:
@@ -573,8 +596,8 @@ class Main(QMainWindow):
         SETTINGS.write_text(json.dumps(self.settings, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # ================================================================== pages
-    def show_page(self, key: str):
-        idx = {"player": 0, "words": 1, "review": 2, "practice": 3, "discover": 4}[key]
+    def show_page(self, key: str, start: bool = True):
+        idx = {"player": 0, "words": 1, "review": 2, "practice": 3, "discover": 4, "study": 5}[key]
         self.page = key
         for k, a in self.nav.items():
             a.setChecked(k == key)
@@ -582,7 +605,7 @@ class Main(QMainWindow):
             self.words_page.refresh()
         elif key == "review":
             self.review_page.start()
-        elif key == "practice":
+        elif key == "practice" and start:
             self.practice_page.start()
         elif key == "discover":
             self.discover_page.activate()
@@ -690,6 +713,8 @@ class Main(QMainWindow):
         self.held_cue = -1
         self._shown = None
         self._fill_transcript()
+        if self._load_translations() and not self.show_tr:
+            self.msg("This video has a saved translation — the translate button beside the subtitle shows it", 8000)
         if info:
             self.msg(f"{info} · {len(cues)} lines")
 
@@ -1143,6 +1168,7 @@ class Main(QMainWindow):
             self._want_translation(i + 1)                  # ready before it is needed
         masked = self.hide_text and playing
         key = (i, len(self.cues), self._saved_version(), masked, self.show_tr, self.settings.get("sub_size", 21),
+               self.lvl_btn.isChecked(), self.settings.get("level_min", 1), getattr(self, "_cue_rev", 0),
                self._tr_key(i) in self.tr_cache if self.show_tr and i >= 0 else None)
         if getattr(self, "_shown", None) != key:
             self._shown = key
@@ -1180,16 +1206,30 @@ class Main(QMainWindow):
                                   "listening mode — pause (Space) to read</div>")
             return
         saved = self._saved_cache[1]
+        show_lv = self.lvl_btn.isChecked()
+        lv_min = self.settings.get("level_min", 1)
+        d = self.dictionary(self.cue_lang) if show_lv else None
         out, last = [], 0
         for k, (s, e, tok) in enumerate(subtitles.tokens(text)):
             out.append(html.escape(text[last:s]).replace("\n", "<br>"))
-            col = theme.GOLD if tok.lower() in saved else "#FFFFFF"
+            deco = "none"
+            if show_lv:
+                lv = self.levels.level(tok, self.cue_lang, d)
+                col = LV_COLORS[lv] if lv >= lv_min else "#FFFFFF"
+                if tok.lower() in saved:
+                    deco = "underline"
+            else:
+                col = theme.GOLD if tok.lower() in saved else "#FFFFFF"
             if self.phrase_start and self.phrase_start[0] == i and self.phrase_start[1] == k:
                 col = theme.MAGENTA
-            out.append(f"<a href='w:{i}:{k}' style='color:{col};text-decoration:none'>{html.escape(tok)}</a>")
+            out.append(f"<a href='w:{i}:{k}' style='color:{col};text-decoration:{deco}'>{html.escape(tok)}</a>")
             last = e
         out.append(html.escape(text[last:]).replace("\n", "<br>"))
         body = f"<div style='text-align:center;font-size:{pt}pt;font-weight:600;line-height:145%'>{''.join(out)}</div>"
+        if show_lv and not self.show_tr:
+            body += ("<div style='text-align:center;font-size:8pt'>" + " ".join(
+                f"<span style='color:{LV_COLORS[n]}'>■ {LV_NAMES[n]}</span>" for n in range(max(1, lv_min), 7)) +
+                (" <span style='color:#7F7A9E'>· estimated</span>" if self.cue_lang == "de" else "") + "</div>")
         if self.show_tr:
             tr = self.tr_cache.get(self._tr_key(i), "…")
             if tr is None:
@@ -1279,7 +1319,8 @@ class Main(QMainWindow):
         lang = c["lang"]
         if not c["entries"]:
             h.append(f"<p style='font-size:22pt;font-weight:800;margin:0'>{html.escape(c['word'])}</p>"
-                     f"<p style='color:{theme.DIM}'>Not in the offline dictionary (names and rare words may be missing).</p>")
+                     f"<p style='color:{theme.DIM}'>Not in the offline dictionary (names and rare words may be missing).</p>"
+                     f"<p><a href='uses:' style='color:{theme.CYAN};text-decoration:none'>🔎 Where else is it used in my videos?</a></p>")
         for n, e in enumerate(c["entries"]):
             if n:
                 h.append(f"<hr style='background:{theme.VIOLET}'>")
@@ -1292,7 +1333,16 @@ class Main(QMainWindow):
                 meta.append(f"<span style='color:{theme.DIM}'>{html.escape(e.hyphenation)}</span>")
             if e.audio_url:
                 meta.append(f"<a href='rec:{n}' style='color:{theme.CYAN};text-decoration:none'>▶ recording</a>")
+            if n == 0:
+                lv = self.levels.level(c["word"], lang, self.dictionary(lang))
+                if lv:
+                    tip = "CEFR-J" if lang == "en" else "estimated from frequency"
+                    meta.append(f"<span style='color:{LV_COLORS[lv]};font-weight:800'>{'≈' if lang == 'de' else ''}{LV_NAMES[lv]}</span>"
+                                f"<span style='color:{theme.DIM};font-size:8pt'> ({tip})</span>")
             h.append(" &nbsp;·&nbsp; ".join(meta))
+            if n == 0:
+                h.append(f"<p style='margin:6px 0 0 0'><a href='uses:' style='color:{theme.CYAN};text-decoration:none'>"
+                         f"🔎 Where else is “{html.escape(c['word'])}” used in my videos?</a></p>")
             if e.lang == "en" and e.german:
                 h.append(self._sec("Deutsch") + html.escape(", ".join(e.german[:6])))
             if e.lang != "en" and e.english:
@@ -1359,6 +1409,8 @@ class Main(QMainWindow):
             self.translate_word_online()
         elif kind == "pw":
             self.open_word(urllib.parse.unquote(val), self.card.get("sentence", ""), lang=self.card["lang"])
+        elif kind == "uses":
+            self.show_uses(self.card["word"], self.card["lang"])
 
     def translate_word_online(self):
         c = self.card
@@ -1439,7 +1491,8 @@ class Main(QMainWindow):
         w = SavedWord(text=c["word"], lemma=lemma, sentence=c["sentence"], video_uri=self.video or "", video_name=self.video_name,
                       start_ms=start, end_ms=c["end"], article=article, ipa=ipa, english=english, persian=persian,
                       lang=e.lang if e else c["lang"])
-        self.store.insert(w)
+        w.id = self.store.insert(w)
+        self.make_snapshot(w)
         self.after_change()
         self._update_save_btn()
         self.msg("★ Saved to My Words — it will come up for review")
@@ -1770,6 +1823,30 @@ class Main(QMainWindow):
             box.exec()
             if box.clickedButton() is show:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(res).parent)))
+        elif kind == "snap":
+            uid, cb = res
+            try:
+                cb(uid)
+            except Exception:
+                pass
+        elif kind == "trall":
+            self._end_task()
+            tgt, done = res
+            lang = self.cue_lang
+            for c in self.cues:
+                t = " ".join(c.text.split())
+                if t in done:
+                    self.tr_cache[(t, lang, tgt)] = done[t]
+            tr = [subtitles.Cue(c.start_ms, c.end_ms, self.tr_cache.get((" ".join(c.text.split()), lang, tgt), "")) for c in self.cues]
+            tr = [c for c in tr if c.text]
+            if tr:
+                self._tr_file(tgt).write_text(subtitles.write(tr), encoding="utf-8")
+            if not self.show_tr:
+                self.trl_btn.setChecked(True)
+                self.toggle_translation_line()
+            self._shown = None
+            self.msg(f"{len(tr)} of {len(self.cues)} lines translated and saved — the translation line now works offline "
+                     "(button beside the subtitle turns it on/off)", 12000)
         elif kind == "trline":
             key, out = res
             self.tr_pending.discard(key)
@@ -1874,6 +1951,223 @@ class Main(QMainWindow):
             except Exception:
                 pass
         super().closeEvent(e)
+
+    # ================================================================== word levels
+    def toggle_levels(self):
+        on = self.lvl_btn.isChecked()
+        self.settings["show_levels"] = on
+        self.save_settings()
+        self._shown = None
+        if on:
+            self.msg("Word levels: A1 green · A2 cyan · B1 blue · B2 violet · C1 orange · C2 pink" +
+                     (" — German levels are estimated from how common a word is" if self.cue_lang == "de" else
+                      " — CEFR-J; words not in it estimated") + " · right-click the button: only harder words", 12000)
+
+    def level_menu(self):
+        m = QMenu(self)
+        cur = self.settings.get("level_min", 1)
+        for n in range(1, 7):
+            label = "Colour all words" if n == 1 else f"Colour only {LV_NAMES[n]} and harder"
+            a = m.addAction(("✓  " if n == cur else "     ") + label)
+            a.triggered.connect(lambda _=False, x=n: self._set_level_min(x))
+        m.exec(self.lvl_btn.mapToGlobal(self.lvl_btn.rect().topLeft()) - m.sizeHint().height() * QPoint(0, 1))
+
+    def _set_level_min(self, n):
+        self.settings["level_min"] = n
+        self.save_settings()
+        if not self.lvl_btn.isChecked():
+            self.lvl_btn.setChecked(True)
+            self.toggle_levels()
+        self._shown = None
+
+    # ================================================================== where else is the word used
+    def show_uses(self, word: str, lang: str):
+        from .dialogs import UsesDialog
+        UsesDialog(self, word, lang).exec()
+
+    def open_use(self, video: str, srt, start_ms: int, end_ms: int):
+        if not video or not os.path.exists(video):
+            self.msg("That video isn't on this PC any more (only its subtitles are)", 8000)
+            return
+        if self.video != video:
+            self.open_video(video, at_ms=max(0, start_ms - 300), play=False)
+        self.show_page("player")
+        self.a, self.b = max(0, start_ms - 300), end_ms + 300
+        self._ab_label()
+        self.player.setPosition(self.a)
+        self.player.play()
+
+    # ================================================================== Space everywhere
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QPlainTextEdit, QTextEdit
+        if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space and not ev.modifiers() and self.isActiveWindow():
+            fw = QApplication.focusWidget()
+            typing = isinstance(fw, (QLineEdit, QPlainTextEdit, QAbstractSpinBox)) or \
+                (isinstance(fw, QTextEdit) and not fw.isReadOnly()) or (isinstance(fw, QComboBox) and fw.isEditable())
+            if not typing and QApplication.activeModalWidget() is None:
+                if self.stack.currentIndex() == 0 and self.video:
+                    self.toggle_play()
+                    return True
+                if self.stack.currentIndex() == 2:              # Review keeps its own Space (show the meaning)
+                    return False
+                if self.video and self.player.playbackState() == QMediaPlayer.PlayingState:
+                    self.player.pause()
+                    return True
+        return super().eventFilter(obj, ev)
+
+    # ================================================================== correcting subtitles
+    def edit_cue(self, i: int | None = None):
+        if not self.cues:
+            self.msg("No subtitles to correct yet")
+            return
+        if i is None:
+            i = subtitles.index_before(self.cues, self.cpos())
+            if i < 0:
+                i = 0
+        was = self.player.playbackState() == QMediaPlayer.PlayingState
+        self.player.pause()
+        from .dialogs import CueEditDialog
+        d = CueEditDialog(self, i)
+        if d.exec() and d.result_action:
+            act, payload = d.result_action
+            cues = list(self.cues)
+            if act == "save":
+                cues[i] = payload
+            elif act == "delete":
+                del cues[i]
+            elif act == "insert":
+                cues.insert(i + 1, payload)
+            cues.sort(key=lambda c: c.start_ms)
+            self._save_edited(cues)
+            self.msg({"save": "Line corrected and saved", "delete": "Line deleted", "insert": "Line added"}[act])
+        elif was:
+            self.player.play()
+
+    def _save_edited(self, cues):
+        path = self.srt_path(self.cue_lang)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            bak = path.with_suffix(".before-edit.srt")
+            if not bak.exists():
+                bak.write_bytes(path.read_bytes())
+        path.write_text(subtitles.write(cues), encoding="utf-8")
+        self.cues = cues
+        self._cue_rev = getattr(self, "_cue_rev", 0) + 1
+        self._fill_transcript()
+        self._shown = None
+        self.after_change()
+
+    def _transcript_menu(self, pos):
+        it = self.transcript.itemAt(pos)
+        if not it:
+            return
+        k = it.data(Qt.UserRole)
+        m = QMenu(self)
+        m.addAction("Play this line", lambda: self._transcript_click(it))
+        m.addAction("Loop this line", lambda: self._transcript_loop(it))
+        m.addSeparator()
+        m.addAction("Correct this line…  (E)", lambda: self.edit_cue(k))
+        m.exec(self.transcript.viewport().mapToGlobal(pos))
+
+    # ================================================================== translate the whole subtitle
+    def _tr_file(self, tgt: str) -> Path:
+        return self.srt_path(self.cue_lang).with_name(f"{subtitles.video_key(self.video_name)}.{self.cue_lang}.tr-{tgt}.srt")
+
+    def _load_translations(self):
+        """A saved full translation of this video's subtitles fills the translation line (offline)."""
+        if not self.cues or not self.video_name:
+            return 0
+        n = 0
+        for tgt in ("en", "fa", "de"):
+            f = self._tr_file(tgt)
+            if f.exists():
+                tr = subtitles.parse(f.read_text(encoding="utf-8", errors="replace"))
+                by_start = {c.start_ms: c.text for c in tr}
+                for c in self.cues:
+                    t = by_start.get(c.start_ms)
+                    if t:
+                        self.tr_cache[(" ".join(c.text.split()), self.cue_lang, tgt)] = " ".join(t.split())
+                        n += 1
+        return n
+
+    def translate_all(self):
+        if not self.cues:
+            self.msg("Load or make subtitles first")
+            return
+        tgt = self._tr_target()
+        name = {"en": "English", "fa": "Persian", "de": "German"}[tgt]
+        cues, lang = list(self.cues), self.cue_lang
+        todo = [c for c in cues if (" ".join(c.text.split()), lang, tgt) not in self.tr_cache]
+
+        def job():
+            done = {}
+            batch, size = [], 0
+            groups = []
+            for c in todo:
+                t = " ".join(c.text.split())
+                if size + len(t) > 1800 and batch:
+                    groups.append(batch)
+                    batch, size = [], 0
+                batch.append(t)
+                size += len(t) + 1
+            if batch:
+                groups.append(batch)
+            for gi, g in enumerate(groups):
+                if self.cancel:
+                    raise RuntimeError("Cancelled")
+                self._bg_progress(gi / max(1, len(groups)), f"Translating into {name}… {sum(len(x) for x in groups[:gi])} of {len(todo)} lines")
+                out = None
+                try:
+                    res, _ = translate.translate("\n".join(g), lang, tgt)
+                    parts = [x.strip() for x in res.split("\n")]
+                    if len(parts) == len(g):
+                        out = parts
+                except Exception:
+                    out = None
+                if out is None:                                    # line by line when the service merged lines
+                    out = []
+                    for t in g:
+                        try:
+                            out.append(translate.translate(t, lang, tgt)[0])
+                        except Exception:
+                            out.append("")
+                for t, o in zip(g, out):
+                    if o:
+                        done[t] = o
+            return tgt, done
+        self.run_bg("trall", job, cancellable=True, label=f"Translating the subtitles into {name}…")
+
+    # ================================================================== video study
+    # ================================================================== snapshots of the video moment
+    def snap_path(self, w: SavedWord) -> Path:
+        return paths.data_dir() / "snaps" / f"{w.uid}.jpg"
+
+    def make_snapshot(self, w: SavedWord, done=None):
+        """A small picture of the video where the word is said (made in the background)."""
+        path = w.video_uri if w.video_uri and os.path.exists(w.video_uri) else \
+            next((r["path"] for r in self.recents() if r["name"].lower() == w.video_name.lower() and os.path.exists(r["path"])), None)
+        out = self.snap_path(w)
+        if not path or w.start_ms < 0 or out.exists():
+            return False
+
+        def work():
+            try:
+                from . import export
+                export.snapshot(path, w.start_ms + 400, out)
+            except Exception:
+                pass
+            if done:
+                self.bus.done.emit("snap", (w.uid, done))
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def open_study(self):
+        if not self.cues:
+            self.msg("Open a video with subtitles first")
+            return
+        self.study_page.load(self.video, self.video_name, list(self.cues), self.cue_lang)
+        self.show_page("study")
 
     def play_clip(self, w: SavedWord, after=None):
         """Plays the saved word's video moment (finds the video by name if it moved)."""

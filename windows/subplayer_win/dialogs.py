@@ -741,3 +741,228 @@ class TourDialog(QDialog):
                                     for i in range(len(TOUR))))
         self.back.setEnabled(self.k > 0)
         self.next.setText("Let's go" if self.k == len(TOUR) - 1 else "Next")
+
+
+# ==================================================================== where else is a word used
+class UsesDialog(QDialog):
+    """Every line in your subtitled videos that uses the word (or one of its forms)."""
+
+    def __init__(self, main, word: str, lang: str):
+        super().__init__(main)
+        import html as _html
+        import threading
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        self.main, self.word, self.lang = main, word, lang
+        self.setWindowTitle(f"“{word}” in your videos")
+        self.resize(820, 620)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 18, 24, 18)
+        v.addWidget(title(f"“{word}” in your videos"))
+        self.info = hint("Searching your subtitled videos (SubPlayer's subtitles and .srt files next to your videos)…")
+        v.addWidget(self.info)
+        self.list = QListWidget()
+        self.list.setWordWrap(True)
+        self.list.itemDoubleClicked.connect(self.play)
+        v.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        self.only_this = QCheckBox("Only other videos")
+        self.only_this.toggled.connect(self._fill)
+        row.addWidget(self.only_this)
+        row.addStretch(1)
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        self.play_b = ibtn("play", "Play this moment", lambda: self.play(self.list.currentItem()), kind="", text=" Play",
+                           size=16, color="#FFFFFF")
+        self.play_b.setProperty("accent", True)
+        row.addWidget(close)
+        row.addWidget(self.play_b)
+        v.addLayout(row)
+        self.uses, self.files = [], 0
+        self._esc = _html.escape
+        self._QLI = QListWidgetItem
+        box = {}
+
+        def work():
+            from . import library, syncer as _syncer
+            try:
+                items = library.scan(main.settings, _syncer.subs_dir())
+                box["r"] = library.find_uses(word, lang, items, main.dictionary(lang))
+            except Exception as e:
+                box["e"] = str(e)
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+
+        def poll():
+            if t.is_alive():
+                QTimer.singleShot(150, poll)
+                return
+            if "e" in box:
+                self.info.setText("Search failed: " + box["e"])
+                return
+            self.uses, self.files = box["r"]
+            self._fill()
+        poll()
+
+    def _fill(self, *_):
+        from PySide6.QtGui import QColor
+        from . import library
+        self.list.clear()
+        uses = [u for u in self.uses if not (self.only_this.isChecked() and u.item.video and u.item.video == self.main.video)]
+        vids = len({u.item.srt for u in uses})
+        self.info.setText(f"{len(uses)} lines in {vids} videos (searched {self.files} subtitle files in "
+                          f"{'German' if self.lang == 'de' else 'English'}, including the word's other forms). "
+                          "Double-click a line to play that moment." if uses else
+                          f"Not found in your other subtitled videos ({self.files} searched). Videos you open with subtitles "
+                          "are included automatically; .srt files next to videos in Videos, Downloads and recent folders too.")
+        for u in uses:
+            parts, last = [], 0
+            for a, b in u.spans:
+                parts.append(u.text[last:a])
+                parts.append("«" + u.text[a:b] + "»")
+                last = b
+            parts.append(u.text[last:])
+            mm, ss = divmod(u.start_ms // 1000, 60)
+            it = self._QLI(f"{u.item.name}  ·  {mm}:{ss:02d}\n{' '.join(''.join(parts).split())}")
+            it.setData(Qt.UserRole, u)
+            if not u.item.video:
+                it.setForeground(QColor(theme.DIM))
+                it.setToolTip("Only the subtitles are on this PC — the video wasn't found")
+            self.list.addItem(it)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+    def play(self, it):
+        if not it:
+            return
+        u = it.data(Qt.UserRole)
+        self.accept()
+        self.main.open_use(u.item.video, u.item.srt, u.start_ms, u.end_ms)
+
+
+# ==================================================================== correct a subtitle line
+class CueEditDialog(QDialog):
+    def __init__(self, main, i: int):
+        super().__init__(main)
+        from . import subtitles
+        self.main, self.i = main, i
+        self.result_action = None
+        c = main.cues[i]
+        self.prev_end = main.cues[i - 1].end_ms if i > 0 else 0
+        self.next_start = main.cues[i + 1].start_ms if i + 1 < len(main.cues) else 10 ** 9
+        self.setWindowTitle("Correct the subtitle line")
+        self.setMinimumWidth(640)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 18, 24, 18)
+        v.addWidget(title("Correct the subtitle line"))
+        v.addWidget(hint(f"Line {i + 1} of {len(main.cues)}. Fix the words, and if needed the timing. Saved into this video's "
+                         "subtitles (the first version is kept as a backup)."))
+        self.text = QPlainTextEdit(c.text)
+        self.text.setMinimumHeight(90)
+        f = self.text.font()
+        f.setPointSize(13)
+        self.text.setFont(f)
+        v.addWidget(self.text)
+        grid = QHBoxLayout()
+        self.start = QLineEdit(self._fmt(c.start_ms))
+        self.end = QLineEdit(self._fmt(c.end_ms))
+        for lab, fld, which in (("Start", self.start, "start"), ("End", self.end, "end")):
+            col = QVBoxLayout()
+            col.addWidget(QLabel(lab, objectName="small"))
+            r = QHBoxLayout()
+            r.addWidget(fld)
+            for d in (-500, -100, 100, 500):
+                b = QPushButton(f"{d / 1000:+.1f}")
+                b.setProperty("kind", "chip")
+                b.setFixedWidth(52)
+                b.clicked.connect(lambda _=False, f_=fld, d_=d: f_.setText(self._fmt(max(0, self._parse(f_.text()) + d_))))
+                r.addWidget(b)
+            now = QPushButton("now")
+            now.setToolTip("The current video position")
+            now.setProperty("kind", "chip")
+            now.clicked.connect(lambda _=False, f_=fld: f_.setText(self._fmt(max(0, main.cpos()))))
+            r.addWidget(now)
+            col.addLayout(r)
+            grid.addLayout(col)
+        v.addLayout(grid)
+        self.err = hint("")
+        self.err.setStyleSheet(f"color:{theme.MAGENTA}")
+        v.addWidget(self.err)
+        row = QHBoxLayout()
+        listen = ibtn("play", "Play this line", self.listen, kind="", text=" Listen", size=15)
+        dele = ibtn("trash", "Delete this line", self.delete, kind="", text=" Delete", size=15, color=theme.MAGENTA)
+        add = ibtn("plus", "Add a new line after this one", self.insert, kind="", text=" Add line after", size=15)
+        row.addWidget(listen)
+        row.addWidget(add)
+        row.addWidget(dele)
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        save = QPushButton("Save")
+        save.setProperty("accent", True)
+        save.clicked.connect(self.save)
+        row.addWidget(cancel)
+        row.addWidget(save)
+        v.addLayout(row)
+        self._Cue = subtitles.Cue
+
+    @staticmethod
+    def _fmt(ms: int) -> str:
+        ms = max(0, int(ms))
+        h, rem = divmod(ms, 3_600_000)
+        m, rem = divmod(rem, 60_000)
+        s, ms = divmod(rem, 1000)
+        return (f"{h}:" if h else "") + f"{m:02d}:{s:02d}.{ms:03d}"
+
+    @staticmethod
+    def _parse(t: str) -> int:
+        import re
+        m = re.match(r"^\s*(?:(\d+):)?(\d+):(\d+)(?:[.,](\d{1,3}))?\s*$", t)
+        if not m:
+            raise ValueError("Use minutes:seconds.milliseconds, e.g. 01:23.450")
+        h, mi, s, ms = int(m.group(1) or 0), int(m.group(2)), int(m.group(3)), (m.group(4) or "0").ljust(3, "0")
+        return ((h * 60 + mi) * 60 + s) * 1000 + int(ms)
+
+    def _read(self):
+        try:
+            a, b = self._parse(self.start.text()), self._parse(self.end.text())
+        except ValueError as e:
+            self.err.setText(str(e))
+            return None
+        t = "\n".join(l.strip() for l in self.text.toPlainText().strip().split("\n") if l.strip())
+        if not t:
+            self.err.setText("The line is empty — use Delete to remove it")
+            return None
+        if b <= a:
+            self.err.setText("The end must be after the start")
+            return None
+        return self._Cue(a, b, t)
+
+    def listen(self):
+        c = self._read()
+        if c:
+            m = self.main
+            m.a, m.b = c.start_ms + m.sub_offset, c.end_ms + m.sub_offset + 150
+            m.player.setPosition(m.a)
+            m.player.play()
+
+    def save(self):
+        c = self._read()
+        if c:
+            self.result_action = ("save", c)
+            self.accept()
+
+    def delete(self):
+        self.result_action = ("delete", None)
+        self.accept()
+
+    def insert(self):
+        c = self.main.cues[self.i]
+        a = c.end_ms + 50
+        b = min(a + 2500, self.next_start - 50) if self.next_start < 10 ** 9 else a + 2500
+        if b <= a:
+            b = a + 1000
+        self.result_action = ("insert", self._Cue(a, b, "…"))
+        self.accept()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, lambda: self.main.edit_cue(self.i + 1))

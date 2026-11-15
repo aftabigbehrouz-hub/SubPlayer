@@ -4,14 +4,16 @@ from __future__ import annotations
 import html
 import random
 
-from PySide6.QtCore import Qt
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
                                QTextBrowser, QVBoxLayout, QWidget)
 
 from . import icons, practice, theme
 from .cosmos import GradientLabel
-from .store import due_label, now_ms, review
+from .store import SavedWord, due_label, now_ms, review
 
 
 def card() -> QFrame:
@@ -47,10 +49,17 @@ def sentences_of(main, w):
 
 
 # ==================================================================== My Words
+CATS = (("all", "All"), ("phrase", "Phrases"), ("noun", "Nouns"), ("verb", "Verbs"), ("adj", "Adjectives"), ("other", "Others"))
+
+
 class WordsPage(QWidget):
     def __init__(self, main):
         super().__init__(objectName="page")
+        from PySide6.QtWidgets import QCalendarWidget, QComboBox
         self.main = main
+        self.cat = "all"
+        self.day = None                     # a date picked in the calendar (datetime.date) or None
+        self._pos: dict[int, str] = {}
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
@@ -64,10 +73,45 @@ class WordsPage(QWidget):
         self.stats = QLabel("", objectName="hint")
         head.addWidget(self.stats)
         left.addLayout(head)
+        crow = QHBoxLayout()
+        crow.setSpacing(5)
+        self.cat_btns = {}
+        for key, label in CATS:
+            b = QPushButton(label, checkable=True)
+            b.setProperty("kind", "chip")
+            b.clicked.connect(lambda _=False, k=key: self.set_cat(k))
+            self.cat_btns[key] = b
+            crow.addWidget(b)
+        crow.addStretch(1)
+        left.addLayout(crow)
+        frow = QHBoxLayout()
         self.search = QLineEdit(placeholderText="Search your words…")
         self.search.textChanged.connect(self.refresh)
-        left.addWidget(self.search)
+        frow.addWidget(self.search, 1)
+        self.video_box = QComboBox()
+        self.video_box.setMinimumWidth(190)
+        self.video_box.setToolTip("Only the words from one video")
+        self.video_box.currentIndexChanged.connect(self.refresh)
+        frow.addWidget(self.video_box)
+        self.cal_btn = ibtn("calendar", "Calendar: the days you saved words — click a day to see them", self.toggle_calendar,
+                            checkable=True, kind="chip", size=15)
+        frow.addWidget(self.cal_btn)
+        self.exp_btn = ibtn("export", "Export these words (CSV for Excel, text, Anki)", self.export_menu, kind="chip", size=15)
+        frow.addWidget(self.exp_btn)
+        left.addLayout(frow)
+        self.cal = QCalendarWidget()
+        self.cal.setGridVisible(False)
+        self.cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.cal.setMaximumHeight(250)
+        self.cal.clicked.connect(self.pick_day)
+        self.cal.currentPageChanged.connect(lambda *_: self._mark_calendar())
+        self.cal.hide()
+        left.addWidget(self.cal)
+        self.day_lbl = QLabel("", objectName="small")
+        self.day_lbl.hide()
+        left.addWidget(self.day_lbl)
         self.list = QListWidget()
+        self.list.setIconSize(QSize(96, 54))
         self.list.currentRowChanged.connect(self.show_word)
         left.addWidget(self.list, 1)
         row = QHBoxLayout()
@@ -96,27 +140,212 @@ class WordsPage(QWidget):
         right.addLayout(btns)
         root.addWidget(rcard, 3)
         self.words = []
+        self.set_cat("all", refresh=False)
+
+    # ------------------------------------------------------------------ grouping
+    def pos_of(self, w) -> str:
+        if " " in w.text.strip():
+            return "phrase"
+        if w.id in self._pos:
+            return self._pos[w.id]
+        cat = "other"
+        d = self.main.dictionary(w.lang)
+        if d:
+            try:
+                es = [e for e in d.lookup(w.lemma or w.text) if e.pos != "name"]
+                p = es[0].pos if es else ""
+            except Exception:
+                p = ""
+            cat = {"noun": "noun", "verb": "verb", "adj": "adj", "adjective": "adj"}.get(p, "other")
+            if cat == "other" and w.article in ("der", "die", "das"):
+                cat = "noun"
+        elif w.article in ("der", "die", "das"):
+            cat = "noun"
+        self._pos[w.id] = cat
+        return cat
+
+    def set_cat(self, k, refresh=True):
+        self.cat = k
+        for key, b in self.cat_btns.items():
+            b.setChecked(key == k)
+        if refresh:
+            self.refresh()
+
+    def toggle_calendar(self):
+        on = self.cal_btn.isChecked()
+        self.cal.setVisible(on)
+        if not on:
+            self.day = None
+            self.day_lbl.hide()
+            self.refresh()
+        else:
+            self._mark_calendar()
+
+    def _day_of(self, ms: int):
+        import datetime
+        return datetime.date.fromtimestamp(ms / 1000) if ms else None
+
+    def _mark_calendar(self):
+        from PySide6.QtCore import QDate
+        from PySide6.QtGui import QBrush, QColor, QTextCharFormat
+        self.cal.setDateTextFormat(QDate(), QTextCharFormat())
+        counts = {}
+        for w in self.main.store.all():
+            d = self._day_of(w.created)
+            if d:
+                counts[d] = counts.get(d, 0) + 1
+        for d, n in counts.items():
+            f = QTextCharFormat()
+            f.setForeground(QBrush(QColor("#0B0A1A")))
+            f.setBackground(QBrush(QColor(theme.CYAN if n < 5 else theme.MAGENTA)))
+            f.setFontWeight(800)
+            f.setToolTip(f"{n} word{'s' if n != 1 else ''} saved")
+            self.cal.setDateTextFormat(QDate(d.year, d.month, d.day), f)
+
+    def pick_day(self, qd):
+        import datetime
+        d = datetime.date(qd.year(), qd.month(), qd.day())
+        self.day = None if self.day == d else d
+        self.day_lbl.setVisible(self.day is not None)
+        self.day_lbl.setText(f"Words saved on {self.day:%A, %d %B %Y} — click the day again to show all" if self.day else "")
+        self.refresh()
+
+    def _videos(self, words):
+        names = []
+        for w in words:
+            if w.video_name and w.video_name not in names:
+                names.append(w.video_name)
+        return names
 
     def refresh(self, *_):
         q = self.search.text().strip().lower()
         all_words = self.main.store.all()
-        self.words = [w for w in all_words if not q or q in w.text.lower() or q in w.lemma.lower() or q in w.english.lower()]
+        # video filter (keep the choice)
+        cur_v = self.video_box.currentData() if self.video_box.count() else None
+        self.video_box.blockSignals(True)
+        self.video_box.clear()
+        self.video_box.addItem("All videos", None)
+        for n in self._videos(all_words):
+            self.video_box.addItem(n[:42] + ("…" if len(n) > 42 else ""), n)
+        i = self.video_box.findData(cur_v) if cur_v else 0
+        self.video_box.setCurrentIndex(max(0, i))
+        self.video_box.blockSignals(False)
+        vid = self.video_box.currentData()
+        ws = [w for w in all_words if not q or q in w.text.lower() or q in w.lemma.lower() or q in w.english.lower()
+              or q in w.persian]
+        if vid:
+            ws = [w for w in ws if w.video_name == vid]
+        if self.day:
+            ws = [w for w in ws if self._day_of(w.created) == self.day]
+        counts = {k: 0 for k, _ in CATS}
+        for w in ws:
+            counts["all"] += 1
+            counts[self.pos_of(w)] += 1
+        for key, label in CATS:
+            self.cat_btns[key].setText(f"{label} {counts[key]}")
+        if self.cat != "all":
+            ws = [w for w in ws if self.pos_of(w) == self.cat]
+        if self.day or self.cat != "all" or vid:
+            ws.sort(key=lambda w: -w.created)
+        self.words = ws
         now = now_ms()
         due = sum(1 for w in all_words if w.due <= now)
         p = self.main.progress
         self.stats.setText(f"{len(all_words)} words  ·  {due} due  ·  🔥 {p.streak} day streak  ·  {p.today_count} today")
         cur = self.list.currentRow()
         self.list.clear()
+        from PySide6.QtGui import QIcon, QPixmap
+        missing = []
         for w in self.words:
             flag = "EN · " if w.lang == "en" else ""
-            it = QListWidgetItem(f"{flag}{(w.article + ' ') if w.article else ''}{w.text}   —   {w.english[:60]}\n"
-                                 f"reviewed {w.reviews}× · box {w.box}/7 · {due_label(w.due, now)}")
+            d = self._day_of(w.created)
+            it = QListWidgetItem(f"{flag}{(w.article + ' ') if w.article else ''}{w.text}   —   {w.english[:56]}\n"
+                                 f"{d:%d.%m.%Y} · reviewed {w.reviews}× · box {w.box}/7 · {due_label(w.due, now)}")
+            snap = self.main.snap_path(w)
+            if snap.exists():
+                it.setIcon(QIcon(QPixmap(str(snap))))
+            else:
+                missing.append(w)
             self.list.addItem(it)
+        for w in missing[:12]:                        # pictures for older words, a few at a time
+            self.main.make_snapshot(w, done=lambda uid: self._snap_ready(uid))
         if self.words:
             self.list.setCurrentRow(min(max(cur, 0), len(self.words) - 1))
         else:
-            self.detail.setHtml(f"<h2 style='color:{theme.CYAN}'>No words yet</h2><p style='color:{theme.DIM}'>Click a word in the "
-                                "subtitles, then ☆ Save. The word, its meaning, the sentence and the exact video moment are kept.</p>")
+            self.detail.setHtml(f"<h2 style='color:{theme.CYAN}'>No words here</h2><p style='color:{theme.DIM}'>Click a word in the "
+                                "subtitles, then ☆ Save. The word, its meaning, the sentence, a picture and the exact video moment "
+                                "are kept.</p>")
+        if self.cal.isVisible():
+            self._mark_calendar()
+
+    def _snap_ready(self, uid):
+        from PySide6.QtGui import QIcon, QPixmap
+        for r, w in enumerate(self.words):
+            if w.uid == uid:
+                snap = self.main.snap_path(w)
+                it = self.list.item(r)
+                if it and snap.exists():
+                    it.setIcon(QIcon(QPixmap(str(snap))))
+                if r == self.list.currentRow():
+                    self.show_word()
+
+    # ------------------------------------------------------------------ export
+    def export_menu(self):
+        m = QMenu(self)
+        n = len(self.words)
+        m.addAction(f"CSV for Excel ({n} words)…", lambda: self.export("csv"))
+        m.addAction(f"Text list ({n} words)…", lambda: self.export("txt"))
+        m.addAction(f"Anki import file ({n} words)…", lambda: self.export("anki"))
+        m.exec(self.exp_btn.mapToGlobal(self.exp_btn.rect().bottomLeft()))
+
+    def export(self, kind):
+        import csv
+        import io
+        from PySide6.QtWidgets import QFileDialog
+        ext = {"csv": "csv", "txt": "txt", "anki": "txt"}[kind]
+        default = str(Path.home() / "Documents" / f"SubPlayer words.{ext}")
+        f, _ = QFileDialog.getSaveFileName(self, "Export words", default, f"*.{ext}")
+        if not f:
+            return
+        rows = []
+        for w in self.words:
+            ex = self.main.store.examples(w.id)
+            rows.append(dict(word=w.text, article=w.article, base=w.lemma, english=w.english, persian=w.persian, ipa=w.ipa,
+                             sentence=w.sentence, video=w.video_name,
+                             time=f"{max(0, w.start_ms) // 60000}:{max(0, w.start_ms) // 1000 % 60:02d}" if w.start_ms >= 0 else "",
+                             saved=f"{self._day_of(w.created):%Y-%m-%d}", category=dict(CATS)[self.pos_of(w)],
+                             level=self._level_name(w), reviews=w.reviews, box=w.box,
+                             examples=" | ".join(e.de + (f" = {e.en}" if e.en else "") for e in ex)))
+        if kind == "csv":
+            buf = io.StringIO()
+            wr = csv.DictWriter(buf, fieldnames=list(rows[0]) if rows else ["word"], delimiter=";")
+            wr.writeheader()
+            wr.writerows(rows)
+            Path(f).write_text("\ufeff" + buf.getvalue(), encoding="utf-8")       # BOM: Excel opens umlauts and Persian right
+        elif kind == "txt":
+            out = []
+            for r in rows:
+                out.append(f"{(r['article'] + ' ') if r['article'] else ''}{r['word']} — {r['english']}"
+                           + (f" — {r['persian']}" if r['persian'] else ""))
+                if r["sentence"]:
+                    out.append(f"    „{r['sentence']}“ ({r['video']} {r['time']})")
+            Path(f).write_text("\n".join(out) + "\n", encoding="utf-8")
+        else:
+            out = ["#separator:tab", "#html:true", "#columns:Front\tBack\tTags"]
+            for r in rows:
+                front = f"{(r['article'] + ' ') if r['article'] else ''}{r['word']}" + (f"<br><i>{html.escape(r['sentence'])}</i>"
+                                                                                       if r["sentence"] else "")
+                back = html.escape(r["english"]) + (f"<br>{html.escape(r['persian'])}" if r["persian"] else "")
+                if r["examples"]:
+                    back += "<br><small>" + html.escape(r["examples"]) + "</small>"
+                out.append(f"{front}\t{back}\tSubPlayer {r['category']} {r['level']}".replace("\n", " "))
+            Path(f).write_text("\n".join(out) + "\n", encoding="utf-8")
+        self.main.msg(f"{len(rows)} words exported to {f}", 9000)
+
+    def _level_name(self, w) -> str:
+        from .levels import NAMES
+        lv = self.main.levels.level(w.lemma or w.text, w.lang, self.main.dictionary(w.lang)) if " " not in w.text else 0
+        return NAMES[lv]
 
     def current(self):
         r = self.list.currentRow()
@@ -126,7 +355,16 @@ class WordsPage(QWidget):
         w = self.current()
         if not w:
             return
-        h = [f"<p style='font-size:24pt;font-weight:800;margin:0'>{article_html(w)}{html.escape(w.text)}</p>"]
+        h = []
+        snap = self.main.snap_path(w)
+        if snap.exists():
+            h.append(f"<p><a href='play:'><img src='{snap.as_uri()}' width='340'></a></p>")
+        h.append(f"<p style='font-size:24pt;font-weight:800;margin:0'>{article_html(w)}{html.escape(w.text)}</p>")
+        lvn = self._level_name(w)
+        cat = dict(CATS)[self.pos_of(w)]
+        h.append(f"<p style='color:{theme.DIM};margin:0'>{cat[:-1] if cat.endswith('s') and cat != 'Others' else cat}"
+                 + (f" · <b>{'≈' if w.lang == 'de' else ''}{lvn}</b>" if lvn else "")
+                 + f" · saved {self._day_of(w.created):%d.%m.%Y}</p>")
         if w.lemma and w.lemma.lower() != w.text.lower():
             h.append(f"<p style='color:{theme.DIM}'>→ {html.escape(w.lemma)}</p>")
         if w.ipa:
@@ -156,6 +394,8 @@ class WordsPage(QWidget):
         w = self.current()
         if not w:
             return
+        if kind == "play":
+            return self.play()
         ex = next((e for e in self.main.store.examples(w.id) if str(e.id) == val), None)
         if ex and kind == "say":
             self.main.speak(ex.de, lang=w.lang)
@@ -368,6 +608,7 @@ class PracticePage(QWidget):
         self.rnd = random.Random()
 
     def start(self, mode=None):
+        self.source = ""
         self.mode = mode or self.mode
         for k, b in self.modes.items():
             b.setChecked(k == self.mode)
@@ -392,6 +633,47 @@ class PracticePage(QWidget):
         self.k = self.score = 0
         self.show_q()
 
+    def start_text(self, cues, video: str, name: str, lang: str, mode: str, min_level: int = 3):
+        """Questions from every line of a video (not only saved words): gaps at words of min_level or harder, dictation of
+        its lines."""
+        from . import library
+        self.mode = mode
+        for k, b in self.modes.items():
+            b.setChecked(k == mode)
+        d = self.main.dictionary(lang)
+        lines = [c for c in cues if len(c.text.split()) >= 4]
+        self.rnd.shuffle(lines)
+        self.qs = []
+        if mode == "gap":
+            picks = []
+            for c in lines:
+                toks = [m.group(0) for m in library.TOKEN.finditer(c.text) if len(m.group(0)) >= 3]
+                scored = [(self.main.levels.level(t, lang, d), t) for t in toks]
+                good = [x for x in scored if x[0] >= min_level] or [x for x in scored if x[0] >= max(1, min_level - 1)]
+                if not good:
+                    continue
+                lv, tok = max(good, key=lambda x: (x[0], len(x[1])))
+                e = (d.lookup(tok) or [None])[0] if d else None
+                hint = (", ".join(e.english[:2]) if e and e.lang != "en" else (e.senses[0].de[:70] if e and e.senses else "")) if e else ""
+                w = SavedWord(text=tok, lemma=tok, sentence=c.text, video_uri=video, video_name=name, start_ms=c.start_ms,
+                              end_ms=c.end_ms, english=hint, lang=lang)
+                cz = practice.cloze(w, c.text)
+                if cz:
+                    picks.append((w, cz, lv))
+                if len(picks) >= self.N:
+                    break
+            pool = [w.text for w, _, _ in picks] + [t for t, _, lv in library.vocabulary(cues, lang, self.main.levels, d)[:300]
+                                                    if lv >= min_level - 1]
+            for w, cz, lv in picks:
+                self.qs.append((w, cz, practice.choices(cz.answer, pool, self.rnd)))
+        else:
+            for c in lines[:self.N]:
+                self.qs.append((SavedWord(text=c.text.split()[0], lemma="", sentence=c.text, video_uri=video, video_name=name,
+                                          start_ms=c.start_ms, end_ms=c.end_ms, lang=lang), None, []))
+        self.k = self.score = 0
+        self.source = f"from “{name[:40]}”"
+        self.show_q()
+
     def _clear_choices(self):
         while self.choice_row.count():
             it = self.choice_row.takeAt(0)
@@ -407,7 +689,8 @@ class PracticePage(QWidget):
         self.input.clear()
         if self.k >= len(self.qs):
             empty = not self.qs
-            msg = {"gap": "Save words (and add sentences) to practise them here.",
+            msg = ("This video has no lines with words at that level — choose a lower level on the Study page."
+                   if getattr(self, "source", "") else None) or {"gap": "Save words (and add sentences) to practise them here.",
                    "dictation": "Save words from a video to practise dictation.",
                    "article": "Save some German nouns to practise der · die · das."}[self.mode] if empty else \
                 f"{self.score} of {len(self.qs)} right · 🔥 {self.main.progress.streak} day streak"
@@ -418,7 +701,8 @@ class PracticePage(QWidget):
                 wdg.setVisible(False)
             return
         w, c, ch = self.qs[self.k]
-        self.head.setText(f"Question {self.k + 1} of {len(self.qs)} · score {self.score}")
+        self.head.setText(f"Question {self.k + 1} of {len(self.qs)} · score {self.score}" +
+                          (f" · {self.source}" if getattr(self, "source", "") else ""))
         self.b_next.setVisible(False)
         self.b_play.setVisible(self.mode in ("dictation",) or self.mode == "gap")
         self.b_hint.setVisible(self.mode == "gap")
