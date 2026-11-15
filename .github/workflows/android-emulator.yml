@@ -36,7 +36,13 @@ jobs:
           SM=$ANDROID_HOME/cmdline-tools/latest/bin
           yes | $SM/sdkmanager --licenses > /dev/null || true
           $SM/sdkmanager "emulator" "platform-tools" "system-images;android-34;google_apis;x86_64" > /dev/null
-          echo no | $SM/avdmanager create avd -n tour -k "system-images;android-34;google_apis;x86_64" -d pixel_6
+          export ANDROID_AVD_HOME=$HOME/.android/avd
+          mkdir -p $ANDROID_AVD_HOME
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> $GITHUB_ENV
+          echo no | $SM/avdmanager create avd -n tour -k "system-images;android-34;google_apis;x86_64" -d pixel_6 -p $ANDROID_AVD_HOME/tour.avd --force
+          # avdmanager writes tour.ini beside the folder it is given only sometimes — make sure it is there
+          [ -f $ANDROID_AVD_HOME/tour.ini ] || printf 'avd.ini.encoding=UTF-8\npath=%s/tour.avd\ntarget=android-34\n' "$ANDROID_AVD_HOME" > $ANDROID_AVD_HOME/tour.ini
+          ls -la $ANDROID_AVD_HOME
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
           ls -l /dev/kvm || true
           $ANDROID_HOME/emulator/emulator -accel-check || true
