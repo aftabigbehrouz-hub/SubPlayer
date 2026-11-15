@@ -210,12 +210,20 @@ if not tap("Translation", timeout=4, required=False):
         adb("shell", "input", "swipe", "900", str(p["y"]), "200", str(p["y"]), "300")
         time.sleep(1)
     tap("Translation")
+def clock():
+    ts = [n["text"] for n in nodes() if re.fullmatch(r"\d+:\d\d", n["text"] or "")]
+    return ts[0] if ts else "?"
+time.sleep(4)                                # let the video load and play
 adb("shell", "input", "keyevent", "62")      # Space = pause (keyboard)
-time.sleep(1)
+time.sleep(1.5); a = clock(); time.sleep(2.5); b = clock()
+print(f"  Space pauses: {'yes' if a == b and a != '?' else 'NO'} ({a} → {b})")
+if a != b:
+    problems.append("Space did not pause")
 adb("shell", "input", "keyevent", "62")      # Space = play again
-time.sleep(5.5)
-adb("shell", "input", "keyevent", "62")      # pause on line 2
-time.sleep(2)
+time.sleep(1.5); c = clock(); time.sleep(2.5); d = clock()
+print(f"  Space plays again: {'yes' if c != d else 'NO'} ({c} → {d})")
+adb("shell", "input", "keyevent", "62")
+time.sleep(1.5)
 shot("05_player_levels_translation")
 
 print(adb("logcat", "-d", "-s", "SubPlayer", check=False)[-3000:])
@@ -233,6 +241,11 @@ if tap("Wetter"):
         time.sleep(3)
         shot("07_word_card_dictionary")
     tap("Save", required=False)
+    for _ in range(4):
+        if find("Where else is it used?", timeout=2):
+            break
+        adb("shell", "input", "swipe", "540", "2000", "540", "900", "400")
+        time.sleep(1)
     if tap("Where else is it used?"):
         time.sleep(4)
         shot("08_where_else")

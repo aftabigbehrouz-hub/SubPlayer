@@ -87,6 +87,8 @@ class MainActivity : ComponentActivity() {
     /** Keyboard (or a TV remote): Space = play/pause, ← → = 5 seconds — on the player, when no text field is open. */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         val onPlayer = vm.screen == Screen.PLAYER && vm.videoUri != null && vm.sheet == null
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_SPACE && event.action == android.view.KeyEvent.ACTION_DOWN)
+            android.util.Log.d("SubPlayer", "Space key: on player = $onPlayer")
         if (onPlayer && event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             when (event.keyCode) {
                 android.view.KeyEvent.KEYCODE_SPACE, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { vm.togglePlay(); vm.touch(); return true }
