@@ -186,9 +186,24 @@ if tap("Discover programmes"):
 
 print("video")
 subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i",
-                "sine=frequency=330", "-t", "40", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "/tmp/Wetterbericht.mp4"], check=True)
+                "sine=frequency=330", "-t", "240", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "/tmp/Wetterbericht.mp4"], check=True)
 uri = f"file:///data/user/0/{PKG}/files/Wetterbericht.mp4"
-open("/tmp/a.srt", "w", encoding="utf-8").write(SRT)
+def repeat_srt(srt, times, every_s):
+    """The same lines again every `every_s` seconds (a slow emulator needs a longer video)."""
+    blocks = [b for b in srt.strip().split("\n\n") if b.strip()]
+    out, n = [], 0
+    for k in range(times):
+        for b in blocks:
+            lines = b.split("\n")
+            def sh(t):
+                h, m, rest = t.split(":"); sec, ms = rest.split(",")
+                v = ((int(h) * 60 + int(m)) * 60 + int(sec)) * 1000 + int(ms) + k * every_s * 1000
+                return f"{v // 3600000:02d}:{v // 60000 % 60:02d}:{v // 1000 % 60:02d},{v % 1000:03d}"
+            a, b2 = [x.strip() for x in lines[1].split("-->")]
+            n += 1
+            out.append(f"{n}\n{sh(a)} --> {sh(b2)}\n" + "\n".join(lines[2:]))
+    return "\n\n".join(out) + "\n"
+open("/tmp/a.srt", "w", encoding="utf-8").write(repeat_srt(SRT.replace("00:00:40,000", "00:00:39,500"), 6, 40))
 open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
 # The files go into the app's own private folder, written by the app's user (run-as works for the debug build): the video,
 # and the subtitles as if synced from another device (files/synced_subs/<name>.de.srt) — the app picks them up by file name.
