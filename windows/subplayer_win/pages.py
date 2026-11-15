@@ -5,16 +5,23 @@ import html
 import random
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
                                QTextBrowser, QVBoxLayout, QWidget)
 
-from . import practice, theme
+from . import icons, practice, theme
+from .cosmos import GradientLabel
 from .store import due_label, now_ms, review
 
 
 def card() -> QFrame:
     f = QFrame(objectName="card")
     return f
+
+
+def ibtn(*a, **k):
+    from .app import ibtn as _ib
+    return _ib(*a, **k)
 
 
 def article_html(w) -> str:
@@ -45,9 +52,13 @@ class WordsPage(QWidget):
         super().__init__(objectName="page")
         self.main = main
         root = QHBoxLayout(self)
-        left = QVBoxLayout()
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(14)
+        lcard = card()
+        left = QVBoxLayout(lcard)
+        left.setContentsMargins(18, 16, 18, 16)
         head = QHBoxLayout()
-        self.title = QLabel("My Words", objectName="title")
+        self.title = GradientLabel("My Words", 22, QFont.Black)
         head.addWidget(self.title)
         head.addStretch(1)
         self.stats = QLabel("", objectName="hint")
@@ -60,33 +71,30 @@ class WordsPage(QWidget):
         self.list.currentRowChanged.connect(self.show_word)
         left.addWidget(self.list, 1)
         row = QHBoxLayout()
-        b1 = QPushButton("🎓 Review due words")
+        b1 = ibtn("cards", "Review the words that are due", lambda: main.show_page("review"), kind="", text="  Review due words", color="#FFFFFF")
         b1.setProperty("accent", True)
-        b1.clicked.connect(lambda: main.show_page("review"))
-        b2 = QPushButton("🧩 Practice")
-        b2.clicked.connect(lambda: main.show_page("practice"))
+        theme.glow(b1, theme.MAGENTA, 28, 120)
+        b2 = ibtn("puzzle", "Gap-fill, dictation, der·die·das", lambda: main.show_page("practice"), kind="", text="  Practice")
         row.addWidget(b1)
         row.addWidget(b2)
         left.addLayout(row)
-        root.addLayout(left, 2)
+        root.addWidget(lcard, 2)
 
-        right = QVBoxLayout()
+        rcard = card()
+        right = QVBoxLayout(rcard)
+        right.setContentsMargins(22, 18, 18, 16)
         self.detail = QTextBrowser(openLinks=False)
         self.detail.anchorClicked.connect(self._link)
         right.addWidget(self.detail, 1)
         btns = QHBoxLayout()
-        self.b_play = QPushButton("▶ Play in video")
-        self.b_play.clicked.connect(self.play)
-        self.b_speak = QPushButton("🔊 Speak")
-        self.b_speak.clicked.connect(self.speak)
-        self.b_learn = QPushButton("Learn more / add sentences ▾")
-        self.b_learn.clicked.connect(self.learn)
-        self.b_del = QPushButton("🗑 Delete")
-        self.b_del.clicked.connect(self.delete)
+        self.b_play = ibtn("play", "Play this moment in the video", self.play, kind="", text=" Play in video")
+        self.b_speak = ibtn("volume", "Speak", self.speak, kind="", text=" Speak")
+        self.b_learn = ibtn("sparkles", "ChatGPT / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
+        self.b_del = ibtn("trash", "Delete this word", self.delete, kind="", text=" Delete", color=theme.MAGENTA)
         for b in (self.b_play, self.b_speak, self.b_learn, self.b_del):
             btns.addWidget(b)
         right.addLayout(btns)
-        root.addLayout(right, 3)
+        root.addWidget(rcard, 3)
         self.words = []
 
     def refresh(self, *_):
@@ -96,11 +104,11 @@ class WordsPage(QWidget):
         now = now_ms()
         due = sum(1 for w in all_words if w.due <= now)
         p = self.main.progress
-        self.stats.setText(f"{len(all_words)} words · {due} due · 🔥 {p.streak} day streak · {p.today_count} today")
+        self.stats.setText(f"{len(all_words)} words  ·  {due} due  ·  🔥 {p.streak} day streak  ·  {p.today_count} today")
         cur = self.list.currentRow()
         self.list.clear()
         for w in self.words:
-            flag = "🇬🇧 " if w.lang == "en" else ""
+            flag = "EN · " if w.lang == "en" else ""
             it = QListWidgetItem(f"{flag}{(w.article + ' ') if w.article else ''}{w.text}   —   {w.english[:60]}\n"
                                  f"reviewed {w.reviews}× · box {w.box}/7 · {due_label(w.due, now)}")
             self.list.addItem(it)
@@ -118,21 +126,21 @@ class WordsPage(QWidget):
         w = self.current()
         if not w:
             return
-        h = [f"<h1 style='margin-bottom:0'>{article_html(w)}{html.escape(w.text)}</h1>"]
+        h = [f"<p style='font-size:24pt;font-weight:800;margin:0'>{article_html(w)}{html.escape(w.text)}</p>"]
         if w.lemma and w.lemma.lower() != w.text.lower():
             h.append(f"<p style='color:{theme.DIM}'>→ {html.escape(w.lemma)}</p>")
         if w.ipa:
-            h.append(f"<p style='font-family:serif'>{html.escape(w.ipa)}</p>")
+            h.append(f"<p style='color:{theme.GOLD};font-size:12.5pt'>{html.escape(w.ipa)}</p>")
         if w.english:
             h.append(f"<p>{html.escape(w.english)}</p>")
         if w.persian:
-            h.append(f"<p dir='rtl' style='font-size:14pt'>{html.escape(w.persian)}</p>")
+            h.append(f"<p dir='rtl' style='font-family:Vazirmatn;font-size:14pt'>{html.escape(w.persian)}</p>")
         acc = f"{w.correct * 100 // w.reviews}%" if w.reviews else "–"
         h.append(f"<p style='color:{theme.DIM}'>Reviewed {w.reviews}× · right {acc} · next {due_label(w.due, now_ms())}"
                  f" · from “{html.escape(w.video_name)}”</p>")
-        h.append(f"<p style='color:{theme.CYAN};font-weight:700;margin-top:14px'>SENTENCES</p>")
+        h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:2px;font-size:9pt;margin-top:16px'>SENTENCES</p>")
         if w.sentence:
-            h.append(f"<p>🎬 {highlight(w.sentence, w.text)}</p>")
+            h.append(f"<p><span style='color:{theme.MAGENTA}'>▶ video</span>&nbsp; {highlight(w.sentence, w.text)}</p>")
         for e in self.main.store.examples(w.id):
             h.append(f"<p style='margin-bottom:0'>{highlight(e.de, w.text)} "
                      f"<a href='say:{e.id}' style='color:{theme.CYAN};text-decoration:none'>🔊</a> "
@@ -140,7 +148,7 @@ class WordsPage(QWidget):
             if e.en:
                 h.append(f"<p style='color:{theme.DIM};margin:0'>{html.escape(e.en)}</p>")
             if e.fa:
-                h.append(f"<p dir='rtl' style='color:{theme.DIM};margin:0 0 6px 0'>{html.escape(e.fa)}</p>")
+                h.append(f"<p dir='rtl' style='font-family:Vazirmatn;color:{theme.DIM};margin:0 0 6px 0'>{html.escape(e.fa)}</p>")
         self.detail.setHtml("".join(h))
 
     def _link(self, url):
@@ -189,25 +197,26 @@ class ReviewPage(QWidget):
         super().__init__(objectName="page")
         self.main = main
         v = QVBoxLayout(self)
+        t = GradientLabel("Review", 22, QFont.Black)
+        v.addWidget(t)
         v.addStretch(1)
         self.head = QLabel("", objectName="hint", alignment=Qt.AlignCenter)
         v.addWidget(self.head)
         self.box = card()
+        theme.glow(self.box, theme.VIOLET, 60, 120)
         bv = QVBoxLayout(self.box)
+        bv.setContentsMargins(26, 22, 26, 20)
         self.view = QTextBrowser(openLinks=False)
-        self.view.setMinimumHeight(330)
+        self.view.setMinimumHeight(340)
         bv.addWidget(self.view)
         row = QHBoxLayout()
-        self.b_play = QPushButton("▶ Play the moment")
-        self.b_play.clicked.connect(self.play)
-        self.b_speak = QPushButton("🔊 Speak")
-        self.b_speak.clicked.connect(lambda: self.cur and self.main.speak(self.sent[0] if self.sent else self.cur.text, lang=self.cur.lang))
-        self.b_reveal = QPushButton("Show meaning (Space)")
+        self.b_play = ibtn("play", "Play the video moment", self.play, kind="", text=" Play the moment")
+        self.b_speak = ibtn("volume", "Speak the sentence", lambda: self.cur and self.main.speak(self.sent[0] if self.sent else self.cur.text, lang=self.cur.lang),
+                            kind="", text=" Speak")
+        self.b_reveal = ibtn("sparkles", "Show the meaning (Space)", self.reveal, kind="", text=" Show meaning", color="#FFFFFF")
         self.b_reveal.setProperty("accent", True)
-        self.b_reveal.clicked.connect(self.reveal)
-        self.b_again = QPushButton("↺ Again — 10 min")
-        self.b_again.clicked.connect(lambda: self.answer(False))
-        self.b_got = QPushButton("✓ Got it")
+        self.b_again = ibtn("repeat", "Again in 10 minutes (1 / ←)", lambda: self.answer(False), kind="", text=" Again — 10 min")
+        self.b_got = ibtn("check", "Got it (2 / → / Space)", None, kind="", text=" Got it", color="#FFFFFF")
         self.b_got.setProperty("accent", True)
         self.b_got.clicked.connect(lambda: self.answer(True))
         for b in (self.b_play, self.b_speak, self.b_reveal, self.b_again, self.b_got):
@@ -256,14 +265,14 @@ class ReviewPage(QWidget):
                  f"{article_html(w) if self.revealed else ''}{html.escape(w.text)}</p>")
         if self.revealed:
             if w.ipa:
-                h.append(f"<p style='text-align:center;font-family:serif'>{html.escape(w.ipa)}</p>")
+                h.append(f"<p style='text-align:center;color:{theme.GOLD};font-size:12.5pt'>{html.escape(w.ipa)}</p>")
             if w.english:
                 h.append(f"<p style='text-align:center'>{html.escape(w.english)}</p>")
             if w.persian:
-                h.append(f"<p dir='rtl' style='text-align:center;font-size:15pt'>{html.escape(w.persian)}</p>")
+                h.append(f"<p dir='rtl' style='font-family:Vazirmatn;text-align:center;font-size:15pt'>{html.escape(w.persian)}</p>")
             if self.sent and (self.sent[1] or self.sent[2]):
                 h.append(f"<p style='text-align:center;color:{theme.DIM}'>{html.escape(self.sent[1])}</p>"
-                         f"<p dir='rtl' style='text-align:center;color:{theme.DIM}'>{html.escape(self.sent[2])}</p>")
+                         f"<p dir='rtl' style='font-family:Vazirmatn;text-align:center;color:{theme.DIM}'>{html.escape(self.sent[2])}</p>")
         self.view.setHtml("".join(h))
 
     def keyPressEvent(self, e):
@@ -313,11 +322,13 @@ class PracticePage(QWidget):
         self.main = main
         v = QVBoxLayout(self)
         top = QHBoxLayout()
-        top.addWidget(QLabel("Practice", objectName="title"))
+        top.addWidget(GradientLabel("Practice", 22, QFont.Black))
         top.addStretch(1)
         self.modes = {}
         for key, label in (("gap", "Fill the gap"), ("dictation", "Dictation"), ("article", "der · die · das")):
             b = QPushButton(label, checkable=True)
+            b.setProperty("kind", "chip")
+            b.setMinimumWidth(130)
             b.clicked.connect(lambda _=False, k=key: self.start(k))
             self.modes[key] = b
             top.addWidget(b)
@@ -325,7 +336,9 @@ class PracticePage(QWidget):
         self.head = QLabel("", objectName="hint")
         v.addWidget(self.head)
         self.box = card()
+        theme.glow(self.box, theme.VIOLET, 50, 100)
         bv = QVBoxLayout(self.box)
+        bv.setContentsMargins(26, 22, 26, 20)
         self.view = QTextBrowser(openLinks=False)
         self.view.setMinimumHeight(260)
         bv.addWidget(self.view)
@@ -335,17 +348,22 @@ class PracticePage(QWidget):
         self.input.returnPressed.connect(self.check_typed)
         bv.addWidget(self.input)
         row = QHBoxLayout()
-        self.b_play = QPushButton("▶ Listen")
-        self.b_play.clicked.connect(self.listen)
-        self.b_hint = QPushButton("Hint")
-        self.b_hint.clicked.connect(self.hint)
+        self.b_play = ibtn("volume", "Listen", self.listen, kind="", text=" Listen")
+        self.b_hint = ibtn("sparkles", "A hint", self.hint, kind="", text=" Hint")
         self.b_next = QPushButton("Next →")
         self.b_next.setProperty("accent", True)
         self.b_next.clicked.connect(self.next)
         for b in (self.b_play, self.b_hint, self.b_next):
             row.addWidget(b)
         bv.addLayout(row)
-        v.addWidget(self.box, 1)
+        self.view.setMaximumHeight(360)
+        v.addStretch(1)
+        wrap = QHBoxLayout()
+        wrap.addStretch(1)
+        wrap.addWidget(self.box, 5)
+        wrap.addStretch(1)
+        v.addLayout(wrap)
+        v.addStretch(2)
         self.mode, self.qs, self.k, self.score, self.answered, self.show_hint = "gap", [], 0, 0, False, False
         self.rnd = random.Random()
 
@@ -377,8 +395,11 @@ class PracticePage(QWidget):
     def _clear_choices(self):
         while self.choice_row.count():
             it = self.choice_row.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+            w = it.widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
 
     def show_q(self):
         self._clear_choices()
@@ -422,7 +443,7 @@ class PracticePage(QWidget):
                 h += f"<p style='text-align:center;color:{theme.GOLD}'>Starts with „{html.escape(c.answer[:2])}…“ · {len(c.answer)} letters</p>"
             if self.answered:
                 h += (f"<p style='text-align:center;color:{theme.DIM}'>{html.escape(c.en)}</p>"
-                      f"<p dir='rtl' style='text-align:center;color:{theme.DIM}'>{html.escape(c.fa)}</p>")
+                      f"<p dir='rtl' style='font-family:Vazirmatn;text-align:center;color:{theme.DIM}'>{html.escape(c.fa)}</p>")
             elif w.english:
                 h += f"<p style='text-align:center;color:{theme.DIM}'>({html.escape(w.english[:80])})</p>"
         elif self.mode == "dictation":

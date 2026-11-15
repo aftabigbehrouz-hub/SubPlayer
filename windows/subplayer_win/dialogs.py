@@ -1,12 +1,28 @@
-"""Dialogs: activation, settings (licence, sync, online, models), make subtitles, add sentences, help."""
+"""Dialogs: activation, settings, make subtitles, add sentences, video link, save clip, intro tour, owner tools, help."""
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPlainTextEdit,
-                               QPushButton, QRadioButton, QScrollArea, QTextBrowser, QVBoxLayout, QWidget)
+from pathlib import Path
 
-from . import asr, downloads, licence, practice, sync, theme
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+                               QPlainTextEdit, QPushButton, QRadioButton, QScrollArea, QSpinBox, QTextBrowser, QVBoxLayout,
+                               QWidget)
+
+from . import asr, downloads, icons, licence, practice, sync, theme
+from .cosmos import GradientLabel, Orb
+
+GITHUB = "https://github.com/aftabigbehrouz-hub/SubPlayer"
+PRIVACY = GITHUB + "/blob/main/PRIVACY.md"
+
+
+def title(text, size=20):
+    return GradientLabel(text, size, QFont.Black)
+
+
+def ibtn(*a, **k):
+    from .app import ibtn as _ib
+    return _ib(*a, **k)
 
 
 def hint(text) -> QLabel:
@@ -17,8 +33,8 @@ def hint(text) -> QLabel:
 def section(title) -> tuple[QFrame, QVBoxLayout]:
     f = QFrame(objectName="card")
     v = QVBoxLayout(f)
-    t = QLabel(title)
-    t.setStyleSheet(f"font-weight:700;font-size:12pt;color:{theme.CYAN}")
+    t = QLabel(title.upper())
+    t.setStyleSheet(f"font-weight:700;font-size:9.5pt;letter-spacing:2px;color:{theme.CYAN}")
     v.addWidget(t)
     return f, v
 
@@ -35,7 +51,7 @@ class ActivationDialog(QDialog):
         self.setWindowTitle("SubPlayer — activate")
         self.setMinimumWidth(560)
         v = QVBoxLayout(self)
-        t = QLabel("Your free trial has ended" if ended else "Buy / activate SubPlayer", objectName="title")
+        t = title("Your free trial has ended" if ended else "Buy / activate SubPlayer")
         v.addWidget(t)
         v.addWidget(hint(f"To keep using SubPlayer, send a message to @{licence.SELLER_TELEGRAM} on Telegram with this PC's "
                          "device code. You receive an activation code made for this PC only."))
@@ -77,7 +93,7 @@ class GenerateDialog(QDialog):
         self.setWindowTitle("Make subtitles")
         self.setMinimumWidth(560)
         v = QVBoxLayout(self)
-        v.addWidget(QLabel("Make subtitles", objectName="title"))
+        v.addWidget(title("Make subtitles"))
         v.addWidget(hint("Spoken language"))
         self.lang_box = QComboBox()
         self.lang_box.addItems(["German", "English"])
@@ -124,7 +140,7 @@ class AddSentencesDialog(QDialog):
         self.setWindowTitle("Add sentences")
         self.setMinimumSize(640, 420)
         v = QVBoxLayout(self)
-        v.addWidget(QLabel(f"Add sentences to „{word.text}“", objectName="title"))
+        v.addWidget(title(f"Add sentences to „{word.text}“", 17))
         fmt = "EN: … | DE: … | FA: …" if word.lang == "en" else "DE: … | EN: … | FA: …"
         v.addWidget(hint(f"Paste the answer from ChatGPT, Grok, DWDS or dict.cc. Lines like  {fmt}  are read with their "
                          "translations; plain sentences work too. They then appear in review and practice."))
@@ -162,7 +178,7 @@ class SettingsDialog(QDialog):
         v = QVBoxLayout(inner)
         area.setWidget(inner)
         outer.addWidget(area)
-        v.addWidget(QLabel("Settings", objectName="title"))
+        v.addWidget(title("Settings", 22))
 
         # licence
         f, lv = section("Licence")
@@ -176,6 +192,60 @@ class SettingsDialog(QDialog):
             b.setProperty("accent", True)
             b.clicked.connect(lambda: ActivationDialog(main).exec())
             lv.addWidget(b)
+        tg = ibtn("send", "Questions, buying a licence", lambda: QDesktopServices.openUrl(QUrl(f"https://t.me/{licence.SELLER_TELEGRAM}")),
+                  kind="link", text=f" Contact @{licence.SELLER_TELEGRAM} on Telegram", size=15, color=theme.CYAN)
+        lv.addWidget(tg)
+        v.addWidget(f)
+
+        # owner tools (seller only — needs the private key)
+        owner_key = OwnerDialog.stored_key()
+        f, ow = section("Owner tools")
+        if owner_key:
+            ow.addWidget(hint("Create an activation code for a buyer's PC or phone: enter the device code they send you and their name."))
+            self.o_dev = QLineEdit(placeholderText="Buyer's device code (XXXXX-XXXXX)")
+            self.o_name = QLineEdit(placeholderText="Buyer's name")
+            ow.addWidget(self.o_dev)
+            ow.addWidget(self.o_name)
+            self.o_out = QPlainTextEdit(readOnly=True)
+            self.o_out.setFixedHeight(70)
+            self.o_out.hide()
+            row = QHBoxLayout()
+            mk = QPushButton("Create code")
+            mk.setProperty("accent", True)
+            mk.clicked.connect(lambda: self.make_code(owner_key))
+            cp = QPushButton("Copy")
+            cp.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.o_out.toPlainText()))
+            rm = ibtn("trash", "Remove the owner key from this PC", lambda: (OwnerDialog.forget(), main.msg("Owner key removed from this PC"), self.accept()),
+                      kind="", text=" Remove key", size=15, color=theme.MAGENTA)
+            for x in (mk, cp, rm):
+                row.addWidget(x)
+            ow.addWidget(self.o_out)
+            ow.addLayout(row)
+            v.addWidget(f)
+        else:   # buyers never see the seller's tools — only a small link at the very bottom
+            f.deleteLater()
+
+        # reminder & look
+        f, rv = section("Daily reminder & look")
+        rrow = QHBoxLayout()
+        self.rem = QCheckBox("Remind me to review at")
+        self.rem.setChecked(bool(s.get("reminder_on")))
+        self.rem_h = QComboBox()
+        self.rem_h.addItems([f"{h:02d}:00" for h in range(24)])
+        self.rem_h.setCurrentIndex(int(s.get("reminder_hour", 19)) % 24)
+        self.rem_h.setMinimumWidth(110)
+        rrow.addWidget(self.rem)
+        rrow.addWidget(self.rem_h)
+        rrow.addStretch(1)
+        rs = QPushButton("Save")
+        rs.clicked.connect(self.save_reminder)
+        rrow.addWidget(rs)
+        rv.addLayout(rrow)
+        rv.addWidget(hint("A Windows notification at that hour when words are due — even when SubPlayer is closed."))
+        self.motion = QCheckBox("Animated space background (pauses by itself while a video plays)")
+        self.motion.setChecked(s.get("motion", True))
+        self.motion.toggled.connect(self.set_motion)
+        rv.addWidget(self.motion)
         v.addWidget(f)
 
         # sync
@@ -238,9 +308,21 @@ class SettingsDialog(QDialog):
         v.addWidget(f)
 
         f, av = section("About")
-        av.addWidget(hint("SubPlayer for Windows · speech recognition: Whisper (OpenAI) via faster-whisper · dictionaries: German and "
-                          "English Wiktionary via kaikki.org (CC BY-SA 4.0) · sentence translation: Google Translate / MyMemory (online)."))
+        av.addWidget(hint(f"SubPlayer for Windows {__import__('subplayer_win').VERSION} · speech recognition: Whisper (OpenAI) via "
+                          "faster-whisper · dictionaries: German and English Wiktionary via kaikki.org (CC BY-SA 4.0) · pronunciation "
+                          "recordings: Wikimedia Commons · sentence translation: Google Translate / MyMemory (online) · video: FFmpeg "
+                          "via PyAV, Qt · Persian font: Vazirmatn (SIL Open Font License)."))
+        links = QHBoxLayout()
+        for ic, text, url in (("link", " Project page", GITHUB), ("file", " Privacy policy", PRIVACY),
+                              ("send", f" @{licence.SELLER_TELEGRAM}", f"https://t.me/{licence.SELLER_TELEGRAM}")):
+            links.addWidget(ibtn(ic, url, lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)), kind="link", text=text, size=15, color=theme.CYAN))
+        links.addStretch(1)
+        av.addLayout(links)
         v.addWidget(f)
+        if not owner_key:
+            seller = ibtn("key", "For the seller only: create activation codes with the private key",
+                          lambda: (OwnerDialog(main).exec(), self.accept()), kind="link", text=" Seller tools", size=13, color=theme.DIM)
+            v.addWidget(seller, 0, Qt.AlignRight)
         v.addStretch(1)
 
     def save_token(self):
@@ -255,6 +337,33 @@ class SettingsDialog(QDialog):
         else:
             self.sync_status.setText("Not set up")
 
+    def make_code(self, key):
+        try:
+            code = licence.create(key, self.o_dev.text().strip().upper(), self.o_name.text().strip())
+        except Exception as e:
+            self.o_out.setPlainText("Could not create the code: " + str(e))
+        else:
+            self.o_out.setPlainText(code)
+        self.o_out.show()
+
+    def save_reminder(self):
+        from . import reminder
+        on, h = self.rem.isChecked(), self.rem_h.currentIndex()
+        try:
+            msg = reminder.set_reminder(on, h)
+        except Exception as e:
+            self.main.msg("Reminder: " + str(e), 9000)
+            return
+        self.main.settings.update(reminder_on=on, reminder_hour=h)
+        self.main.save_settings()
+        self.main.msg(msg, 8000)
+
+    def set_motion(self, on):
+        self.main.settings["motion"] = on
+        self.main.save_settings()
+        self.main.cosmos.motion = on
+        self.main._update_motion()
+
     def _load_key(self):
         self.key.setText(self.main.settings.get("online_key_" + self.prov.currentData(), ""))
 
@@ -267,10 +376,14 @@ class SettingsDialog(QDialog):
 
 
 HELP = [
-    ("Open a video", "📂 Open (Ctrl+O), or drag a video onto SubPlayer.exe. 🕘 Recent continues where you stopped."),
-    ("Make subtitles", "💬 Subtitles ▸ language ▸ quality. Offline Whisper runs on your PC (the model downloads once); "
+    ("Open a video", "Open (Ctrl+O), or drag a video onto the window or onto SubPlayer.exe. Recent and the cards on the welcome "
+                     "screen continue where you stopped."),
+    ("Video links", "Link (Ctrl+L): paste a Tagesschau page or any direct .mp4 / .webm link — the video is saved to "
+                    "Videos\\SubPlayer and opens ready for subtitles. YouTube, Netflix, Instagram, TikTok… are refused: their "
+                    "terms don't allow downloading."),
+    ("Make subtitles", "Subtitles ▸ language ▸ quality. Offline Whisper runs on your PC (the model downloads once); "
                        "Online uses your Groq/OpenAI key and is the fastest. Subtitles are saved and reload next time. "
-                       "Already have subtitles? 📄 Subtitle file ▸ Load."),
+                       "Already have subtitles? Subtitle file ▸ Load, or drop the .srt on the window."),
     ("Click a word", "Pause and click any word in the subtitle: the word card on the right shows article, IPA, meanings with "
                      "examples, English (or German for English words), Persian, the voice (also slow) and a real recording. "
                      "Lines are joined into the complete sentence."),
@@ -278,16 +391,22 @@ HELP = [
                        "IPA, English definitions with examples, German and Persian. Cambridge replaces DWDS."),
     ("Phrases & sentences", "Shift+click the first word, then Shift+click the last word: phrase translation + each word. "
                             "Ctrl+click a word: the whole sentence. Translation needs internet."),
-    ("Save & review", "☆ Save keeps the word, meaning, sentence and the exact video moment. 🎓 Review plays the moment; "
+    ("Save & review", "Save keeps the word, meaning, sentence and the exact video moment. Review plays the moment; "
                       "Space shows the meaning, then Got it (1, 2, 4, 7, 15, 30, 60 days) or Again (10 minutes)."),
     ("Learn more", "Learn more ▾: ChatGPT and Grok open with a ready question (3 example sentences with translations). Copy the "
                    "answer and use ＋ Add sentences — review then shows a different sentence each time."),
-    ("Practice", "🧩 Practice: Fill the gap, Dictation (hear the video line, type it) and der·die·das. Answers count for your 🔥 streak."),
-    ("Repeat like VLC", "A = loop start, B = loop end (keys A and B); ✕ or Esc stops. ⟲ Loop line repeats the current subtitle. "
+    ("Practice", "Practice: Fill the gap, Dictation (hear the video line, type it) and der·die·das. Answers count for your 🔥 streak."),
+    ("Repeat like VLC", "A = loop start, B = loop end (keys A and B); × or Esc stops. Loop line (L) repeats the current subtitle. "
                         "↑/↓ previous/next line, ←/→ 5 seconds, Space play/pause, F full screen, 1× ▸ 0.75× ▸ 0.5× slower."),
+    ("Shadowing", "Shadowing (S): the line plays, then SubPlayer pauses about as long as the line so you can say it aloud, then "
+                  "plays it again. ↓ goes to the next line. Pause each line stops after every line so you can read and click."),
+    ("Save a clip", "Set A and B, then Save clip: the part between them is saved as a new MP4 in Videos\\SubPlayer — "
+                    "with the subtitles drawn into the picture, or clean."),
+    ("Daily reminder", "Settings ▸ Daily reminder: a Windows notification at your hour when words are due, even when SubPlayer is "
+                       "closed (uses Windows' Task Scheduler)."),
     ("Sync with the phone", "Settings ▸ Sync: “Get a token ↗”, sign in to GitHub, create a token with only “gist” ticked, paste it "
                             "here and in the phone app. Syncs on start, a little after each change, when you come back to the "
-                            "window, on close and with ⟳ Sync. Keep the same video file names on both devices."),
+                            "window, on close and with Sync. Keep the same video file names on both devices."),
     ("Voices", "Speaking uses Windows voices. For German: Windows Settings ▸ Time & language ▸ Speech ▸ Add voices ▸ Deutsch."),
     ("Offline & privacy", "Offline subtitles, dictionaries, review and practice work without internet. Your videos never leave your PC."),
 ]
@@ -297,8 +416,227 @@ class HelpDialog(QDialog):
     def __init__(self, main):
         super().__init__(main)
         self.setWindowTitle("Help")
-        self.setMinimumSize(700, 640)
+        self.setMinimumSize(760, 700)
         v = QVBoxLayout(self)
+        v.setContentsMargins(24, 18, 24, 18)
+        top = QHBoxLayout()
+        top.addWidget(title("How SubPlayer works", 20))
+        top.addStretch(1)
+        tour = ibtn("sparkles", "Show the intro tour again", lambda: (self.accept(), main.show_tour()), kind="", text=" Replay the tour", size=16)
+        top.addWidget(tour)
+        v.addLayout(top)
         t = QTextBrowser()
-        t.setHtml("".join(f"<h3 style='color:{theme.CYAN};margin-bottom:2px'>{a}</h3><p style='margin-top:0'>{b}</p>" for a, b in HELP))
+        t.setHtml("".join(f"<p style='color:{theme.CYAN};font-weight:700;font-size:11.5pt;margin:14px 0 2px 0'>{a}</p>"
+                          f"<p style='margin-top:0;line-height:145%;color:{theme.LIGHT}'>{b}</p>" for a, b in HELP))
         v.addWidget(t)
+
+
+# ==================================================================== new in 2.0
+class LinkDialog(QDialog):
+    """Paste a web link: Tagesschau pages or a direct .mp4 / .webm."""
+
+    def __init__(self, main):
+        super().__init__(main)
+        from . import linkimport
+        self.url = None
+        self.setWindowTitle("Open a video link")
+        self.setMinimumWidth(620)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(26, 20, 26, 20)
+        v.addWidget(title("Open a video link"))
+        v.addWidget(hint("A Tagesschau page or any direct .mp4 / .webm link. SubPlayer saves the video to Videos\\SubPlayer "
+                         "(so it works offline) and opens it, ready for subtitles."))
+        clip = linkimport.first_link(QGuiApplication.clipboard().text()) or ""
+        self.field = QLineEdit(clip, placeholderText="https://www.tagesschau.de/…")
+        self.field.setMinimumHeight(40)
+        v.addWidget(self.field)
+        self.err = hint("")
+        self.err.setStyleSheet(f"color:{theme.MAGENTA}")
+        v.addWidget(self.err)
+        v.addWidget(QLabel("YouTube, Netflix, Instagram, TikTok and similar are refused: their terms don't allow downloading.",
+                           objectName="small", wordWrap=True))
+        row = QHBoxLayout()
+        row.addStretch(1)
+        c = QPushButton("Cancel")
+        c.clicked.connect(self.reject)
+        go = ibtn("download", "Download and open", self.go, kind="", text=" Download && open", size=16, color="#FFFFFF")
+        go.setProperty("accent", True)
+        row.addWidget(c)
+        row.addWidget(go)
+        v.addLayout(row)
+        self.field.returnPressed.connect(self.go)
+
+    def go(self):
+        from . import linkimport
+        u = linkimport.first_link(self.field.text())
+        if not u:
+            self.err.setText("That doesn't look like a web link (it should start with https://)")
+            return
+        why = linkimport.refused_reason(u)
+        if why:
+            self.err.setText(why)
+            return
+        self.url = u
+        self.accept()
+
+
+class ExportDialog(QDialog):
+    def __init__(self, main, has_subs: bool):
+        super().__init__(main)
+        from .app import fmt
+        self.burn = has_subs
+        self.setWindowTitle("Save clip")
+        self.setMinimumWidth(560)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(26, 20, 26, 20)
+        v.addWidget(title("Save the A → B clip"))
+        v.addWidget(hint(f"{fmt(main.a)} → {fmt(main.b)}  ·  {(main.b - main.a) / 1000:.1f} seconds  ·  saved as MP4 in Videos\\SubPlayer"))
+        self.r_burn = QRadioButton("With subtitles drawn into the picture")
+        self.r_clean = QRadioButton("Clean video (no subtitles)")
+        self.r_burn.setEnabled(has_subs)
+        (self.r_burn if has_subs else self.r_clean).setChecked(True)
+        v.addWidget(self.r_burn)
+        v.addWidget(self.r_clean)
+        if not has_subs:
+            v.addWidget(QLabel("No subtitles loaded for this video, so the clip is saved clean.", objectName="small"))
+        row = QHBoxLayout()
+        row.addStretch(1)
+        c = QPushButton("Cancel")
+        c.clicked.connect(self.reject)
+        go = ibtn("scissors", "Save", self.go, kind="", text=" Save clip", size=16, color="#FFFFFF")
+        go.setProperty("accent", True)
+        row.addWidget(c)
+        row.addWidget(go)
+        v.addLayout(row)
+
+    def go(self):
+        self.burn = self.r_burn.isChecked()
+        self.accept()
+
+
+class OwnerDialog(QDialog):
+    """Seller only: paste the private licence key once; it is checked against the key built into SubPlayer."""
+
+    @staticmethod
+    def key_file() -> Path:
+        from . import paths
+        return paths.data_dir() / "owner.key"
+
+    @classmethod
+    def stored_key(cls) -> str | None:
+        try:
+            k = cls.key_file().read_text(encoding="utf-8").strip()
+            return k if cls.valid(k) else None
+        except Exception:
+            return None
+
+    @classmethod
+    def forget(cls):
+        cls.key_file().unlink(missing_ok=True)
+
+    @staticmethod
+    def valid(key: str) -> bool:
+        try:
+            dev = licence.device_code()
+            return licence.verify(licence.create(key, dev, "owner-check"), dev) == "owner-check"
+        except Exception:
+            return False
+
+    def __init__(self, main):
+        super().__init__(main)
+        self.main = main
+        self.setWindowTitle("Owner tools")
+        self.setMinimumWidth(600)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(26, 20, 26, 20)
+        v.addWidget(title("Unlock owner tools"))
+        v.addWidget(hint("Paste the contents of SUBPLAYER_LICENCE_PRIVATE_KEY.txt. It is checked against the key built into the app, "
+                         "kept only on this PC (never synced) and lets you create activation codes for buyers."))
+        self.field = QPlainTextEdit(placeholderText="Private key")
+        self.field.setFixedHeight(110)
+        v.addWidget(self.field)
+        self.err = hint("")
+        v.addWidget(self.err)
+        b = QPushButton("Unlock")
+        b.setProperty("accent", True)
+        b.clicked.connect(self.go)
+        v.addWidget(b)
+
+    def go(self):
+        k = "".join(self.field.toPlainText().split())
+        if not self.valid(k):
+            self.err.setText("That key doesn't match this app's licence key.")
+            return
+        self.key_file().write_text(k, encoding="utf-8")
+        self.main.msg("Owner tools unlocked on this PC — Settings › Owner tools")
+        self.accept()
+
+
+TOUR = [
+    ("film", "Welcome to SubPlayer", "Learn German and English from the videos you already love — films, news, series, your own "
+                                    "recordings. Open a file, drop it on the window, or paste a Tagesschau link."),
+    ("captions", "Subtitles in one click", "Subtitles makes them on your PC with Whisper (or online with your key). They're saved "
+                                          "and come back next time — and travel to your phone with Sync."),
+    ("sparkles", "Tap any word", "Pause and click a word: article, IPA, meanings with examples, English and Persian, the voice and a "
+                                 "real recording. Shift+click two words for a phrase, Ctrl+click for the whole sentence."),
+    ("repeat", "Loop, shadow, slow down", "A and B loop any part, Loop line repeats a sentence, Shadowing gives you a pause to say "
+                                          "it aloud, 0.75× and 0.5× slow it down. Save clip keeps the part as a video."),
+    ("cards", "Save, review, practise", "Save keeps the word with its exact video moment. Review brings it back at the right time "
+                                        "(1, 2, 4, 7, 15, 30, 60 days); Practice has gap-fill, dictation and der·die·das."),
+]
+
+
+class TourDialog(QDialog):
+    def __init__(self, main):
+        super().__init__(main)
+        self.setWindowTitle("Welcome")
+        self.setFixedSize(640, 560)
+        self.k = 0
+        v = QVBoxLayout(self)
+        v.setContentsMargins(34, 24, 34, 24)
+        self.orb = Orb(170)
+        v.addWidget(self.orb, 0, Qt.AlignHCenter)
+        self.icon = QLabel(alignment=Qt.AlignCenter)
+        v.addWidget(self.icon)
+        self.head = GradientLabel("", 22, QFont.Black)
+        self.head.setAlignment(Qt.AlignHCenter)
+        v.addWidget(self.head)
+        self.body = QLabel(wordWrap=True, alignment=Qt.AlignHCenter | Qt.AlignTop)
+        self.body.setStyleSheet(f"color:{theme.LIGHT};font-size:11.5pt;line-height:150%")
+        self.body.setMinimumHeight(96)
+        v.addWidget(self.body)
+        self.dots = QLabel(alignment=Qt.AlignCenter)
+        v.addWidget(self.dots)
+        v.addStretch(1)
+        row = QHBoxLayout()
+        self.skip = QPushButton("Skip")
+        self.skip.clicked.connect(self.accept)
+        self.back = QPushButton("Back")
+        self.back.clicked.connect(lambda: self.step(-1))
+        self.next = QPushButton("Next")
+        self.next.setProperty("accent", True)
+        self.next.clicked.connect(lambda: self.step(1))
+        row.addWidget(self.skip)
+        row.addStretch(1)
+        row.addWidget(self.back)
+        row.addWidget(self.next)
+        v.addLayout(row)
+        self.show_step()
+
+    def step(self, d):
+        if self.k + d >= len(TOUR):
+            self.accept()
+            return
+        self.k = max(0, self.k + d)
+        self.show_step()
+
+    def show_step(self):
+        ic, h, b = TOUR[self.k]
+        self.icon.setPixmap(icons.pixmap(ic, theme.CYAN, 30))
+        self.head.setText(h)
+        self.head.update()
+        self.body.setText(b)
+        self.dots.setText("  ".join(f"<span style='color:{theme.CYAN if i == self.k else '#3a3660'};font-size:14pt'>●</span>"
+                                    for i in range(len(TOUR))))
+        self.back.setEnabled(self.k > 0)
+        self.next.setText("Let's go" if self.k == len(TOUR) - 1 else "Next")

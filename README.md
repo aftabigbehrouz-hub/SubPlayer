@@ -19,6 +19,14 @@
 - [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
 
 
+**Windows 2.0**
+- **New look:** a living space backdrop (stars, nebula, aurora; pauses by itself while a video plays or in Settings),
+  glass panels, a side rail (Player · My Words · Review · Practice · Sync · Settings · Help), crisp line icons, Persian
+  shown in the Vazirmatn font, a dark title bar and dark menus everywhere (the white *Recent* list is fixed).
+- **Same features as the phone:** **video links** (Tagesschau pages and direct .mp4/.webm, saved to Videos\SubPlayer),
+  **Save clip** (A‑B part as MP4, with or without the subtitles drawn in), **shadowing** and **pause after each line**,
+  drag & drop of videos and .srt files, an intro tour, the due‑word badge, and the seller's code tools hidden from buyers.
+
 **2.5**
 - **English words too:** in English subtitles a tapped word opens the **English dictionary** (English Wiktionary,
   131 124 entries, 19 MB): IPA, English definitions with examples, **German translations** (63 587 words) and Persian
@@ -117,7 +125,9 @@ site as a fallback. The app checks every file's SHA‑256 fingerprint and refuse
 *Open* a video → *Subtitles* → language and quality → *Start* (progress at the bottom, *Cancel* stops).
 Pause and **click a word** — the word card is on the right. **Shift+click** first and last word = phrase,
 **Ctrl+click** = whole sentence. Keys: Space play/pause, ←/→ 5 s, ↑/↓ previous/next line, **A**/**B** loop, **L** loop line,
-Esc stop loop, F full screen. *My Words*, *Review* (Space = show meaning, then Got it / Again) and *Practice* are in the top bar.
+Esc stop loop, **S** shadowing, F / F11 full screen, Ctrl+O open, **Ctrl+L video link**, Ctrl+G subtitles, F1 help.
+*Link* opens a Tagesschau page or a direct .mp4/.webm link; *Save clip* (after A and B) saves that part as MP4.
+*My Words*, *Review* (Space = show meaning, then Got it / Again) and *Practice* are in the side rail.
 
 ## Everyday use on the phone
 
@@ -170,7 +180,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 37 Android unit tests (+ 15 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 37 Android unit tests (+ 24 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
