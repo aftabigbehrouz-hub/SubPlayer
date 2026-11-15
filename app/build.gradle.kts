@@ -21,11 +21,12 @@ android {
         targetSdk = 36    // Google Play: new apps and updates must target Android 16 (API 36)
         // Home-screen name; the test copies below get "SubPlayer Bazaar", "SubPlayer Myket" …
         manifestPlaceholders["appLabel"] = "@string/app_name"
-        versionCode = 10
-        versionName = "2.6.1"
+        versionCode = 11
+        versionName = "2.7"
 
         // 64-bit ARM phones (practically every phone from the last ~7 years)
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // (-Pabis=x86_64 builds a copy for the emulator check in GitHub Actions; never uploaded anywhere)
+        ndk { abiFilters += ((project.findProperty("abis") as String?) ?: "arm64-v8a").split(",") }
 
         externalNativeBuild {
             cmake {

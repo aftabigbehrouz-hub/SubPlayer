@@ -1,0 +1,250 @@
+"""
+Walks through the Android app on an emulator (GitHub Actions, .github/workflows/android-emulator.yml) and takes a screenshot of
+every new screen of version 2.7. Fails if the app crashes. A small test video ("Wetterbericht") with German subtitles is made with
+FFmpeg and put in the app's own folder, so no permissions are needed.
+
+usage: python3 emulator_tour.py app.apk out_dir
+"""
+import os
+import re
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+
+APK, OUT = sys.argv[1], sys.argv[2]
+PKG = "com.behrouz.subplayer"
+FILES = f"/sdcard/Android/data/{PKG}/files"
+os.makedirs(OUT, exist_ok=True)
+problems = []
+
+
+def adb(*a, check=True, timeout=120):
+    r = subprocess.run(["adb", *a], capture_output=True, text=True, timeout=timeout)
+    if check and r.returncode != 0:
+        raise RuntimeError(f"adb {' '.join(a)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def nodes():
+    for _ in range(3):
+        adb("shell", "uiautomator", "dump", "/sdcard/u.xml", check=False, timeout=60)
+        x = adb("shell", "cat", "/sdcard/u.xml", check=False)
+        if "<hierarchy" in x:
+            break
+        time.sleep(1)
+    out = []
+    try:
+        root = ET.fromstring(x[x.index("<hierarchy"):])
+    except Exception:
+        return out
+    for n in root.iter("node"):
+        m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n.get("bounds", ""))
+        if not m:
+            continue
+        a, b, c, d = map(int, m.groups())
+        out.append({"text": n.get("text", ""), "desc": n.get("content-desc", ""), "x": (a + c) // 2, "y": (b + d) // 2,
+                    "top": b, "bottom": d})
+    return out
+
+
+def find(label, contains=False, timeout=12):
+    end = time.time() + timeout
+    while time.time() < end:
+        for n in nodes():
+            for v in (n["text"], n["desc"]):
+                if v and (v == label or (contains and label.lower() in v.lower())):
+                    return n
+        time.sleep(1)
+    return None
+
+
+def tap(label, contains=False, timeout=12, required=True):
+    n = find(label, contains, timeout)
+    if not n:
+        if required:
+            problems.append(f"not found: {label!r}")
+            print("  !! not found:", label)
+        return False
+    adb("shell", "input", "tap", str(n["x"]), str(n["y"]))
+    time.sleep(1.2)
+    return True
+
+
+def shot(name):
+    time.sleep(1.0)
+    with open(os.path.join(OUT, name + ".png"), "wb") as f:
+        f.write(subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True, timeout=60).stdout)
+    print("  shot", name)
+
+
+def crashed():
+    log = adb("logcat", "-d", "-s", "AndroidRuntime:E", check=False)
+    return "FATAL EXCEPTION" in log and PKG in log
+
+
+def back():
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(1.2)
+
+
+def java_hash(s: str) -> str:
+    h = 0
+    for ch in s.encode("utf-16-be").decode("utf-16-be"):
+        h = (31 * h + ord(ch)) & 0xFFFFFFFF
+    return format(h, "x")
+
+
+SRT = """1
+00:00:01,000 --> 00:00:04,000
+Guten Abend und willkommen zum Wetterbericht.
+
+2
+00:00:04,500 --> 00:00:08,000
+Morgen wird das Wetter im Norden sonnig und warm.
+
+3
+00:00:08,500 --> 00:00:12,000
+Im Süden gibt es Gewitter und starke Niederschläge.
+
+4
+00:00:12,500 --> 00:00:16,000
+Die Temperaturen steigen auf dreißig Grad.
+
+5
+00:00:16,500 --> 00:00:20,000
+Am Wochenende kühlt es deutlich ab.
+
+6
+00:00:20,500 --> 00:00:24,000
+Vergessen Sie Ihren Regenschirm nicht!
+
+7
+00:00:24,500 --> 00:00:28,000
+Das war das Wetter für heute.
+
+8
+00:00:28,500 --> 00:00:40,000
+Ich wünsche Ihnen einen schönen Abend.
+"""
+OTHER = """1
+00:00:02,000 --> 00:00:05,000
+Das Wetter in Hamburg bleibt regnerisch.
+
+2
+00:00:06,000 --> 00:00:09,000
+Auch morgen ist das Wetter wechselhaft.
+"""
+
+print("install")
+adb("install", "-r", "-g", APK, timeout=300)
+adb("logcat", "-c")
+adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
+time.sleep(6)
+if find("Skip", timeout=15):
+    shot("00_tour")
+    tap("Skip")
+shot("01_home")
+
+print("discover")
+if tap("Discover programmes"):
+    time.sleep(18)
+    shot("02_discover_german")
+    tap("English")
+    time.sleep(18)
+    shot("03_discover_english")
+    # a programme's card
+    n = find("6 Minute", contains=True, timeout=5) or find("NASA", contains=True, timeout=5)
+    if n:
+        adb("shell", "input", "tap", str(n["x"]), str(n["y"]))
+        time.sleep(2)
+        shot("04_programme")
+        back()
+    back()
+
+print("video")
+subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i",
+                "sine=frequency=330", "-t", "40", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "/tmp/Wetterbericht.mp4"], check=True)
+uri = f"file://{FILES}/Wetterbericht.mp4"
+open("/tmp/a.srt", "w", encoding="utf-8").write(SRT)
+open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
+adb("shell", "mkdir", "-p", f"{FILES}/subtitles")
+adb("push", "/tmp/Wetterbericht.mp4", f"{FILES}/Wetterbericht.mp4")
+adb("push", "/tmp/a.srt", f"{FILES}/subtitles/Wetterbericht_{java_hash(uri)}.de.srt")
+adb("push", "/tmp/b.srt", f"{FILES}/subtitles/Tagesschau_Wetter_1a2b3c.de.srt")
+adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", uri, "-t", "video/mp4", "-n", f"{PKG}/.MainActivity")
+time.sleep(4)
+tap("A1–C2")
+if not tap("Translation", timeout=4, required=False):
+    p = find("Pause each line")
+    if p:
+        adb("shell", "input", "swipe", "900", str(p["y"]), "200", str(p["y"]), "300")
+        time.sleep(1)
+    tap("Translation")
+adb("shell", "input", "keyevent", "62")      # Space = pause (keyboard)
+time.sleep(1)
+adb("shell", "input", "keyevent", "62")      # Space = play again
+time.sleep(5.5)
+adb("shell", "input", "keyevent", "62")      # pause on line 2
+time.sleep(2)
+shot("05_player_levels_translation")
+
+print("word card")
+if tap("Wetter"):
+    time.sleep(2)
+    shot("06_word_card")
+    if tap("Download German dictionary", timeout=5, required=False):
+        for _ in range(60):
+            time.sleep(5)
+            if not find("Downloading", contains=True, timeout=1):
+                break
+        if not find("Where else is it used?", timeout=10):
+            tap("Wetter", required=False)
+        time.sleep(3)
+        shot("07_word_card_dictionary")
+    tap("Save", required=False)
+    if tap("Where else is it used?"):
+        time.sleep(4)
+        shot("08_where_else")
+        back()
+    else:
+        back()
+
+print("options, transcript, edit")
+if tap("Options"):
+    shot("09_options")
+    back()
+if tap("Transcript"):
+    shot("10_transcript")
+    back()
+if tap("Edit line"):
+    shot("11_edit_line")
+    back()
+
+print("study")
+if tap("Study video"):
+    time.sleep(4)
+    shot("12_study_words")
+    tap("Practise")
+    shot("13_study_practise")
+    if tap("Start"):
+        time.sleep(2)
+        shot("14_gap_from_video")
+        back()
+    back()
+
+print("my words")
+if tap("My words"):
+    time.sleep(2)
+    shot("15_my_words")
+    if tap("Calendar", contains=True, required=False):
+        shot("16_calendar")
+
+if crashed():
+    print(adb("logcat", "-d", "-s", "AndroidRuntime:E", check=False)[-6000:])
+    sys.exit("The app crashed")
+log = adb("logcat", "-d", check=False)
+open(os.path.join(OUT, "logcat.txt"), "w").write(log[-400000:])
+print("problems:", problems or "none")
+if len(problems) > 4:
+    sys.exit("too many screens not found")
