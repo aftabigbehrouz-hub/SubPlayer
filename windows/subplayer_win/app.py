@@ -1639,18 +1639,16 @@ class Main(QMainWindow):
     def _fetch_found(self, found):
         """(runs in the background) downloads the video + subtitles; returns (video path, srt text or None)."""
         from . import linkimport
-        stream = found.hls
-
         def prog(done, total):
-            if stream:
+            if total and total < 200_000:                  # a stream copied by time (seconds), not by bytes
                 self._bg_progress(done / total if total else 0, f"Downloading “{found.title}” · {fmt(done * 1000)}"
                                   + (f" of {fmt(total * 1000)}" if total else ""))
             else:
                 self._bg_progress(done / total if total else 0, f"Downloading “{found.title}” · {done // 1_000_000} MB"
                                   + (f" of {total // 1_000_000} MB" if total else ""))
         path = linkimport.download(found, progress=prog, cancelled=lambda: self.cancel)
-        srt = None
-        if found.subtitle_url:
+        srt = found.subtitle_text or None
+        if not srt and found.subtitle_url:
             self._bg_progress(1, "Getting the broadcaster's subtitles…")
             srt = linkimport.subtitle_srt(found.subtitle_url)
         return path, srt

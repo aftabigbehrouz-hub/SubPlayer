@@ -128,30 +128,31 @@ try:
 except Exception:
     traceback.print_exc()
 
-print("\n== Arte stream copy (20 s)")
+print("\n== Arte: full download as the app does it (432p to keep it small)")
 try:
-    fs, _ = M.search(channels=["Arte"], length=(600, 3600), size=5, session=s)
-    f = fs[0]
-    found = L.resolve(f.url_website, s)
-    print("resolved:", found.hls, found.title[:60], found.duration, found.video_url[:90])
+    fs, _ = M.search(channels=["Arte"], length=(300, 1500), size=8, session=s)
     import pathlib, av
-    out = pathlib.Path("/tmp/arte.part.mp4")
-    seen = {"t": 0}
-    def prog(d, t): seen["t"] = d
-    L._download_hls(found, out, prog, lambda: False, stop_at=20)
-    c = av.open(str(out))
-    print("sample:", out.stat().st_size, "bytes", [(st.type, st.codec_context.name) for st in c.streams], "duration", c.duration / 1e6 if c.duration else None)
-    nfr = sum(1 for _ in c.decode(video=0))
-    print("decoded video frames:", nfr)
-    c.close()
-    # cancelled deletes the file: run again keeping it by copying logic quickly
-    src = av.open(found.video_url, options={"user_agent": L.UA})
-    print("streams:", [(st.type, st.codec_context.name, getattr(st.codec_context, 'height', None), (st.metadata or {}).get('language')) for st in src.streams][:12])
-    src.close()
-    # catalogue manifest link (no .m3u8 ending) -> detected by content type?
-    r = s.get(f.video(), headers={"User-Agent": L.UA}, stream=True, timeout=30)
-    print("catalogue link content-type:", r.headers.get("Content-Type")); r.close()
-except Exception as e:
+    for f in fs:
+        try:
+            found = L.resolve(f.url_website, s)
+        except Exception as e:
+            print("  skip", f.title[:40], "-", str(e)[:80]); continue
+        print("resolved:", found.title[:60], found.duration, "s")
+        txt = L._get_text(found.video_url)
+        pick = L.pick_hls(found.video_url, txt, 432)
+        print("pick:", pick.height, pick.video[-50:], "| audio", pick.audio[-40:], "| subs", pick.subtitles[-40:])
+        out = pathlib.Path("/tmp/arte.mp4")
+        t0 = time.time(); last = {}
+        L._download_hls(found, out, lambda d, t: last.update(d=d, t=t), lambda: False, max_height=432)
+        c = av.open(str(out))
+        print("file:", out.stat().st_size // 1_000_000, "MB in", round(time.time() - t0, 1), "s;",
+              [(st.type, st.codec_context.name, (st.metadata or {}).get("language")) for st in c.streams], "duration", round(c.duration / 1e6))
+        print("decoded frames (first 5 s):", sum(1 for fr in c.decode(video=0) if fr.time < 5))
+        c.close()
+        print("subtitles from the stream:", len(found.subtitle_text.splitlines()) // 4 if found.subtitle_text else 0, "lines",
+              repr(found.subtitle_text[:120]) if found.subtitle_text else "")
+        break
+except Exception:
     traceback.print_exc()
 
 print("\n== tagesschau page")

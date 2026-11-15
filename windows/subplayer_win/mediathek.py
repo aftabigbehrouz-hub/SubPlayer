@@ -122,7 +122,7 @@ def search(text: str = "", channels: list[str] | None = None, topic: str = "", t
     import requests
     s = session or requests
     q = build_query(text, channels, topic, title, length, offset, size * (3 if subtitles_only else 1))
-    r = s.post(API, data=json.dumps(q), headers={"Content-Type": "text/plain", "User-Agent": UA}, timeout=25)
+    r = s.post(API, data=json.dumps(q), headers={"Content-Type": "text/plain", "User-Agent": UA}, timeout=(8, 25))
     r.raise_for_status()
     films, total = parse_response(r.json())
     films = [f for f in films if f.url_video.startswith("https://") or f.url_video.startswith("http")]

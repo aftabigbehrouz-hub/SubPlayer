@@ -29,6 +29,7 @@ class Found:
     subtitle_url: str = ""
     hls: bool = False            # an .m3u8 stream: copied into an MP4 (no re-encoding)
     duration: int = 0            # seconds, if known (for the progress of streams)
+    subtitle_text: str = ""      # subtitles found inside a stream (already .srt)
 
 
 BROADCASTERS = ("ardmediathek.de", "ard.de", "tagesschau.de", "sportschau.de", "zdf.de", "zdfheute.de", "3sat.de", "arte.tv",
@@ -352,50 +353,227 @@ def download(found: Found, folder: Path | None = None, progress=lambda done, tot
     return dest
 
 
-def _download_hls(found: Found, tmp: Path, progress, cancelled, stop_at: float = 0):
-    """Copies an HLS stream (the best video up to 720p + its audio) into an MP4 without re-encoding."""
+# ------------------------------------------------------------------ HLS streams
+_ATTR = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
+
+
+def m3u8_attrs(line: str) -> dict:
+    return {k: v.strip('"') for k, v in _ATTR.findall(line.split(":", 1)[1] if ":" in line else "")}
+
+
+@dataclass
+class HlsPick:
+    video: str                      # media playlist of the picture (may also carry the sound)
+    audio: str = ""                 # separate sound playlist, if the stream has one
+    subtitles: str = ""             # subtitle playlist (WebVTT), if offered
+    height: int = 0
+
+
+def pick_hls(master_url: str, text: str, max_height: int = 720) -> HlsPick:
+    """From a master playlist: the best H.264 picture up to max_height, the normal German sound (not Klare Sprache /
+    audio description), German subtitles."""
+    from urllib.parse import urljoin
+    lines = text.splitlines()
+    if not any(l.startswith("#EXT-X-STREAM-INF") for l in lines):
+        return HlsPick(master_url)                                  # already a media playlist
+    variants, audios, subs = [], [], []
+    for k, l in enumerate(lines):
+        if l.startswith("#EXT-X-STREAM-INF"):
+            a = m3u8_attrs(l)
+            uri = next((x for x in lines[k + 1:] if x and not x.startswith("#")), "")
+            res = a.get("RESOLUTION", "0x0")
+            h = int(res.split("x")[1]) if "x" in res else 0
+            variants.append((urljoin(master_url, uri), h, a.get("CODECS", ""), int(a.get("BANDWIDTH", 0) or 0), a.get("AUDIO", "")))
+        elif l.startswith("#EXT-X-MEDIA"):
+            a = m3u8_attrs(l)
+            if a.get("URI"):
+                a["URI"] = urljoin(master_url, a["URI"])
+                (audios if a.get("TYPE") == "AUDIO" else subs if a.get("TYPE") == "SUBTITLES" else []).append(a)
+    avc = [v for v in variants if "avc1" in v[2] or not v[2]] or variants
+    fit = [v for v in avc if 0 < v[1] <= max_height] or avc
+    v = max(fit, key=lambda x: (x[1], -x[3] if x[1] > max_height else x[3]))
+
+    def alt(a):
+        t = (a.get("NAME", "") + " " + a.get("CHARACTERISTICS", "")).lower()
+        return any(x in t for x in ("klare sprache", "audiodeskription", "description", "public.accessibility", "hörfilm"))
+    group = [a for a in audios if not v[4] or a.get("GROUP-ID") == v[4]] or audios
+    de = [a for a in group if a.get("LANGUAGE", "").lower().startswith(("de", "ger", "deu"))]
+    pool = [a for a in (de or group) if not alt(a)] or de or group
+    au = max(pool, key=lambda a: a.get("DEFAULT") == "YES")["URI"] if pool else ""
+    sde = [a for a in subs if a.get("LANGUAGE", "").lower().startswith(("de", "ger", "deu"))]
+    sde.sort(key=lambda a: ("automat" in a.get("NAME", "").lower(), a.get("FORCED") == "YES"))
+    return HlsPick(v[0], au, sde[0]["URI"] if sde else "", v[1])
+
+
+def single_file(playlist_url: str, text: str) -> str | None:
+    """CMAF streams often keep every piece in ONE file (byte ranges): then that file can simply be downloaded."""
+    from urllib.parse import urljoin
+    uris = {x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#")}
+    m = re.search(r'#EXT-X-MAP:.*URI="([^"]+)"', text)
+    if m:
+        uris.add(m.group(1))
+    return urljoin(playlist_url, uris.pop()) if len(uris) == 1 else None
+
+
+def _get_text(url: str) -> str:
+    import requests
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
+    if r.status_code in (403, 451):
+        raise PermissionError(GEO_HINT)
+    r.raise_for_status()
+    return r.text
+
+
+def _fetch_file(url: str, dest: Path, progress, cancelled, base: int = 0, grand: int = 0):
+    import requests
+    with requests.get(url, headers={"User-Agent": UA}, stream=True, timeout=60) as r:
+        if r.status_code in (403, 451):
+            raise PermissionError(GEO_HINT)
+        r.raise_for_status()
+        done = 0
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(256 * 1024):
+                if cancelled():
+                    raise RuntimeError("Cancelled")
+                f.write(chunk)
+                done += len(chunk)
+                progress(base + done, grand or 0)
+    return done
+
+
+def _head_size(url: str) -> int:
+    import requests
+    try:
+        r = requests.head(url, headers={"User-Agent": UA}, timeout=20, allow_redirects=True)
+        return int(r.headers.get("Content-Length") or 0)
+    except Exception:
+        return 0
+
+
+def _download_hls(found: Found, tmp: Path, progress, cancelled, stop_at: float = 0, max_height: int = 720):
+    """Saves an HLS stream as one MP4 without re-encoding: picture + German sound (+ German subtitles into
+    found.subtitle_text when the stream offers plain WebVTT)."""
+    pick = pick_hls(found.video_url, _get_text(found.video_url), max_height)
+    v_text = _get_text(pick.video)
+    a_text = _get_text(pick.audio) if pick.audio else ""
+    v_file = single_file(pick.video, v_text)
+    a_file = single_file(pick.audio, a_text) if pick.audio else None
+    parts = []
+    try:
+        if pick.subtitles:
+            try:
+                found.subtitle_text = _vtt_from_playlist(pick.subtitles)
+            except Exception:
+                found.subtitle_text = ""
+        if v_file and (a_file or not pick.audio) and not stop_at:
+            # whole files: plain downloads (fast, exact progress), then joined
+            sizes = [_head_size(v_file), _head_size(a_file) if a_file else 0]
+            grand = sum(sizes)
+            vp = tmp.with_name(tmp.stem + ".v.mp4")
+            parts.append(vp)
+            got = _fetch_file(v_file, vp, progress, cancelled, 0, grand)
+            ap = None
+            if a_file:
+                ap = tmp.with_name(tmp.stem + ".a.mp4")
+                parts.append(ap)
+                _fetch_file(a_file, ap, progress, cancelled, got, grand)
+            _mux([str(vp)] + ([str(ap)] if ap else []), tmp, lambda d, t: None, cancelled, 0)
+        else:
+            dur = float(found.duration or 0)
+            _mux([pick.video] + ([pick.audio] if pick.audio else []), tmp, progress, cancelled, dur, stop_at)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    finally:
+        for p_ in parts:
+            p_.unlink(missing_ok=True)
+
+
+def _vtt_from_playlist(url: str) -> str:
+    from urllib.parse import urljoin
+    import requests
+    text = _get_text(url)
+    uris = list(dict.fromkeys(x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#")))
+    out = []
+    for u in uris[:2000]:
+        r = requests.get(urljoin(url, u), headers={"User-Agent": UA}, timeout=30)
+        r.raise_for_status()
+        t = r.content.decode("utf-8", errors="replace")
+        if not t.lstrip("\ufeff").startswith("WEBVTT"):
+            return ""                                    # binary (CMAF) subtitles — not used
+        out.append(t)
+    from . import subtitles
+    cues = []
+    for t in out:
+        cues += subtitles.parse(t)
+    cues.sort(key=lambda c: c.start_ms)
+    return subtitles.write(cues) if len(cues) >= 3 else ""
+
+
+def _mux(inputs: list[str], tmp: Path, progress, cancelled, dur: float = 0, stop_at: float = 0):
+    """Copies the picture (first input) and the sound (second input, or the first one's) into one MP4, interleaved."""
     import av
     from . import netcfg
     opts = {"user_agent": UA, "reconnect": "1", "reconnect_streamed": "1", "reconnect_delay_max": "5"}
     px = netcfg.ffmpeg_proxy()
     if px:
         opts["http_proxy"] = px
+    srcs = []
     try:
-        src = av.open(found.video_url, options=opts, timeout=(30, 60))
-    except av.error.HTTPForbiddenError:
-        raise PermissionError(GEO_HINT)
-    try:
-        vids = [s for s in src.streams.video]
-        good = [s for s in vids if (s.codec_context.height or 0) <= 720] or vids
-        v = max(good, key=lambda s: (s.codec_context.height or 0, s.bit_rate or 0)) if good else None
+        for i in inputs:
+            try:
+                srcs.append(av.open(i, options=opts if i.startswith("http") else {}, timeout=(30, 60)))
+            except av.error.HTTPForbiddenError:
+                raise PermissionError(GEO_HINT)
+        vsrc = srcs[0]
+        v = max(vsrc.streams.video, key=lambda s: (s.codec_context.height or 0)) if vsrc.streams.video else None
+        asrc = srcs[1] if len(srcs) > 1 else srcs[0]
         a = None
-        if src.streams.audio:
-            a = next((s for s in src.streams.audio if (s.metadata or {}).get("language", "").startswith(("de", "ger", "deu"))), None) \
-                or src.streams.audio[0]
+        if asrc.streams.audio:
+            a = next((s for s in asrc.streams.audio if (s.metadata or {}).get("language", "").startswith(("de", "ger", "deu"))), None) \
+                or asrc.streams.audio[0]
         if v is None and a is None:
             raise ValueError("The stream has no picture or sound")
-        dur = (src.duration / 1_000_000) if src.duration else float(found.duration or 0)
+        dur = dur or ((vsrc.duration or 0) / 1_000_000)
         out = av.open(str(tmp), "w", format="mp4")
         try:
-            mapping = {}
-            for s_in in (v, a):
-                if s_in is not None:
-                    mapping[s_in.index] = out.add_stream_from_template(s_in)
-            for pkt in src.demux([x for x in (v, a) if x is not None]):
+            omap = {}
+            if v is not None:
+                omap[(0, v.index)] = out.add_stream_from_template(v)
+            if a is not None:
+                omap[(srcs.index(asrc), a.index)] = out.add_stream_from_template(a)
+
+            def packets(ci, src, streams):
+                for pkt in src.demux(streams):
+                    if pkt.dts is None:
+                        continue
+                    yield ci, pkt
+            gens = []
+            if asrc is vsrc:
+                gens.append(packets(0, vsrc, [x for x in (v, a) if x is not None]))
+            else:
+                if v is not None:
+                    gens.append(packets(0, vsrc, [v]))
+                if a is not None:
+                    gens.append(packets(1, asrc, [a]))
+            heads = [next(g, None) for g in gens]
+            while any(h is not None for h in heads):
                 if cancelled():
                     raise RuntimeError("Cancelled")
-                if stop_at and pkt.pts is not None and pkt.time_base is not None and float(pkt.pts * pkt.time_base) > stop_at:
-                    break
-                if pkt.dts is None:
+                k = min((i for i, h in enumerate(heads) if h is not None),
+                        key=lambda i: float(heads[i][1].dts * heads[i][1].time_base))
+                ci, pkt = heads[k]
+                t = float(pkt.dts * pkt.time_base)
+                if stop_at and t > stop_at:
+                    heads[k] = None
                     continue
-                pkt.stream = mapping[pkt.stream.index]
+                pkt.stream = omap[(ci, pkt.stream.index)]
                 out.mux(pkt)
-                if dur and pkt.pts is not None and pkt.time_base is not None:
-                    progress(min(float(pkt.pts * pkt.time_base), dur), dur)
+                if dur:
+                    progress(min(t, dur), dur)
+                heads[k] = next(gens[k], None)
         finally:
             out.close()
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
     finally:
-        src.close()
+        for s_ in srcs:
+            s_.close()

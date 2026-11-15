@@ -201,8 +201,12 @@ class DiscoverPage(QWidget):
     def _failed(self, g, err):
         if g != self.gen:
             return
-        self.status.setText(f"<span style='color:{theme.MAGENTA}'>Couldn't reach the catalogue — {html.escape(err[:160])}</span>"
-                            "<br>Check the internet connection (from Iran a VPN is needed: Settings ▸ Internet connection).")
+        low = err.lower()
+        why = ("no connection" if any(k in low for k in ("connectionpool", "max retries", "connection", "resolve", "proxy"))
+               else "it took too long" if "timed out" in low or "timeout" in low else err[:140])
+        self.status.setText(f"<span style='color:{theme.MAGENTA}'>Couldn't reach the programme catalogue — {html.escape(why)}.</span>"
+                            "<br>Check the internet connection. Where it is filtered (e.g. in Iran) turn on your VPN — "
+                            "Settings ▸ Internet connection ▸ Test connection shows what works.")
 
     # ------------------------------------------------------------------ views
     def activate(self):
@@ -276,17 +280,17 @@ class DiscoverPage(QWidget):
         shelves = mediathek.SHELVES
 
         def job():
-            import requests
-            s = requests.Session()
-            out = []
-            for sh in shelves:
+            from concurrent.futures import ThreadPoolExecutor
+            first = mediathek.shelf_films(shelves[0], 10)          # fails fast when there is no connection
+
+            def one(sh):
                 try:
-                    out.append((sh, mediathek.shelf_films(sh, 10, session=s)))
+                    return sh, mediathek.shelf_films(sh, 10)
                 except Exception as e:
-                    out.append((sh, e))
-            if all(isinstance(x[1], Exception) for x in out):
-                raise out[0][1]
-            return "shelves", out
+                    return sh, e
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                rest = list(ex.map(one, shelves[1:]))
+            return "shelves", [(shelves[0], first)] + rest
         self._run(job)
 
     def _render_shelves(self, shelves):
