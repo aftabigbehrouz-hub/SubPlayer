@@ -173,9 +173,10 @@ fun GlowButton(text: String, modifier: androidx.compose.ui.Modifier = androidx.c
 
 /** Gradient headline text. */
 @Composable
-fun NeonTitle(text: String, size: androidx.compose.ui.unit.TextUnit = 26.sp, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier) {
+fun NeonTitle(text: String, size: androidx.compose.ui.unit.TextUnit = 26.sp, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+              maxLines: Int = Int.MAX_VALUE) {
     androidx.compose.material3.Text(
-        text, modifier = modifier,
+        text, modifier = modifier, maxLines = maxLines, softWrap = maxLines > 1,
         style = androidx.compose.ui.text.TextStyle(brush = Neon.hot, fontSize = size,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Black, letterSpacing = (-0.5).sp)
     )

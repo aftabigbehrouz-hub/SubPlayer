@@ -159,7 +159,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            NeonTitle("SubPlayer", 24.sp)
+            NeonTitle("SubPlayer", 24.sp, maxLines = 1)
             Text(
                 if (vm.videoName.isNotEmpty()) vm.videoName + if (vm.cueInfo.isNotEmpty()) "  ·  ${vm.cueInfo}" else ""
                 else "Watch · understand · remember",
@@ -186,8 +186,7 @@ private fun TopBar(vm: AppViewModel, onOpenVideo: () -> Unit) {
         }
         BarIcon(Icons.Star, "My words", badge = vm.dueCount) { vm.screen = Screen.WORDS }
         if (!com.behrouz.subplayer.BuildConfig.PLAY) BarIcon(Icons.Explore, "Discover programmes") { vm.openDiscover() }
-        BarIcon(Icons.Folder, "Open a video") { onOpenVideo() }
-        BarIcon(Icons.History, "Recent videos") { vm.sheet = Sheet.Videos }
+        BarIcon(Icons.Folder, "Videos") { if (vm.recentList.isEmpty()) onOpenVideo() else vm.sheet = Sheet.Videos }
         BarIcon(Icons.Help, "How it works") { vm.sheet = Sheet.Help }
         BarIcon(Icons.More, "Settings") { vm.sheet = Sheet.Settings }
     }

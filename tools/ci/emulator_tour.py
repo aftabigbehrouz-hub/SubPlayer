@@ -27,12 +27,15 @@ def adb(*a, check=True, timeout=120):
 
 
 def nodes():
-    for _ in range(3):
-        adb("shell", "uiautomator", "dump", "/sdcard/u.xml", check=False, timeout=60)
+    x = ""
+    for i in range(4):
+        adb("shell", "rm", "-f", "/sdcard/u.xml", check=False)
+        r = adb("shell", "uiautomator", "dump", "--compressed", "/sdcard/u.xml", check=False, timeout=60)
         x = adb("shell", "cat", "/sdcard/u.xml", check=False)
         if "<hierarchy" in x:
             break
-        time.sleep(1)
+        print("   (screen not readable yet:", r.strip()[:120], ")")
+        time.sleep(2)
     out = []
     try:
         root = ET.fromstring(x[x.index("<hierarchy"):])
@@ -179,10 +182,15 @@ subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "test
 uri = f"file://{FILES}/Wetterbericht.mp4"
 open("/tmp/a.srt", "w", encoding="utf-8").write(SRT)
 open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
-adb("shell", "mkdir", "-p", f"{FILES}/subtitles")
-adb("push", "/tmp/Wetterbericht.mp4", f"{FILES}/Wetterbericht.mp4")
-adb("push", "/tmp/a.srt", f"{FILES}/subtitles/Wetterbericht_{java_hash(uri)}.de.srt")
-adb("push", "/tmp/b.srt", f"{FILES}/subtitles/Tagesschau_Wetter_1a2b3c.de.srt")
+# the files are copied by the app's own user (run-as: debug build), so the app owns them like files it made itself
+def place(local, dest):
+    adb("push", local, "/data/local/tmp/" + os.path.basename(local))
+    adb("shell", "chmod", "644", "/data/local/tmp/" + os.path.basename(local))
+    adb("shell", "run-as", PKG, "sh", "-c", f"mkdir -p {os.path.dirname(dest)} && cp /data/local/tmp/{os.path.basename(local)} {dest}")
+place("/tmp/Wetterbericht.mp4", f"{FILES}/Wetterbericht.mp4")
+place("/tmp/a.srt", f"{FILES}/subtitles/Wetterbericht_{java_hash(uri)}.de.srt")
+place("/tmp/b.srt", f"{FILES}/subtitles/Tagesschau_Wetter_1a2b3c.de.srt")
+print(adb("shell", "run-as", PKG, "ls", "-la", f"{FILES}", f"{FILES}/subtitles", check=False))
 adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", uri, "-t", "video/mp4", "-n", f"{PKG}/.MainActivity")
 time.sleep(4)
 tap("A1–C2")
@@ -200,6 +208,7 @@ adb("shell", "input", "keyevent", "62")      # pause on line 2
 time.sleep(2)
 shot("05_player_levels_translation")
 
+print(adb("logcat", "-d", "-s", "SubPlayer", check=False)[-3000:])
 print("word card")
 if tap("Wetter"):
     time.sleep(2)
