@@ -236,21 +236,33 @@ def resolve(url: str, session=None) -> Found:
     r = s.get(u, headers={"User-Agent": UA, "Accept-Language": "de-DE,de;q=0.9"}, timeout=30)
     r.raise_for_status()
     page = r.text[:5_000_000]
+    mt = OG_TITLE.search(page) or TITLE.search(page)
+    title = html.unescape(re.sub(r"<[^>]+>", "", mt.group(1))).strip() if mt else ""
+    if "{{" in title:                                    # page filled in later by a script
+        title = ""
+    if is_broadcaster(u):
+        from . import mediathek
+        f = mediathek.lookup(u, title, session=s, similar=False)      # the catalogue's own entry for this page
+        if f:
+            return _from_film(f)
     found = find_in_page(page)
     if found and is_broadcaster(u):
         found.subtitle_url = found.subtitle_url or find_subtitle(page)
-    if not found and is_broadcaster(u):
+    if not found and is_broadcaster(u) and title:
         from . import mediathek
-        mt = OG_TITLE.search(page) or TITLE.search(page)
-        title = html.unescape(re.sub(r"<[^>]+>", "", mt.group(1))).strip() if mt else ""
-        f = mediathek.lookup(u, title, session=s)
+        f = mediathek.lookup(u, title, session=s, similar=True)
         if f:
-            found = Found(f.video(), f.title if f.topic.lower() in f.title.lower() else f"{f.topic} – {f.title}", f.url_subtitle,
-                          duration=f.duration)
+            found = _from_film(f)
     if not found:
         raise ValueError("No downloadable video found on that page. For ARD, ZDF, 3sat, Arte and DW programmes, "
                          "Discover finds them by name.")
     return found
+
+
+def _from_film(f) -> Found:
+    title = f.title if f.topic.lower() in f.title.lower() else f"{f.topic} – {f.title}"
+    u = f.video()
+    return Found(u, title, f.url_subtitle, hls=bool(HLS.search(u.split("?")[0])), duration=f.duration)
 
 
 SUB_URL = re.compile(r"""https?://[^"'\s<>\\]+\.(?:vtt|xml|ttml)(?:\?[^"'\s<>\\]*)?(?=["'\s<>\\]|$)""", re.I)
@@ -334,7 +346,11 @@ def download(found: Found, folder: Path | None = None, progress=lambda done, tot
 def _download_hls(found: Found, tmp: Path, progress, cancelled, stop_at: float = 0):
     """Copies an HLS stream (the best video up to 720p + its audio) into an MP4 without re-encoding."""
     import av
+    from . import netcfg
     opts = {"user_agent": UA, "reconnect": "1", "reconnect_streamed": "1", "reconnect_delay_max": "5"}
+    px = netcfg.ffmpeg_proxy()
+    if px:
+        opts["http_proxy"] = px
     try:
         src = av.open(found.video_url, options=opts, timeout=(30, 60))
     except av.error.HTTPForbiddenError:

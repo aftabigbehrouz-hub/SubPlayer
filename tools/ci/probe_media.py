@@ -88,6 +88,46 @@ for kind, q, chans in M.SHELF_TRIALS:
     except Exception as e:
         print(q, "FAILED", e)
 
+print("\n== ARD: all video files of one item")
+try:
+    fs, _ = M.search(channels=["ARD"], length=(600, 3600), size=10, session=s)
+    f = next(x for x in fs if L.ard_id(x.url_website))
+    r = s.get(f"https://api.ardmediathek.de/page-gateway/pages/ard/item/{L.ard_id(f.url_website)}",
+              params={"devicetype": "pc", "embedded": "true"}, headers={"User-Agent": L.UA}, timeout=30)
+    import json as _j
+    d = r.json()
+    for path, v in L._walk(d):
+        if isinstance(v, str) and (".mp4" in v or ".m3u8" in v):
+            print("   ", "/".join(path[-4:]), v[-70:])
+        if path and path[-1] in ("maxHResolutionPx", "forcedLabel", "kind", "languageCode") and len(path) > 4:
+            print("      ", "/".join(path[-4:]), "=", v)
+    print("chosen:", L.ard_item(L.ard_id(f.url_website), s).video_url[-70:])
+except Exception:
+    traceback.print_exc()
+
+print("\n== Arte stream diagnosis")
+try:
+    fs, _ = M.search(channels=["Arte"], length=(600, 3600), size=5, session=s)
+    found = L.resolve(fs[0].url_website, s)
+    m = s.get(found.video_url, headers={"User-Agent": L.UA}, timeout=30)
+    print("master", m.status_code, m.headers.get("Content-Type"))
+    lines = m.text.splitlines()
+    print("\n".join("   " + l[:150] for l in lines[:14]))
+    from urllib.parse import urljoin
+    var = next((l for l in lines if l and not l.startswith("#")), None)
+    if var:
+        vu = urljoin(found.video_url, var)
+        vr = s.get(vu, headers={"User-Agent": L.UA}, timeout=30)
+        vl = vr.text.splitlines()
+        print("variant", vr.status_code, "\n" + "\n".join("   " + l[:150] for l in vl[:10]))
+        seg = next((l for l in vl if l and not l.startswith("#")), None)
+        if seg:
+            su = urljoin(vu, seg)
+            sr = s.get(su, headers={"User-Agent": L.UA, "Range": "bytes=0-1023"}, timeout=30)
+            print("segment", sr.status_code, sr.headers.get("Content-Type"), su[-80:])
+except Exception:
+    traceback.print_exc()
+
 print("\n== Arte stream copy (20 s)")
 try:
     fs, _ = M.search(channels=["Arte"], length=(600, 3600), size=5, session=s)

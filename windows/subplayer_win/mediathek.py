@@ -206,25 +206,75 @@ def _title_queries(page_title: str) -> list[str]:
     return out[:4]
 
 
-def lookup(page_url: str, page_title: str, session=None) -> Film | None:
-    """The catalogue entry for a broadcaster page: same web address, or else the closest title."""
+GENERIC_SEG = {"video", "videos", "sendungen", "sendung", "dokus", "doku", "dokumentation", "reportagen", "magazine", "filme",
+               "serien", "nachrichten", "wissen", "kultur", "gesellschaft", "politik", "panorama", "multimedia", "de", "mediathek",
+               "gespraeche", "comedy", "show", "kinder", "page", "p", "programm", "unterhaltung", "verbraucher"}
+
+
+def _variants(t: str) -> list[str]:
+    """'phoenix persoenlich' -> also 'phoenix persönlich' etc. (addresses write ö as oe; each word tried both ways)."""
+    import itertools
+    opts = []
+    for w in t.split():
+        alt = re.sub(r"ae", "ä", re.sub(r"oe", "ö", re.sub(r"ue", "ü", w)))
+        opts.append([w] if alt == w else [w, alt])
+    out = [" ".join(c) for c in itertools.product(*opts)]
+    return out[:4]
+
+
+def _url_topics(page_url: str) -> list[str]:
+    """Programme names hidden in the address, e.g. zdf.de/video/reportagen/backstage-154/… -> 'backstage'."""
+    from urllib.parse import urlparse
+    segs = [x for x in urlparse(page_url).path.split("/") if x][:-1]
+    out = []
+    for seg in segs:
+        t = re.sub(r"-\d+$", "", seg.lower()).replace("-", " ").strip()
+        if len(t) < 3 or t in GENERIC_SEG or t.isdigit():
+            continue
+        for v in _variants(t):
+            if v not in out:
+                out.append(v)
+    return out[:6]
+
+
+def _exact(films: list[Film], want: str, tail: str) -> Film | None:
+    for f in films:
+        u = _norm_url(f.url_website)
+        if u == want or (len(tail) >= 6 and u.rsplit("/", 1)[-1] == tail):
+            return f
+    return None
+
+
+def lookup(page_url: str, page_title: str, session=None, similar: bool = True) -> Film | None:
+    """The catalogue entry for a broadcaster page: same web address (found through the programme name in the address or the
+    page title); if `similar`, else the closest title."""
+    import html as _html
+    page_title = _html.unescape(page_title or "")
     want = _norm_url(page_url)
     tail = want.rsplit("/", 1)[-1]
     pool: list[Film] = []
+    for topic in _url_topics(page_url):
+        try:
+            films, _ = search(topic=topic, size=50, session=session)
+        except Exception:
+            continue
+        hit = _exact(films, want, tail)
+        if hit:
+            return hit
+        pool += films
     for q in _title_queries(page_title):
         for fields in ("title", "both"):
             try:
                 films, _ = search(text=q if fields == "both" else "", title=q if fields == "title" else "", size=50, session=session)
             except Exception:
                 continue
-            for f in films:
-                u = _norm_url(f.url_website)
-                if u == want or (len(tail) >= 6 and u.rsplit("/", 1)[-1] == tail):
-                    return f
+            hit = _exact(films, want, tail)
+            if hit:
+                return hit
             pool += films
             if films:
                 break
-    if not pool:
+    if not pool or not similar or not page_title.strip():
         return None
 
     def sim(a: str, b: str) -> float:

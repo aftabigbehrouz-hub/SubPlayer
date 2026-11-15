@@ -3,7 +3,8 @@ name: Build Windows app
 on:
   push:
     branches: [main]
-    paths: ['windows/**', '.github/workflows/windows.yml']
+    # a release is made when the version number changes (windows/subplayer_win/__init__.py), or by hand
+    paths: ['windows/subplayer_win/__init__.py']
   workflow_dispatch:
 
 permissions:
