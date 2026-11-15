@@ -164,17 +164,26 @@ def ard_item(item_id: str, session) -> Found:
             hls.append(u)
         elif "subtitle" in joined and (low.endswith(".vtt") or low.endswith(".xml") or "ebutt" in low or "webvtt" in low):
             subs.append(u)
-    # heights given beside the url (maxHResolutionPx) are more reliable than names
+    # the size given beside each file is more reliable than the file name: "forcedLabel": "HD 720p", or
+    # "maxHResolutionPx" (the picture WIDTH, e.g. 1280 = 720p)
     for path, v in _walk(data):
-        if path and path[-1] == "maxHResolutionPx" and isinstance(v, int):
-            parent = path[:-1]
-            node = data
-            for k in parent:
-                node = node[int(k)] if isinstance(node, list) else node[k]
-            u = node.get("url") if isinstance(node, dict) else None
-            if isinstance(u, str):
-                u = "https:" + u if u.startswith("//") else u
-                mp4 = [(x, v if x == u else h) for x, h in mp4]
+        if not path or path[-1] not in ("maxHResolutionPx", "forcedLabel"):
+            continue
+        node = data
+        for k in path[:-1]:
+            node = node[int(k)] if isinstance(node, list) else node[k]
+        u = node.get("url") if isinstance(node, dict) else None
+        if not isinstance(u, str):
+            continue
+        u = "https:" + u if u.startswith("//") else u
+        h = 0
+        if path[-1] == "forcedLabel" and isinstance(v, str):
+            m = re.search(r"(\d{3,4})p", v)
+            h = int(m.group(1)) if m else 0
+        elif isinstance(v, int) and v > 0:
+            h = round(v * 9 / 16)
+        if h:
+            mp4 = [(x, h if x == u else hh) for x, hh in mp4]
     sub = next((u for u in subs if u.lower().split("?")[0].endswith(".vtt")), subs[0] if subs else "")
     if mp4:
         return Found(_pick_mp4(mp4), title or "ARD video", sub)

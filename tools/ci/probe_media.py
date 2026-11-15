@@ -112,7 +112,7 @@ try:
     m = s.get(found.video_url, headers={"User-Agent": L.UA}, timeout=30)
     print("master", m.status_code, m.headers.get("Content-Type"))
     lines = m.text.splitlines()
-    print("\n".join("   " + l[:150] for l in lines[:14]))
+    print("\n".join("   " + l[:170] for l in lines if l.startswith("#EXT-X-MEDIA") or "RESOLUTION" in l)[:3000])
     from urllib.parse import urljoin
     var = next((l for l in lines if l and not l.startswith("#")), None)
     if var:

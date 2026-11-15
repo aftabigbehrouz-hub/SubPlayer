@@ -10,13 +10,13 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
+from PySide6.QtCore import QObject, QPoint, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-                               QMenu, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSlider, QStackedWidget,
-                               QTextBrowser, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSlider,
+                               QStackedWidget, QStyle, QTextBrowser, QToolButton, QVBoxLayout, QWidget)
 
 from . import VERSION, downloads, icons, licence, paths, subtitles, syncer, theme, translate
 from .cosmos import Cosmos, GradientLabel, Orb
@@ -57,6 +57,23 @@ def ibtn(name, tip, fn=None, checkable=False, size=20, kind="icon", text="", col
     return b
 
 
+class JumpSlider(QSlider):
+    """A seek bar that jumps straight to where you click (instead of moving a page at a time)."""
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.maximum() > self.minimum():
+            x = e.position().x() if hasattr(e, "position") else e.x()
+            v = QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), int(x), self.width())
+            self.setValue(v)
+            self.sliderMoved.emit(v)
+        super().mousePressEvent(e)
+
+
+SPEEDS = (0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5)
+SUB_SIZES = {"Small": 16, "Medium": 21, "Large": 26, "Extra large": 32}
+REPEATS = (0, 2, 3, 5)                      # 0 = until you stop it
+
+
 class RecentCard(QFrame):
     """A recent video on the welcome screen: name, how far you got, one click to continue."""
 
@@ -95,6 +112,8 @@ class Main(QMainWindow):
         self.resize(1440, 900)
         self.setMinimumSize(1100, 700)
         self.settings = load_settings()
+        from . import netcfg
+        netcfg.apply(self.settings)
         self.store = WordStore()
         self.progress = Progress()
         self.lic = licence.LicenceState()
@@ -113,6 +132,16 @@ class Main(QMainWindow):
         self.shadowing = False
         self.shadow_resume = 0.0
         self.held_cue = -1
+        self.sub_offset = 0                                  # ms; + = subtitles appear later (G / H)
+        self.hide_text = False                               # listening mode
+        self.show_tr = False                                 # translation line under the subtitle
+        self.tr_cache: dict = {}
+        self.tr_pending: set = set()
+        self.repeat_n = 0                                    # 0 = loop until stopped
+        self.repeat_done = 0
+        self._tr_idx = -1
+        self._tr_scrolled_at = 0.0
+        self._tr_auto = False
         self.phrase_start: tuple[int, int] | None = None     # (cue, token) of a Shift+click
         self.card: dict | None = None                        # what the word card shows
         self.busy = None
@@ -144,11 +173,13 @@ class Main(QMainWindow):
         bl.setSpacing(14)
         self.stack = QStackedWidget()
         self.stack.addWidget(self._player_page())
+        from .discover import DiscoverPage
         from .pages import PracticePage, ReviewPage, WordsPage
         self.words_page = WordsPage(self)
         self.review_page = ReviewPage(self)
         self.practice_page = PracticePage(self)
-        for p in (self.words_page, self.review_page, self.practice_page):
+        self.discover_page = DiscoverPage(self)
+        for p in (self.words_page, self.review_page, self.practice_page, self.discover_page):
             self.stack.addWidget(p)
         bl.addWidget(self.stack, 1)
         bl.addWidget(self._panel())
@@ -193,6 +224,7 @@ class Main(QMainWindow):
 
         self.nav = {}
         for key, ic, label, tip in (("player", "film", "Player", "The video and its subtitles"),
+                                    ("discover", "compass", "Discover", "Find free programmes from ARD, ZDF, 3sat, Arte, DW (Ctrl+F)"),
                                     ("words", "star", "My Words", "Saved words and phrases"),
                                     ("review", "cards", "Review", "Review the words that are due"),
                                     ("practice", "puzzle", "Practice", "Gap-fill, dictation, der·die·das")):
@@ -210,6 +242,7 @@ class Main(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self.open_dialog)
         QShortcut(QKeySequence("Ctrl+L"), self, activated=self.link_dialog)
         QShortcut(QKeySequence("Ctrl+G"), self, activated=self.generate_dialog)
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: (self.show_page("discover"), self.discover_page.q.setFocus()))
         return rail
 
     def _panel(self) -> QFrame:
@@ -218,14 +251,24 @@ class Main(QMainWindow):
         v = QVBoxLayout(self.panel)
         v.setContentsMargins(18, 14, 14, 14)
         head = QHBoxLayout()
-        head.addWidget(GradientLabel("Word card", 14, QFont.Bold))
+        head.setSpacing(6)
+        self.tab_card = ibtn("book", "The dictionary entry of the word you clicked", lambda: self.panel_tab(0), checkable=True,
+                             kind="chip", text=" Word card", size=15)
+        self.tab_tr = ibtn("list", "All subtitle lines — click one to jump there, double-click to loop it (T)", lambda: self.panel_tab(1),
+                           checkable=True, kind="chip", text=" Transcript", size=15)
+        head.addWidget(self.tab_card)
+        head.addWidget(self.tab_tr)
         head.addStretch(1)
-        x = ibtn("x", "Hide the word card", self.toggle_panel, size=16)
+        x = ibtn("x", "Hide the panel", self.toggle_panel, size=16)
         head.addWidget(x)
         v.addLayout(head)
+        self.panel_stack = QStackedWidget()
+        card_page = QWidget(objectName="clear")
+        cv = QVBoxLayout(card_page)
+        cv.setContentsMargins(0, 6, 0, 0)
         self.card_view = QTextBrowser(openLinks=False)
         self.card_view.anchorClicked.connect(self._card_link)
-        v.addWidget(self.card_view, 1)
+        cv.addWidget(self.card_view, 1)
         g = QGridLayout()
         g.setSpacing(8)
         self.save_btn = ibtn("star", "Save to My Words with this video moment", self.save_from_card, kind="", text=" Save")
@@ -240,7 +283,31 @@ class Main(QMainWindow):
         g.addWidget(b_slow, 0, 2)
         g.addWidget(b_sent, 1, 0, 1, 1)
         g.addWidget(self.learn_btn, 1, 1, 1, 2)
-        v.addLayout(g)
+        cv.addLayout(g)
+        self.panel_stack.addWidget(card_page)
+
+        tr_page = QWidget(objectName="clear")
+        tv = QVBoxLayout(tr_page)
+        tv.setContentsMargins(0, 6, 0, 0)
+        self.tr_search = QLineEdit(placeholderText="Find in the transcript…")
+        self.tr_search.textChanged.connect(self._filter_transcript)
+        tv.addWidget(self.tr_search)
+        self.transcript = QListWidget()
+        self.transcript.setWordWrap(True)
+        self.transcript.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.transcript.setResizeMode(QListWidget.Adjust)
+        self.transcript.setTextElideMode(Qt.ElideNone)
+        self.transcript.setObjectName("transcript")
+        self.transcript.itemClicked.connect(self._transcript_click)
+        self.transcript.itemDoubleClicked.connect(self._transcript_loop)
+        self.transcript.verticalScrollBar().valueChanged.connect(self._transcript_scrolled)
+        tv.addWidget(self.transcript, 1)
+        self.tr_info = QLabel("", objectName="small")
+        self.tr_info.setWordWrap(True)
+        tv.addWidget(self.tr_info)
+        self.panel_stack.addWidget(tr_page)
+        v.addWidget(self.panel_stack, 1)
+        self.panel_tab(0)
         self._card_html(f"<p style='font-size:20pt;font-weight:800;color:{theme.CYAN};margin-bottom:4px'>Tap a word</p>"
                         f"<p style='color:{theme.DIM};line-height:150%'>Pause the video and click any word in the subtitle: "
                         "dictionary entry, IPA, meanings with examples, English/German and Persian.</p>"
@@ -263,7 +330,7 @@ class Main(QMainWindow):
         self.title_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         t.addWidget(self.title_lbl, 1)
         for ic, label, tip, fn in (("folder", " Open", "Open a video (Ctrl+O) — or drag it onto the window", self.open_dialog),
-                                   ("link", " Link", "Open a video from a web link — Tagesschau, any .mp4 (Ctrl+L)", self.link_dialog),
+                                   ("link", " Link", "Open a video link — ARD, ZDF, 3sat, Arte, DW, Tagesschau pages or any .mp4 (Ctrl+L)", self.link_dialog),
                                    ("clock", " Recent", "Recent videos — continues where you stopped", self.show_recent),
                                    ("captions", " Subtitles", "Make subtitles for this video: offline Whisper or online (Ctrl+G)", self.generate_dialog),
                                    ("file", " Subtitle file", "Load an .srt/.vtt, save the current subtitles", self.subtitle_menu)):
@@ -285,7 +352,11 @@ class Main(QMainWindow):
         for key, fn in (("Space", self.toggle_play), ("Left", lambda: self.seek_rel(-5000)), ("Right", lambda: self.seek_rel(5000)),
                         ("Up", lambda: self.jump_line(-1)), ("Down", lambda: self.jump_line(1)), ("A", self.set_a), ("B", self.set_b),
                         ("L", lambda: self.loop_btn.click()), ("S", lambda: self.shadow_btn.click()), ("Escape", self._escape),
-                        ("F", self.toggle_fullscreen), ("F11", self.toggle_fullscreen)):
+                        ("F", self.toggle_fullscreen), ("F11", self.toggle_fullscreen),
+                        ("G", lambda: self.shift_subs(-100)), ("H", lambda: self.shift_subs(100)), ("V", lambda: self.hide_btn.click()),
+                        ("Ctrl+T", lambda: self.trl_btn.click()), ("T", lambda: self.panel_tab(1 if self.panel_stack.currentIndex() == 0 else 0, show=True)),
+                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
+                        ("Ctrl+=", lambda: self.step_sub_size(1)), ("Ctrl++", lambda: self.step_sub_size(1)), ("Ctrl+-", lambda: self.step_sub_size(-1))):
             QShortcut(QKeySequence(key), page, activated=fn, context=Qt.WidgetWithChildrenShortcut)
         self.ticker = QTimer(self, interval=40, timeout=self._tick)
         self.ticker.start()
@@ -316,7 +387,10 @@ class Main(QMainWindow):
         theme.glow(b1, theme.MAGENTA, 34, 140)
         b2 = ibtn("link", "Paste a web link (Ctrl+L)", self.link_dialog, kind="", text="  Paste a video link", size=20)
         b2.setMinimumHeight(46)
-        for b in (b1, b2):
+        b3 = ibtn("compass", "Free programmes from ARD, ZDF, 3sat, Arte, DW — many with subtitles (Ctrl+F)",
+                  lambda: self.show_page("discover"), kind="", text="  Discover videos", size=20)
+        b3.setMinimumHeight(46)
+        for b in (b1, b2, b3):
             b.setMinimumWidth(220)
             row.addWidget(b)
         row.addStretch(1)
@@ -362,18 +436,31 @@ class Main(QMainWindow):
         self.player.durationChanged.connect(lambda d: self.slider.setRange(0, max(0, d)))
         self.vw.mousePressEvent = lambda e: self.toggle_play()
         self.vw.mouseDoubleClickEvent = lambda e: self.toggle_fullscreen()
+        self.vw.wheelEvent = self._video_wheel
         vf.addWidget(self.vw)
         theme.glow(self.vframe, theme.VIOLET, 40, 110)
         v.addWidget(self.vframe, 1)
 
         self.subs_frame = QFrame(objectName="subs")
-        sl = QVBoxLayout(self.subs_frame)
-        sl.setContentsMargins(14, 6, 14, 6)
+        sl = QHBoxLayout(self.subs_frame)
+        sl.setContentsMargins(14, 6, 8, 6)
+        sl.setSpacing(4)
         self.sub_view = QTextBrowser(openLinks=False)
-        self.sub_view.setFixedHeight(112)
         self.sub_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.sub_view.anchorClicked.connect(self._sub_click)
-        sl.addWidget(self.sub_view)
+        sl.addWidget(self.sub_view, 1)
+        tools = QVBoxLayout()
+        tools.setSpacing(2)
+        self.size_btn = ibtn("textsize", "Subtitle size and timing (G / H move the subtitles earlier / later)", self.subtitle_options, size=17)
+        self.hide_btn = ibtn("eye", "Listening mode: hide the text while the video plays — it shows when you pause (V)",
+                             self.toggle_hide_text, checkable=True, size=17)
+        self.trl_btn = ibtn("translate", "Show a translation of each line underneath (online) — English or Persian (Ctrl+T)",
+                            self.toggle_translation_line, checkable=True, size=17)
+        self.trs_btn = ibtn("list", "Transcript: all lines, click to jump (T)", lambda: self.panel_tab(1, show=True), size=17)
+        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.trs_btn):
+            tools.addWidget(b)
+        tools.addStretch(1)
+        sl.addLayout(tools)
         v.addWidget(self.subs_frame)
 
         self.controls = QFrame(objectName="controls")
@@ -392,17 +479,25 @@ class Main(QMainWindow):
         row.addSpacing(10)
         self.time_lbl = QLabel("0:00", objectName="time")
         self.dur_lbl = QLabel("0:00", objectName="time")
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = JumpSlider(Qt.Horizontal)
         self.slider.sliderMoved.connect(lambda p: self.player.setPosition(p))
         self.slider.setCursor(Qt.PointingHandCursor)
         row.addWidget(self.time_lbl)
         row.addWidget(self.slider, 1)
         row.addWidget(self.dur_lbl)
         row.addSpacing(6)
-        self.speed_btn = QPushButton("1×", toolTip="Slower speech: 1× → 0.75× → 0.5×")
+        self.vol_btn = ibtn("volume", "Mute / sound on (M) — the mouse wheel over the video changes the volume", self.toggle_mute, size=18)
+        row.addWidget(self.vol_btn)
+        self.vol_slider = JumpSlider(Qt.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setFixedWidth(84)
+        self.vol_slider.setToolTip("Volume")
+        self.vol_slider.valueChanged.connect(self.set_volume)
+        row.addWidget(self.vol_slider)
+        self.speed_btn = QPushButton("1×", toolTip="Playback speed — slower speech helps: [ slower, ] faster")
         self.speed_btn.setProperty("kind", "chip")
-        self.speed_btn.setMinimumWidth(58)
-        self.speed_btn.clicked.connect(self.cycle_speed)
+        self.speed_btn.setMinimumWidth(64)
+        self.speed_btn.clicked.connect(self.speed_menu)
         row.addWidget(self.speed_btn)
         cv.addLayout(row)
 
@@ -425,6 +520,9 @@ class Main(QMainWindow):
         ctl.addWidget(ibtn("x", "Stop looping (Esc)", self.clear_ab, size=16))
         ctl.addSpacing(4)
         self.loop_btn = chip(" Loop line", "Repeat the current subtitle line (L)", self.toggle_loop_line, True, "repeat")
+        self.rep_btn = chip("∞", "How often a loop repeats: until you stop it, or 2× / 3× / 5× — then it goes on "
+                                 "(Loop line then moves to the next line: every line N times) (R)", self.cycle_repeat)
+        self.rep_btn.setFixedWidth(46)
         self.pause_btn = chip(" Pause each line", "Stop after every line so you can read and click words", self.toggle_pause_each, True, "pause")
         self.shadow_btn = chip(" Shadowing", "Listen, then repeat aloud in the pause — the line plays again (S)", self.toggle_shadowing, True, "mic")
         ctl.addSpacing(8)
@@ -439,6 +537,11 @@ class Main(QMainWindow):
     # ================================================================== startup / licence
     def _startup(self):
         theme.dark_title_bar(self)
+        self.vol_slider.setValue(int(self.settings.get("volume", 90)))
+        if self.settings.get("show_tr"):
+            self.trl_btn.setChecked(True)
+            self.show_tr = True
+        self._apply_sub_height()
         left = self.lic.check_trial()
         if self.lic.holder is None and left <= 0:
             from .dialogs import ActivationDialog
@@ -471,7 +574,7 @@ class Main(QMainWindow):
 
     # ================================================================== pages
     def show_page(self, key: str):
-        idx = {"player": 0, "words": 1, "review": 2, "practice": 3}[key]
+        idx = {"player": 0, "words": 1, "review": 2, "practice": 3, "discover": 4}[key]
         self.page = key
         for k, a in self.nav.items():
             a.setChecked(k == key)
@@ -481,6 +584,8 @@ class Main(QMainWindow):
             self.review_page.start()
         elif key == "practice":
             self.practice_page.start()
+        elif key == "discover":
+            self.discover_page.activate()
         if key != "player":
             self.player.pause()
         else:
@@ -494,7 +599,9 @@ class Main(QMainWindow):
         self.panel.setVisible(self.panel_open and self.page == "player")
         self.panel_btn.setChecked(self.panel_open)
 
-    def show_panel(self):
+    def show_panel(self, card: bool = False):
+        if card and hasattr(self, "panel_stack"):
+            self.panel_tab(0)
         self.panel_open = True
         if self.page == "player" and not self.isFullScreen():
             self.panel.show()
@@ -542,6 +649,8 @@ class Main(QMainWindow):
         self.player.setSource(QUrl.fromLocalFile(path))
         self.clear_ab()
         self.cues = []
+        self.sub_offset = int(self.settings.get("sub_offsets", {}).get(subtitles.video_key(self.video_name), 0))
+        self.repeat_done = 0
         self.pstack.setCurrentIndex(1)
         self._load_subs_for_video()
         pos = at_ms if at_ms is not None else next((r.get("pos", 0) for r in self.recents() if r["path"] == path), 0)
@@ -580,6 +689,7 @@ class Main(QMainWindow):
         self.cues, self.cue_lang = cues, lang
         self.held_cue = -1
         self._shown = None
+        self._fill_transcript()
         if info:
             self.msg(f"{info} · {len(cues)} lines")
 
@@ -603,34 +713,286 @@ class Main(QMainWindow):
         if not self.cues:
             self.seek_rel(5000 * step)
             return
-        pos = self.player.position()
+        pos = self.cpos()
         i = subtitles.index_before(self.cues, pos)
         if step < 0 and i >= 0 and pos - self.cues[i].start_ms > 1200:
             j = i
         else:
             j = max(0, min(len(self.cues) - 1, i + step))
         self.held_cue = -1
+        self.repeat_done = 0
         if self.loop_line or self.shadowing:
-            self.a, self.b = self.cues[j].start_ms, self.cues[j].end_ms + 150
+            self.a, self.b = self.cues[j].start_ms + self.sub_offset, self.cues[j].end_ms + self.sub_offset + 150
             self._ab_label()
-        self.player.setPosition(self.cues[j].start_ms)
+        self.player.setPosition(self.cues[j].start_ms + self.sub_offset)
         self.player.play()
 
-    def cycle_speed(self):
-        r = {1.0: 0.75, 0.75: 0.5}.get(round(self.player.playbackRate(), 2), 1.0)
+    def speed_menu(self):
+        m = QMenu(self)
+        cur = round(self.player.playbackRate(), 2)
+        for r in SPEEDS:
+            a = m.addAction(("✓  " if abs(r - cur) < 0.01 else "     ") + f"{r:g}×" + ("  normal" if r == 1 else ""))
+            a.triggered.connect(lambda _=False, x=r: self.set_speed(x))
+        m.exec(self.speed_btn.mapToGlobal(self.speed_btn.rect().topLeft()) - m.sizeHint().height() * QPoint(0, 1))
+
+    def step_speed(self, d):
+        cur = round(self.player.playbackRate(), 2)
+        i = min(range(len(SPEEDS)), key=lambda k: abs(SPEEDS[k] - cur))
+        self.set_speed(SPEEDS[max(0, min(len(SPEEDS) - 1, i + d))])
+
+    def set_speed(self, r: float):
         self.player.setPlaybackRate(r)
         self.speed_btn.setText(f"{r:g}×")
-        self.speed_btn.setChecked(False)
         self.speed_btn.setProperty("accent", r < 1)
         theme.repolish(self.speed_btn)
+        self.msg(f"Speed {r:g}×")
+
+    # ------------------------------------------------------------------ volume
+    def set_volume(self, v: int):
+        self.audio.setVolume(v / 100)
+        if v and self.audio.isMuted():
+            self.audio.setMuted(False)
+        self.settings["volume"] = v
+        self._vol_icon()
+
+    def toggle_mute(self):
+        self.audio.setMuted(not self.audio.isMuted())
+        self._vol_icon()
+        self.msg("Sound off" if self.audio.isMuted() else "Sound on")
+
+    def _vol_icon(self):
+        off = self.audio.isMuted() or self.vol_slider.value() == 0
+        self.vol_btn.setIcon(icons.icon("mute" if off else "volume", theme.MAGENTA if off else theme.LIGHT, 18))
+
+    def _video_wheel(self, e):
+        self.vol_slider.setValue(self.vol_slider.value() + (5 if e.angleDelta().y() > 0 else -5))
+
+    # ------------------------------------------------------------------ subtitle options
+    def subtitle_options(self):
+        m = QMenu(self)
+        cur = self.settings.get("sub_size", 21)
+        m.addSection("Text size")
+        for name, pt in SUB_SIZES.items():
+            a = m.addAction(("✓  " if pt == cur else "     ") + name)
+            a.triggered.connect(lambda _=False, x=pt: self.set_sub_size(x))
+        m.addSection(f"Timing — now {self.sub_offset / 1000:+.1f} s")
+        m.addAction("Subtitles earlier  (G)   −0.1 s", lambda: self.shift_subs(-100))
+        m.addAction("Subtitles later  (H)   +0.1 s", lambda: self.shift_subs(100))
+        m.addAction("Subtitles earlier   −1 s", lambda: self.shift_subs(-1000))
+        m.addAction("Subtitles later   +1 s", lambda: self.shift_subs(1000))
+        r = m.addAction("Reset timing", lambda: self.shift_subs(-self.sub_offset))
+        r.setEnabled(self.sub_offset != 0)
+        m.addSection("Translation line")
+        tgt = self.settings.get("tr_target", "en")
+        for key, label in (("en", "English  (German for English videos)"), ("fa", "فارسی — Persian")):
+            a = m.addAction(("✓  " if key == tgt else "     ") + label)
+            a.triggered.connect(lambda _=False, k=key: self.set_tr_target(k))
+        m.exec(self.size_btn.mapToGlobal(self.size_btn.rect().topLeft()) - m.sizeHint().height() * QPoint(0, 1))
+
+    def set_sub_size(self, pt: int):
+        self.settings["sub_size"] = pt
+        self.save_settings()
+        self._apply_sub_height()
+        self._shown = None
+
+    def step_sub_size(self, d):
+        sizes = sorted(SUB_SIZES.values())
+        cur = self.settings.get("sub_size", 21)
+        i = min(range(len(sizes)), key=lambda k: abs(sizes[k] - cur))
+        self.set_sub_size(sizes[max(0, min(len(sizes) - 1, i + d))])
+
+    def _apply_sub_height(self):
+        pt = self.settings.get("sub_size", 21)
+        lines = 2 + (1 if self.show_tr else 0)
+        self.sub_view.setFixedHeight(int(pt * 2.05 * lines + 22))
+
+    def shift_subs(self, d: int):
+        if not self.cues:
+            self.msg("Load subtitles first — then G / H move them earlier / later")
+            return
+        self.sub_offset += d
+        offs = self.settings.setdefault("sub_offsets", {})
+        key = subtitles.video_key(self.video_name)
+        if self.sub_offset:
+            offs[key] = self.sub_offset
+        else:
+            offs.pop(key, None)
+        self.save_settings()
+        self._shown = None
+        self.msg(f"Subtitle timing {self.sub_offset / 1000:+.1f} s  (G earlier · H later)" if self.sub_offset else "Subtitle timing reset")
+
+    def cpos(self) -> int:
+        """The video position on the subtitles' clock."""
+        return self.player.position() - self.sub_offset
+
+    def toggle_hide_text(self):
+        self.hide_text = self.hide_btn.isChecked()
+        self.hide_btn.setIcon(icons.icon("eye_off" if self.hide_text else "eye", theme.CYAN if self.hide_text else theme.LIGHT, 17))
+        self._shown = None
+        self.msg("Listening mode: the text hides while the video plays and shows when you pause" if self.hide_text
+                 else "Subtitles always visible")
+
+    def toggle_translation_line(self):
+        self.show_tr = self.trl_btn.isChecked()
+        self.settings["show_tr"] = self.show_tr
+        self._apply_sub_height()
+        self._shown = None
+        if self.show_tr:
+            self.msg("Translation line on (online) — " + ("Persian" if self.settings.get("tr_target") == "fa" else "English")
+                     + " · change it with the Aa button")
+
+    def set_tr_target(self, k):
+        self.settings["tr_target"] = k
+        self.save_settings()
+        if not self.show_tr:
+            self.trl_btn.setChecked(True)
+            self.toggle_translation_line()
+        self._shown = None
+
+    def _tr_target(self) -> str:
+        t = self.settings.get("tr_target", "en")
+        if t == "en" and self.cue_lang == "en":
+            return "de"
+        return t
+
+    def _want_translation(self, i: int):
+        if i < 0 or i >= len(self.cues):
+            return
+        tgt = self._tr_target()
+        text = " ".join(self.cues[i].text.split())
+        key = (text, self.cue_lang, tgt)
+        if key in self.tr_cache or key in self.tr_pending:
+            return
+        self.tr_pending.add(key)
+
+        def work():
+            try:
+                out, _ = translate.translate(text, self.cue_lang, tgt)
+            except Exception:
+                out = None
+            self.bus.done.emit("trline", (key, out))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ------------------------------------------------------------------ repeat count
+    def cycle_repeat(self):
+        i = REPEATS.index(self.repeat_n) if self.repeat_n in REPEATS else 0
+        self.repeat_n = REPEATS[(i + 1) % len(REPEATS)]
+        self.repeat_done = 0
+        self.rep_btn.setText("∞" if not self.repeat_n else f"{self.repeat_n}×")
+        self.rep_btn.setProperty("accent", bool(self.repeat_n))
+        theme.repolish(self.rep_btn)
+        self.msg("Loops repeat until you stop them" if not self.repeat_n else
+                 f"Loops play {self.repeat_n}× — then go on (Loop line: every line {self.repeat_n}×, then the next)")
+
+    def _loop_finished(self) -> bool:
+        """Called at the end of each loop pass; True when the repeat count is reached and playback moved on."""
+        self.repeat_done += 1
+        if not self.repeat_n or self.repeat_done < self.repeat_n:
+            return False
+        self.repeat_done = 0
+        if (self.loop_line or self.shadowing) and self.cues:
+            i = subtitles.index_before(self.cues, self.a - self.sub_offset + 50)
+            if i + 1 < len(self.cues):
+                c = self.cues[i + 1]
+                self.a, self.b = c.start_ms + self.sub_offset, c.end_ms + self.sub_offset + 150
+                self.player.setPosition(self.a)
+                self._ab_label()
+                return True
+        self.clear_ab()
+        self.msg(f"Played {self.repeat_n}× — going on")
+        return True
+
+    # ------------------------------------------------------------------ transcript
+    def panel_tab(self, i: int, show: bool = False):
+        self.panel_stack.setCurrentIndex(i)
+        self.tab_card.setChecked(i == 0)
+        self.tab_tr.setChecked(i == 1)
+        if show:
+            self.show_panel()
+        if i == 1:
+            self._tr_scrolled_at = 0.0
+            if 0 <= self._tr_idx < self.transcript.count():
+                self._tr_auto = True
+                self.transcript.scrollToItem(self.transcript.item(self._tr_idx), QListWidget.PositionAtCenter)
+                self._tr_auto = False
+
+    def _fill_transcript(self):
+        self.transcript.clear()
+        self._tr_idx = -1
+        for k, c in enumerate(self.cues):
+            it = QListWidgetItem(f"{fmt(c.start_ms)}   {' '.join(c.text.split())}")
+            it.setData(Qt.UserRole, k)
+            self.transcript.addItem(it)
+        self.tr_info.setText(f"{len(self.cues)} lines · click = jump · double-click = loop that line" if self.cues
+                             else "No subtitles yet.")
+        if self.tr_search.text():
+            self._filter_transcript(self.tr_search.text())
+
+    def _filter_transcript(self, q: str):
+        q = q.strip().lower()
+        n = 0
+        for r in range(self.transcript.count()):
+            it = self.transcript.item(r)
+            hide = bool(q) and q not in it.text().lower()
+            it.setHidden(hide)
+            n += not hide
+        if q:
+            self.tr_info.setText(f"{n} of {self.transcript.count()} lines contain “{q}”")
+
+    def _transcript_scrolled(self, _):
+        if not self._tr_auto:
+            self._tr_scrolled_at = time.monotonic()
+
+    def _transcript_click(self, it):
+        k = it.data(Qt.UserRole)
+        if k is None or not (0 <= k < len(self.cues)):
+            return
+        self.held_cue = -1
+        self.repeat_done = 0
+        if self.loop_line or self.shadowing:
+            self.a, self.b = self.cues[k].start_ms + self.sub_offset, self.cues[k].end_ms + self.sub_offset + 150
+            self._ab_label()
+        self.player.setPosition(self.cues[k].start_ms + self.sub_offset)
+        self.player.play()
+
+    def _transcript_loop(self, it):
+        k = it.data(Qt.UserRole)
+        if k is None:
+            return
+        self.player.setPosition(self.cues[k].start_ms + self.sub_offset)
+        if not self.loop_btn.isChecked():
+            self.loop_btn.setChecked(True)
+        self.loop_line = True
+        self.repeat_done = 0
+        self.a, self.b = self.cues[k].start_ms + self.sub_offset, self.cues[k].end_ms + self.sub_offset + 150
+        self._ab_label()
+        self.player.play()
+
+    def _transcript_follow(self, i: int):
+        if i == self._tr_idx or i < 0 or i >= self.transcript.count():
+            return
+        prev = self.transcript.item(self._tr_idx) if 0 <= self._tr_idx < self.transcript.count() else None
+        if prev:
+            prev.setForeground(QColor(theme.LIGHT))
+            f = prev.font(); f.setBold(False); prev.setFont(f)
+        it = self.transcript.item(i)
+        it.setForeground(QColor(theme.CYAN))
+        f = it.font(); f.setBold(True); it.setFont(f)
+        self._tr_idx = i
+        if time.monotonic() - self._tr_scrolled_at > 4 and self.panel.isVisible() and self.panel_stack.currentIndex() == 1:
+            self._tr_auto = True
+            self.transcript.scrollToItem(it, QListWidget.PositionAtCenter)
+            self._tr_auto = False
 
     def set_a(self):
+        self.repeat_done = 0
         self.a = self.player.position()
         if self.b >= 0 and self.b <= self.a:
             self.b = -1
         self._ab_label()
 
     def set_b(self):
+        self.repeat_done = 0
         if self.a < 0:
             self.a = 0
         p = self.player.position()
@@ -641,6 +1003,7 @@ class Main(QMainWindow):
         self._ab_label()
 
     def clear_ab(self):
+        self.repeat_done = 0
         self.a = self.b = -1
         self.loop_line = False
         self.shadowing = False
@@ -668,10 +1031,11 @@ class Main(QMainWindow):
     def _loop_current_line(self) -> bool:
         if not self.cues:
             return False
-        i = subtitles.index_before(self.cues, self.player.position())
+        i = subtitles.index_before(self.cues, self.cpos())
         if i < 0:
             i = 0
-        self.a, self.b = self.cues[i].start_ms, self.cues[i].end_ms + 150
+        self.a, self.b = self.cues[i].start_ms + self.sub_offset, self.cues[i].end_ms + self.sub_offset + 150
+        self.repeat_done = 0
         return True
 
     def toggle_loop_line(self):
@@ -746,7 +1110,8 @@ class Main(QMainWindow):
             self._update_motion()
         if self.shadow_resume and time.monotonic() >= self.shadow_resume:
             self.shadow_resume = 0
-            self.player.setPosition(self.a)
+            if not self._loop_finished() and self.a >= 0:
+                self.player.setPosition(self.a)
             self.player.play()
             self._ab_label()
         if playing and self.a >= 0 and self.b > self.a and pos >= self.b:
@@ -754,25 +1119,37 @@ class Main(QMainWindow):
                 self.player.pause()
                 self.shadow_resume = time.monotonic() + (self.b - self.a) * 1.2 / 1000 + 0.6
                 self._ab_label()
-            else:
+            elif not self._loop_finished():
                 self.player.setPosition(self.a)
             return
-        i = subtitles.index_at(self.cues, pos) if self.cues else -1
+        cp = pos - self.sub_offset
+        i = subtitles.index_at(self.cues, cp) if self.cues else -1
         if playing and self.pause_each and self.cues:
-            j = subtitles.index_before(self.cues, pos)
-            if j >= 0 and j != self.held_cue and pos >= self.cues[j].end_ms - 60:
+            j = subtitles.index_before(self.cues, cp)
+            if j >= 0 and j != self.held_cue and cp >= self.cues[j].end_ms - 60:
                 self.held_cue = j
                 self.player.pause()
                 i = j
         if i < 0 and not playing and self.held_cue >= 0:
             i = self.held_cue
         if i < 0 and self.shadowing and self.cues and self.a >= 0:
-            i = subtitles.index_before(self.cues, self.a + 50)
+            i = subtitles.index_before(self.cues, self.a - self.sub_offset + 50)
         if i < 0 and self.card and not playing and self.card.get("cue", -1) >= 0:
             i = self.card["cue"]
-        if getattr(self, "_shown", None) != (i, len(self.cues), self._saved_version()):
-            self._shown = (i, len(self.cues), self._saved_version())
+        if self.cues and self.panel_stack.currentIndex() == 1 and self.panel.isVisible():
+            self._transcript_follow(i if i >= 0 else subtitles.index_before(self.cues, cp))
+        if self.show_tr and i >= 0:
+            self._want_translation(i)
+            self._want_translation(i + 1)                  # ready before it is needed
+        masked = self.hide_text and playing
+        key = (i, len(self.cues), self._saved_version(), masked, self.show_tr, self.settings.get("sub_size", 21),
+               self._tr_key(i) in self.tr_cache if self.show_tr and i >= 0 else None)
+        if getattr(self, "_shown", None) != key:
+            self._shown = key
             self._render_sub(i)
+
+    def _tr_key(self, i: int):
+        return (" ".join(self.cues[i].text.split()), self.cue_lang, self._tr_target())
 
     _saved_cache: tuple = (0, set())
 
@@ -791,10 +1168,17 @@ class Main(QMainWindow):
         self.streak_lbl.setText(f"🔥 {s} day{'s' if s != 1 else ''}" if s else "")
 
     def _render_sub(self, i: int):
+        pt = self.settings.get("sub_size", 21)
         if i < 0:
             self.sub_view.setHtml("")
             return
         text = self.cues[i].text
+        if self.hide_text and self.player.playbackState() == QMediaPlayer.PlayingState:
+            dots = " ".join("•" * min(6, max(2, len(t[2]) // 2)) for t in subtitles.tokens(text))
+            self.sub_view.setHtml(f"<div style='text-align:center;font-size:{pt}pt;color:#4E4A72;letter-spacing:2px;"
+                                  f"line-height:145%'>{dots}</div><div style='text-align:center;color:{theme.DIM};font-size:9pt'>"
+                                  "listening mode — pause (Space) to read</div>")
+            return
         saved = self._saved_cache[1]
         out, last = [], 0
         for k, (s, e, tok) in enumerate(subtitles.tokens(text)):
@@ -805,7 +1189,18 @@ class Main(QMainWindow):
             out.append(f"<a href='w:{i}:{k}' style='color:{col};text-decoration:none'>{html.escape(tok)}</a>")
             last = e
         out.append(html.escape(text[last:]).replace("\n", "<br>"))
-        self.sub_view.setHtml(f"<div style='text-align:center;font-size:21pt;font-weight:600;line-height:145%'>{''.join(out)}</div>")
+        body = f"<div style='text-align:center;font-size:{pt}pt;font-weight:600;line-height:145%'>{''.join(out)}</div>"
+        if self.show_tr:
+            tr = self.tr_cache.get(self._tr_key(i), "…")
+            if tr is None:
+                tr = "(translation needs internet)"
+            small = max(11, int(pt * 0.62))
+            if self._tr_target() == "fa":
+                body += (f"<div dir='rtl' style='text-align:center;font-family:{theme.FA_FONT};font-size:{small + 1}pt;"
+                         f"color:{theme.CYAN}'>{html.escape(tr)}</div>")
+            else:
+                body += f"<div style='text-align:center;font-size:{small}pt;color:{theme.CYAN};font-style:italic'>{html.escape(tr)}</div>"
+        self.sub_view.setHtml(body)
 
     # ================================================================== words in subtitles
     def _sub_click(self, url: QUrl):
@@ -821,7 +1216,7 @@ class Main(QMainWindow):
         self.shadow_resume = 0
         a, b = subtitles.sentence_range(self.cues, ci)
         sentence = subtitles.sentence_text(self.cues, a, b)
-        start, end = self.cues[a].start_ms, self.cues[b].end_ms
+        start, end = self.cues[a].start_ms + self.sub_offset, self.cues[b].end_ms + self.sub_offset
         if mods & Qt.ControlModifier:
             self.open_phrase(sentence, sentence, start, end, whole=True)
         elif mods & Qt.ShiftModifier:
@@ -852,7 +1247,7 @@ class Main(QMainWindow):
         word = normalize(raw)
         self.card = {"kind": "word", "word": word, "sentence": sentence, "start": start, "end": end, "lang": lang, "cue": cue,
                      "entries": [], "fa_online": None}
-        self.show_panel()
+        self.show_panel(card=True)
         d = self.dictionary(lang)
         if d is None:
             a = downloads.DICT_EN if lang == "en" else downloads.DICT_DE
@@ -982,7 +1377,7 @@ class Main(QMainWindow):
                 if e:
                     x = e[0]
                     self.card["glosses"][w] = (x.english[:1] or [("DE: " + g) for g in x.german[:1]] or [x.senses[0].de if x.senses else ""])[0][:60]
-        self.show_panel()
+        self.show_panel(card=True)
         self._render_phrase()
         other = "de" if lang == "en" else "en"
         self.run_bg("phrase", lambda: (translate.translate(text, lang, other), translate.translate(text, lang, "fa")[0]))
@@ -1230,14 +1625,35 @@ class Main(QMainWindow):
 
         def job():
             self._bg_progress(0, "Looking for the video…")
-            found = linkimport.resolve(url)
-
-            def prog(done, total):
-                mb = done // 1_048_576
-                self._bg_progress(done / total if total else 0, f"Downloading “{found.title}” · {mb} MB"
-                                  + (f" of {total // 1_048_576} MB" if total else ""))
-            return linkimport.download(found, progress=prog, cancelled=lambda: self.cancel)
+            return self._fetch_found(linkimport.resolve(url))
         self.run_bg("link", job, cancellable=True, label="Opening the link…")
+
+    def import_film(self, film, quality: str = "normal"):
+        """A programme picked in Discover: its MP4 (and the broadcaster's subtitles) straight from the broadcaster."""
+        from . import linkimport
+        title = film.title if film.topic.lower() in film.title.lower() else f"{film.topic} – {film.title}"
+        found = linkimport.Found(film.video(quality), title, film.url_subtitle, duration=film.duration)
+        found.hls = bool(linkimport.HLS.search(found.video_url.split("?")[0]))
+        self.run_bg("link", lambda: self._fetch_found(found), cancellable=True, label=f"Downloading {title}…")
+
+    def _fetch_found(self, found):
+        """(runs in the background) downloads the video + subtitles; returns (video path, srt text or None)."""
+        from . import linkimport
+        stream = found.hls
+
+        def prog(done, total):
+            if stream:
+                self._bg_progress(done / total if total else 0, f"Downloading “{found.title}” · {fmt(done * 1000)}"
+                                  + (f" of {fmt(total * 1000)}" if total else ""))
+            else:
+                self._bg_progress(done / total if total else 0, f"Downloading “{found.title}” · {done // 1_000_000} MB"
+                                  + (f" of {total // 1_000_000} MB" if total else ""))
+        path = linkimport.download(found, progress=prog, cancelled=lambda: self.cancel)
+        srt = None
+        if found.subtitle_url:
+            self._bg_progress(1, "Getting the broadcaster's subtitles…")
+            srt = linkimport.subtitle_srt(found.subtitle_url)
+        return path, srt
 
     def export_dialog(self):
         if not self.video or not (self.a >= 0 and self.b > self.a):
@@ -1334,9 +1750,18 @@ class Main(QMainWindow):
                 then()
         elif kind == "link":
             self._end_task()
-            self.open_video(str(res), at_ms=0)
-            self.msg(f"Saved to {res.parent} — click Subtitles to transcribe it", 12000)
-            QTimer.singleShot(600, self.generate_dialog)
+            path, srt = res
+            if srt:
+                cues = subtitles.parse(srt)
+                lang = subtitles.guess_lang(cues)
+                (syncer.subs_dir() / f"{subtitles.video_key(path.name)}.{lang}.srt").write_text(srt, encoding="utf-8")
+            self.open_video(str(path), at_ms=0)
+            if srt:
+                self.msg(f"Saved to {path.parent} — with the broadcaster's own subtitles ({len(cues)} lines)", 12000)
+                self.after_change()
+            else:
+                self.msg(f"Saved to {path.parent} — click Subtitles to transcribe it", 12000)
+                QTimer.singleShot(600, self.generate_dialog)
         elif kind == "clip":
             self._end_task()
             box = QMessageBox(self)
@@ -1347,6 +1772,13 @@ class Main(QMainWindow):
             box.exec()
             if box.clickedButton() is show:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(res).parent)))
+        elif kind == "trline":
+            key, out = res
+            self.tr_pending.discard(key)
+            self.tr_cache[key] = out
+            if len(self.tr_cache) > 4000:
+                self.tr_cache.clear()
+            self._shown = None
         elif kind == "trword" and self.card and self.card["kind"] == "word":
             self.card["fa_online"] = res
             self._render_card()
@@ -1465,7 +1897,8 @@ def selftest(out: str) -> int:
     """Used by the build: proves the packaged app can load everything it needs."""
     lines, ok = [], True
     for mod in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "numpy", "PySide6.QtMultimedia", "PySide6.QtTextToSpeech",
-                "PySide6.QtSvg", "cryptography", "requests"):
+                "PySide6.QtSvg", "cryptography", "requests", "socks", "urllib3.contrib.socks", "subplayer_win.discover",
+                "subplayer_win.mediathek", "subplayer_win.netcfg"):
         try:
             __import__(mod)
             lines.append(f"OK   {mod}")
@@ -1496,6 +1929,18 @@ def selftest(out: str) -> int:
     except Exception as e:
         ok = False
         lines.append(f"FAIL audio decoding: {e}")
+    try:
+        cues = subtitles.parse_any('<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="10:00:01.000" end="10:00:02.000">'
+                                   'Guten Tag</p></div></body></tt>')
+        if not (len(cues) == 1 and cues[0].start_ms == 1000):
+            raise ValueError(cues)
+        import av
+        if "hls" not in av.formats_available:
+            raise ValueError("FFmpeg has no HLS reader")
+        lines.append("OK   broadcaster subtitles + HLS streams")
+    except Exception as e:
+        ok = False
+        lines.append(f"FAIL broadcaster subtitles / HLS: {e}")
     try:
         from . import export
         enc = export.pick_encoder()

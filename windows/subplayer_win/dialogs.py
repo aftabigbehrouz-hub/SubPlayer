@@ -292,6 +292,48 @@ class SettingsDialog(QDialog):
         self._load_key()
         v.addWidget(f)
 
+        # internet connection (proxy / VPN)
+        f, nv = section("Internet connection")
+        nv.addWidget(hint("Where internet access is filtered (for example in Iran), run your VPN app and let SubPlayer use it. "
+                          "Programmes that only play in Germany need a VPN server in Germany."))
+        self.net_mode = QComboBox()
+        for key, label in (("system", "Automatic — Windows' proxy settings (most VPN apps set these)"),
+                           ("proxy", "Use this proxy — e.g. the local port of v2rayN, Hiddify or Psiphon"),
+                           ("direct", "Direct — no proxy")):
+            self.net_mode.addItem(label, key)
+        self.net_mode.setCurrentIndex(max(0, self.net_mode.findData(s.get("net_mode", "system"))))
+        nv.addWidget(self.net_mode)
+        prow = QHBoxLayout()
+        self.net_kind = QComboBox()
+        self.net_kind.addItem("HTTP", "http")
+        self.net_kind.addItem("SOCKS5", "socks5")
+        self.net_kind.setCurrentIndex(max(0, self.net_kind.findData(s.get("net_kind", "http"))))
+        self.net_proxy = QLineEdit(s.get("net_proxy", ""), placeholderText="127.0.0.1:10809")
+        prow.addWidget(self.net_kind)
+        prow.addWidget(self.net_proxy, 1)
+        nv.addLayout(prow)
+        nv.addWidget(hint("Typical local ports: v2rayN HTTP 10809 / SOCKS 10808 · Hiddify 12334 · Psiphon: see its settings. "
+                          "HTTP is best (video streams need it)."))
+        nrow = QHBoxLayout()
+        nsave = QPushButton("Save")
+        nsave.clicked.connect(self.save_net)
+        ntest = QPushButton("Test connection")
+        ntest.clicked.connect(self.test_net)
+        nrow.addWidget(nsave)
+        nrow.addWidget(ntest)
+        nrow.addStretch(1)
+        nv.addLayout(nrow)
+        self.net_status = hint(s.get("net_status", ""))
+        nv.addWidget(self.net_status)
+
+        def mode_changed(_=None):
+            on = self.net_mode.currentData() == "proxy"
+            self.net_kind.setEnabled(on)
+            self.net_proxy.setEnabled(on)
+        self.net_mode.currentIndexChanged.connect(mode_changed)
+        mode_changed()
+        v.addWidget(f)
+
         # downloads
         f, dv = section("Downloads")
         for a in (downloads.DICT_DE, downloads.DICT_EN, downloads.FW_BASE, downloads.FW_SMALL, downloads.FW_TURBO):
@@ -310,7 +352,9 @@ class SettingsDialog(QDialog):
         f, av = section("About")
         av.addWidget(hint(f"SubPlayer for Windows {__import__('subplayer_win').VERSION} · speech recognition: Whisper (OpenAI) via "
                           "faster-whisper · dictionaries: German and English Wiktionary via kaikki.org (CC BY-SA 4.0) · pronunciation "
-                          "recordings: Wikimedia Commons · sentence translation: Google Translate / MyMemory (online) · video: FFmpeg "
+                          "recordings: Wikimedia Commons · sentence translation: Google Translate / MyMemory (online) · Discover: the "
+                          "MediathekViewWeb catalogue (MediathekView film list); programmes and their subtitles come straight "
+                          "from the broadcasters (ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix…) and remain theirs · video: FFmpeg "
                           "via PyAV, Qt · Persian font: Vazirmatn (SIL Open Font License)."))
         links = QHBoxLayout()
         for ic, text, url in (("link", " Project page", GITHUB), ("file", " Privacy policy", PRIVACY),
@@ -324,6 +368,40 @@ class SettingsDialog(QDialog):
                           lambda: (OwnerDialog(main).exec(), self.accept()), kind="link", text=" Seller tools", size=13, color=theme.DIM)
             v.addWidget(seller, 0, Qt.AlignRight)
         v.addStretch(1)
+
+    def save_net(self):
+        from . import netcfg
+        mode = self.net_mode.currentData()
+        if mode == "proxy" and not netcfg.valid(self.net_proxy.text()):
+            self.net_status.setText("<span style='color:#FF4FD8'>Enter the proxy as address:port, e.g. 127.0.0.1:10809</span>")
+            return
+        self.main.settings.update(net_mode=mode, net_kind=self.net_kind.currentData(), net_proxy=self.net_proxy.text().strip())
+        desc = netcfg.apply(self.main.settings)
+        self.main.settings["net_status"] = "Connection: " + desc
+        self.main.save_settings()
+        self.net_status.setText("Saved — connection: " + desc)
+
+    def test_net(self):
+        import threading
+        from PySide6.QtCore import QTimer
+        self.save_net()
+        self.net_status.setText("Testing…")
+        box = {}
+
+        def work():
+            from . import netcfg
+            box["r"] = netcfg.test()
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+
+        def poll():
+            if t.is_alive():
+                QTimer.singleShot(200, poll)
+                return
+            lines = [f"<span style='color:{'#5BE38F' if ok else '#FF4FD8'}'>{'✓' if ok else '✗'} {name}</span> "
+                     f"<span style='color:#9A98B5'>{detail}</span>" for name, ok, detail in box.get("r", [])]
+            self.net_status.setText("<br>".join(lines))
+        poll()
 
     def save_token(self):
         t = self.token.text().strip()
@@ -378,9 +456,16 @@ class SettingsDialog(QDialog):
 HELP = [
     ("Open a video", "Open (Ctrl+O), or drag a video onto the window or onto SubPlayer.exe. Recent and the cards on the welcome "
                      "screen continue where you stopped."),
-    ("Video links", "Link (Ctrl+L): paste a Tagesschau page or any direct .mp4 / .webm link — the video is saved to "
-                    "Videos\\SubPlayer and opens ready for subtitles. YouTube, Netflix, Instagram, TikTok… are refused: their "
-                    "terms don't allow downloading."),
+    ("Discover", "Discover (Ctrl+F): search the free libraries of ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix and the regional "
+                 "stations, or start with the suggestions by level (A2 → C1, always the newest episodes). Tick “With subtitles” for "
+                 "programmes that bring the broadcaster's own subtitles (CC) — click words straight away, no transcription. "
+                 "Download & open saves the programme to Videos\\SubPlayer."),
+    ("Video links", "Link (Ctrl+L): paste a page of the ARD Mediathek, ZDF, 3sat, Arte, DW, KiKA, phoenix or Tagesschau, or any "
+                    "direct .mp4 / .webm / .m3u8 link. The broadcaster's subtitles come along when it has them. YouTube, Netflix, "
+                    "Instagram, TikTok… are refused: their terms don't allow downloading."),
+    ("Only in Germany?", "Some programmes are blocked outside Germany (or Austria/Switzerland) by the broadcaster. From other "
+                         "countries use a VPN with a server in Germany: Settings ▸ Internet connection — Automatic works with most "
+                         "VPN apps; otherwise enter the VPN app's local proxy port (v2rayN HTTP: 127.0.0.1:10809)."),
     ("Make subtitles", "Subtitles ▸ language ▸ quality. Offline Whisper runs on your PC (the model downloads once); "
                        "Online uses your Groq/OpenAI key and is the fastest. Subtitles are saved and reload next time. "
                        "Already have subtitles? Subtitle file ▸ Load, or drop the .srt on the window."),
@@ -397,7 +482,15 @@ HELP = [
                    "answer and use ＋ Add sentences — review then shows a different sentence each time."),
     ("Practice", "Practice: Fill the gap, Dictation (hear the video line, type it) and der·die·das. Answers count for your 🔥 streak."),
     ("Repeat like VLC", "A = loop start, B = loop end (keys A and B); × or Esc stops. Loop line (L) repeats the current subtitle. "
-                        "↑/↓ previous/next line, ←/→ 5 seconds, Space play/pause, F full screen, 1× ▸ 0.75× ▸ 0.5× slower."),
+                        "∞ / 2× / 3× / 5× (R) sets how often: with Loop line every line plays that often, then the next — "
+                        "great for drilling a whole scene. ↑/↓ previous/next line, ←/→ 5 seconds, Space play/pause, F full screen."),
+    ("Speed & sound", "The speed button (or [ and ]) goes from 0.5× to 1.5× in small steps. M mutes; the mouse wheel over the "
+                      "video changes the volume. Click anywhere on the time bar to jump there."),
+    ("Transcript", "Transcript (T, or the list button beside the subtitle): every line of the video; the current one is "
+                   "highlighted. Click a line to jump there, double-click to loop it, and search it with the box on top."),
+    ("Subtitle tools", "Beside the subtitle: Aa = text size, timing (G earlier, H later — for .srt files that don't match) and the "
+                       "translation language; 👁 = listening mode (the text hides while playing and shows when you pause); "
+                       "translate = a translation line under each subtitle, in English or Persian (online)."),
     ("Shadowing", "Shadowing (S): the line plays, then SubPlayer pauses about as long as the line so you can say it aloud, then "
                   "plays it again. ↓ goes to the next line. Pause each line stops after every line so you can read and click."),
     ("Save a clip", "Set A and B, then Save clip: the part between them is saved as a new MP4 in Videos\\SubPlayer — "
@@ -408,7 +501,9 @@ HELP = [
                             "here and in the phone app. Syncs on start, a little after each change, when you come back to the "
                             "window, on close and with Sync. Keep the same video file names on both devices."),
     ("Voices", "Speaking uses Windows voices. For German: Windows Settings ▸ Time & language ▸ Speech ▸ Add voices ▸ Deutsch."),
-    ("Offline & privacy", "Offline subtitles, dictionaries, review and practice work without internet. Your videos never leave your PC."),
+    ("Offline & privacy", "Offline subtitles, dictionaries, review and practice work without internet. Your videos never leave your PC. "
+                          "Discover asks the public MediathekViewWeb catalogue for programmes; downloads come straight from the "
+                          "broadcasters."),
 ]
 
 
@@ -574,13 +669,17 @@ class OwnerDialog(QDialog):
 
 TOUR = [
     ("film", "Welcome to SubPlayer", "Learn German and English from the videos you already love — films, news, series, your own "
-                                    "recordings. Open a file, drop it on the window, or paste a Tagesschau link."),
+                                    "recordings. Open a file, drop it on the window, or paste a link from ARD, ZDF, Arte or DW."),
+    ("compass", "Discover free German TV", "Discover searches ARD, ZDF, 3sat, Arte and DW — news, documentaries, series, kids' "
+                                           "shows — with suggestions by level. CC programmes bring real subtitles; one click "
+                                           "downloads and opens them."),
     ("captions", "Subtitles in one click", "Subtitles makes them on your PC with Whisper (or online with your key). They're saved "
                                           "and come back next time — and travel to your phone with Sync."),
     ("sparkles", "Tap any word", "Pause and click a word: article, IPA, meanings with examples, English and Persian, the voice and a "
                                  "real recording. Shift+click two words for a phrase, Ctrl+click for the whole sentence."),
-    ("repeat", "Loop, shadow, slow down", "A and B loop any part, Loop line repeats a sentence, Shadowing gives you a pause to say "
-                                          "it aloud, 0.75× and 0.5× slow it down. Save clip keeps the part as a video."),
+    ("repeat", "Loop, shadow, slow down", "A and B loop any part, Loop line repeats a sentence (∞ or 2×/3×/5× per line), "
+                                          "Shadowing gives you a pause to say it aloud, the speed goes down to 0.5×. The "
+                                          "transcript, listening mode and a translation line help too."),
     ("cards", "Save, review, practise", "Save keeps the word with its exact video moment. Review brings it back at the right time "
                                         "(1, 2, 4, 7, 15, 30, 60 days); Practice has gap-fill, dictation and der·die·das."),
 ]

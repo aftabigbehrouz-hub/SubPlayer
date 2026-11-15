@@ -3,3 +3,4 @@ faster-whisper==1.2.1
 av==19.0.2
 cryptography>=42
 requests>=2.31
+PySocks==1.7.1
