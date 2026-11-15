@@ -36,7 +36,8 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --name SubPlayer `
             --collect-all faster_whisper --collect-all ctranslate2 --collect-all onnxruntime `
-            --collect-submodules av --hidden-import PySide6.QtTextToSpeech `
+            --collect-submodules av --hidden-import PySide6.QtTextToSpeech --hidden-import PySide6.QtSvg `
+            --add-data "subplayer_win/fonts;subplayer_win/fonts" `
             run.py
       - name: Self-test the packaged app
         run: |
