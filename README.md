@@ -19,6 +19,24 @@
 - [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md) (fill in your name, address and e-mail before publishing).
 
 
+**Windows 2.2**
+- **Word levels in colour** (bars button beside the subtitle, K): A1 green · A2 cyan · B1 blue · B2 violet · C1 orange ·
+  C2 pink; saved words underlined; right-click to colour only harder words. English: CEFR-J + Octanove C1/C2 lists;
+  German: estimated from word frequency (no free official list exists — Goethe's and Oxford's are copyrighted).
+- **Where else is this word used?** (word card): every line in all your subtitled videos with the word or its forms
+  (gehen → geht, ging, gegangen) — double-click plays that moment.
+- **Translate all** (Transcript): the whole subtitle in English or Persian at once, saved — the translation line then
+  works offline and switches on/off with its button.
+- **Correct subtitles** (pencil beside the subtitle, E, or right-click a transcript line): text, timing, delete, add a
+  line; the first version is kept as a backup.
+- **Study this video** (Transcript): all its words by level with counts, the words you saved from it, practice with its
+  whole text (gaps at your level, dictation of its lines).
+- **My Words:** phrases · nouns · verbs · adjectives · others, filter by video, a **calendar** of the days you saved
+  words, a **picture of the video moment** for every word, **export** to CSV (Excel), text or Anki.
+- **Discover ▸ English:** VOA Learning English (English in a Minute, How to Pronounce, Everyday Grammar, News Words,
+  VOA60) and NASA science videos (most with subtitles) — public domain.
+- **Space** pauses and plays everywhere, even after clicking a button.
+
 **Windows 2.1**
 - **Discover** (Ctrl+F): search the free libraries of **ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix** and the regional
   stations, filter by channel, length and **“With subtitles”**, or start with **suggestions by level** (logo!, Die Sendung
@@ -197,7 +215,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 40 Android unit tests (+ 41 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 40 Android unit tests (+ 50 Windows tests) — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 

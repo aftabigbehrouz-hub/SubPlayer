@@ -152,17 +152,33 @@ def find_uses(word: str, lang: str, items: list[Item], dictionary=None, limit: i
 
 
 def vocabulary(cues: list, lang: str, levels, dictionary=None) -> list[tuple[str, int, int]]:
-    """[(word, count, level)] of a video's text, most frequent first (base words where the dictionary knows them)."""
+    """[(word, count, level)] of a video's text, most frequent first. A capital at the start of a line or sentence doesn't
+    make a German word a noun: such words count as lowercase unless they only ever appear capitalised mid-sentence."""
     counts: dict[str, int] = {}
-    shown: dict[str, str] = {}
+    lower_seen: set = set()
+    mid_capital: set = set()
     for c in cues:
+        prev_end = True
         for m in TOKEN.finditer(c.text):
             t = m.group(0).strip("'’-")
+            before = c.text[:m.start()].rstrip()
+            sentence_start = prev_end or not before or before[-1:] in ".!?:…\"„“»«"
+            prev_end = False
             if len(t) < 2:
                 continue
             k = t.lower()
             counts[k] = counts.get(k, 0) + 1
-            if k not in shown or (t[:1].isupper() and lang == "de"):
-                shown[k] = t
-    out = [(shown[k], n, levels.level(shown[k], lang, dictionary)) for k, n in counts.items()]
+            if t[:1].islower():
+                lower_seen.add(k)
+            elif not sentence_start:
+                mid_capital.add(k)
+    out = []
+    for k, n in counts.items():
+        if lang == "de" and k in mid_capital and k not in lower_seen:
+            shown = k[:1].upper() + k[1:]                # a German noun (capitalised inside sentences)
+        elif lang == "en" and k in mid_capital and k not in lower_seen:
+            shown = k[:1].upper() + k[1:]                # a name
+        else:
+            shown = k
+        out.append((shown, n, levels.level(shown, lang, dictionary)))
     return sorted(out, key=lambda x: (-x[1], x[0].lower()))

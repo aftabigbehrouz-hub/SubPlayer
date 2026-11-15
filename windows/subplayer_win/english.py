@@ -1,6 +1,7 @@
 """
 English programmes for Discover — free to download:
-  VOA Learning English (Voice of America — US government work, public domain; lessons made for learners, A1–B2)
+  VOA Learning English (Voice of America — US government work, public domain; lessons made for learners, A2–B2;
+  "Let's Learn English with Anna" is only on YouTube, so it is not offered)
   NASA video library (images.nasa.gov — public domain; most videos come with English .srt subtitles)
 Both are listed with the same Film type as the German catalogue; the video file is found when you download.
 """
@@ -31,7 +32,6 @@ class EnShelf:
 
 
 SHELVES = [
-    EnShelf("Let's Learn English with Anna", "A1–A2", "VOA's video course: everyday English, slow and clear", feed="/api/zyygqpl-vomx-tpetrbqm"),
     EnShelf("English in a Minute", "A2–B1", "One expression explained in a minute", feed="/api/zjk-rl-vomx-tpebpqqo"),
     EnShelf("How to Pronounce", "A2–B1", "Sounds of American English, step by step", feed="/api/zpivqol-vomx-tpe_guqi"),
     EnShelf("Everyday Grammar Video", "B1", "Grammar in short, real situations", feed="/api/z_riqtl-vomx-tpevtmqr"),

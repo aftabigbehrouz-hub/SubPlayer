@@ -105,6 +105,7 @@ class DiscoverPage(QWidget):
         head.addWidget(GradientLabel("Discover", 22, QFont.Black))
         sub = QLabel("Free programmes from ARD, ZDF, 3sat, Arte, DW and more — download, then learn with subtitles",
                      objectName="hint")
+        self.sub_lbl = sub
         sub.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         head.addWidget(sub, 1)
         lv.addLayout(head)
@@ -209,6 +210,8 @@ class DiscoverPage(QWidget):
             if not b.isVisible():
                 b.setChecked(False)
         self.length.setVisible(not en)
+        self.sub_lbl.setText("Free English programmes: VOA Learning English and NASA — download, then learn with subtitles" if en
+                             else "Free programmes from ARD, ZDF, 3sat, Arte, DW and more — download, then learn with subtitles")
         self.cc_only.setVisible(not en)
         self.q.setPlaceholderText("Search programmes — e.g. grammar, Mars, interview, climate, Thanksgiving" if en else
                                   "Search programmes — e.g. Terra X, Tatort, Wirtschaft, Klimawandel, logo!")
@@ -339,7 +342,8 @@ class DiscoverPage(QWidget):
         self._last_cols = self._cols()
         self.shelves_loaded = True
         self.status.setText("Suggestions by level — always the newest episodes. Click a programme to see it; "
-                            "<b style='color:#5BE38F'>CC</b> = comes with the broadcaster's subtitles.")
+                            "<b style='color:#5BE38F'>CC</b> = comes with the broadcaster's subtitles." if self.lang == "de" else
+                            "Suggestions by level: VOA Learning English lessons (made for learners) and NASA science videos.")
         cols, cw = self._cols()
         shown = 0
         for sh, films in shelves:

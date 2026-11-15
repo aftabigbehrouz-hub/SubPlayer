@@ -76,8 +76,12 @@ def score(u: str) -> int:
         s = 30
     else:
         s = 45
-    if "_hq.mp4" in l:                          # VOA: 720p — clear picture, sensible size
+    if "_hq.mp4" in l or "_720p.mp4" in l:      # VOA: 720p — clear picture, sensible size
         s += 12
+    elif "_480p.mp4" in l:
+        s += 9
+    elif "_240p.mp4" in l or "_360p.mp4" in l:
+        s -= 10
     elif "_fullhd.mp4" in l:
         s -= 8
     if "download=1" in l:
@@ -279,6 +283,9 @@ def resolve(url: str, session=None) -> Found:
         if f:
             found = _from_film(f)
     if not found:
+        if "youtube.com/iframe_api" in page and ("youtube.com/embed" in page or "voanews.com" in u):
+            raise ValueError("This lesson is only offered as a YouTube video, which SubPlayer can't download "
+                             "(YouTube's terms forbid it). Other lessons of the same series usually have their own video file.")
         raise ValueError("No downloadable video found on that page. For ARD, ZDF, 3sat, Arte and DW programmes, "
                          "Discover finds them by name.")
     return found

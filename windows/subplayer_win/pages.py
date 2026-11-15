@@ -105,6 +105,23 @@ class WordsPage(QWidget):
         self.cal.setMaximumHeight(250)
         self.cal.clicked.connect(self.pick_day)
         self.cal.currentPageChanged.connect(lambda *_: self._mark_calendar())
+        self.cal.setStyleSheet(
+            "QCalendarWidget QWidget#qt_calendar_navigationbar{background:rgba(40,32,84,0.95);border-radius:8px}"
+            "QCalendarWidget QToolButton{color:#FFFFFF;background:transparent;font-weight:700;padding:4px 10px}"
+            "QCalendarWidget QToolButton:hover{background:rgba(255,255,255,0.08);border-radius:6px}"
+            "QCalendarWidget QMenu{background:#1A1638;color:#E8E6FF}"
+            "QCalendarWidget QSpinBox{background:#1A1638;color:#FFFFFF;border:0}"
+            "QCalendarWidget QAbstractItemView{background:#110E26;color:#E8E6FF;selection-background-color:#8A5CFF;"
+            "selection-color:#FFFFFF;outline:0;border:0}"
+            "QCalendarWidget QAbstractItemView:disabled{color:#4A4670}")
+        from PySide6.QtGui import QTextCharFormat, QColor as _QC, QBrush as _QB
+        wk = QTextCharFormat()
+        wk.setForeground(_QB(_QC("#E8E6FF")))
+        for d in (Qt.Saturday, Qt.Sunday):
+            self.cal.setWeekdayTextFormat(d, wk)
+        hd = QTextCharFormat()
+        hd.setForeground(_QB(_QC("#9A98B5")))
+        self.cal.setHeaderTextFormat(hd)
         self.cal.hide()
         left.addWidget(self.cal)
         self.day_lbl = QLabel("", objectName="small")
@@ -112,6 +129,8 @@ class WordsPage(QWidget):
         left.addWidget(self.day_lbl)
         self.list = QListWidget()
         self.list.setIconSize(QSize(96, 54))
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setTextElideMode(Qt.ElideRight)
         self.list.currentRowChanged.connect(self.show_word)
         left.addWidget(self.list, 1)
         row = QHBoxLayout()
