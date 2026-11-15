@@ -177,3 +177,99 @@ def _key(base: str) -> str:
             out.append("_")
             prev_bad = True
     return "".join(out)[:60]
+
+
+# ------------------------------------------------------------------ broadcaster subtitles (TTML / EBU-TT, WebVTT)
+_CLOCK = re.compile(r"^(\d+):(\d{2}):(\d{2})(?:([.,]\d+)|:(\d+(?:\.\d+)?))?$")
+_OFFSET = re.compile(r"^(\d+(?:\.\d+)?)(h|ms|m|s|f|t)$")
+
+
+def _ttml_time(v: str, fps: float, tick_rate: float) -> int:
+    v = (v or "").strip()
+    m = _CLOCK.match(v)
+    if m:
+        h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        ms = (h * 3600 + mi * 60 + s) * 1000
+        if m.group(4):
+            ms += int(round(float("0" + m.group(4).replace(",", ".")) * 1000))
+        elif m.group(5):
+            ms += int(round(float(m.group(5)) / fps * 1000))
+        return ms
+    m = _OFFSET.match(v)
+    if m:
+        n, unit = float(m.group(1)), m.group(2)
+        return int(round(n * {"h": 3_600_000, "m": 60_000, "s": 1000, "ms": 1}.get(unit, 0) if unit in ("h", "m", "s", "ms")
+                         else (n / fps * 1000 if unit == "f" else n / tick_rate * 1000)))
+    raise ValueError(f"time {v!r}")
+
+
+def parse_ttml(xml_text: str) -> list[Cue]:
+    """TTML / EBU-TT-D as used by ARD and ZDF. Line breaks kept; colours and styles dropped; the 10:00:00 timecode start
+    that broadcast subtitles often use is removed so the first line lines up with the video."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text)
+
+    def local(tag):
+        return tag.rsplit("}", 1)[-1]
+
+    def attr(el, name):
+        for k, v in el.attrib.items():
+            if local(k) == name:
+                return v
+        return None
+
+    fps = float(attr(root, "frameRate") or 25)
+    mult = (attr(root, "frameRateMultiplier") or "").split()          # e.g. "1000 1001" (NTSC)
+    if len(mult) == 2 and float(mult[1]):
+        fps *= float(mult[0]) / float(mult[1])
+    tick_rate = float(attr(root, "tickRate") or 10_000_000)
+
+    def text_of(el) -> str:
+        parts = [el.text or ""]
+        for ch in el:
+            parts.append("\n" if local(ch.tag) == "br" else text_of(ch))
+            parts.append(ch.tail or "")
+        return "".join(parts)
+
+    cues = []
+    for p in root.iter():
+        if local(p.tag) != "p":
+            continue
+        b, e, dur = attr(p, "begin"), attr(p, "end"), attr(p, "dur")
+        if b is None:
+            continue
+        try:
+            s = _ttml_time(b, fps, tick_rate)
+            en = _ttml_time(e, fps, tick_rate) if e else s + _ttml_time(dur or "3s", fps, tick_rate)
+        except ValueError:
+            continue
+        body = "\n".join(" ".join(l.split()) for l in text_of(p).split("\n"))
+        body = "\n".join(l for l in body.split("\n") if l).strip()
+        if body and en > s:
+            cues.append(Cue(s, en, body))
+    cues.sort(key=lambda c: c.start_ms)
+    if cues and cues[0].start_ms >= 36_000_000:          # broadcast timecode that starts at 10:00:00
+        for c in cues:
+            c.start_ms -= 36_000_000
+            c.end_ms -= 36_000_000
+    return cues
+
+
+def parse_any(text: str) -> list[Cue]:
+    """.srt, .vtt or TTML/XML — whatever the text is."""
+    t = text.lstrip("﻿ \r\n\t")
+    if t.startswith("<"):
+        return parse_ttml(t)
+    return parse(text)
+
+
+_DE = set("der die das und ist nicht ich sie wir ein eine es auf mit den dem zu von für sich auch noch wie aber oder wenn dass".split())
+_EN = set("the and is not you we it of to in that for on with this are was be have he she they but or if".split())
+
+
+def guess_lang(cues: list[Cue]) -> str:
+    """'de' or 'en' from the most common little words."""
+    words = re.findall(r"[a-zäöüß]+", " ".join(c.text for c in cues[:200]).lower())
+    de = sum(w in _DE for w in words)
+    en = sum(w in _EN for w in words)
+    return "en" if en > de * 1.3 else "de"
