@@ -491,6 +491,7 @@ private fun SubtitleLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun TranslationLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
     LaunchedEffect(cueIndex, vm.showTranslation) { vm.ensureTranslation(cueIndex) }
