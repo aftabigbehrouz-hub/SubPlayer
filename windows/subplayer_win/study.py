@@ -126,7 +126,7 @@ class StudyPage(QWidget):
         v3 = QVBoxLayout(p3)
         v3.setContentsMargins(0, 8, 0, 0)
         v3.setSpacing(8)
-        h3 = QLabel("<b>1.</b> Choose a level. &nbsp;<b>2.</b> Send the ready question (with the whole text of the video) to an assistant: "
+        h3 = QLabel("<b>1.</b> Choose a level — or the exam: TestDaF for a German video, IELTS for an English one. &nbsp;<b>2.</b> Send the ready question (with the whole text of the video) to an assistant: "
                     "it writes a text at that level, the key words, the structures, exercises and the answers. &nbsp;<b>3.</b> Copy the "
                     "answer and paste it here — it is kept with the video for practice.", objectName="hint")
         h3.setWordWrap(True)
@@ -134,9 +134,13 @@ class StudyPage(QWidget):
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Level", objectName="small"))
         self.ai_lv = {}
-        for x in lessons.LEVELS:
+        for x in lessons.ALL:
+            if x in lessons.EXAMS:
+                r1.addSpacing(6) if x == lessons.EXAMS[0] else None
             b = QPushButton(x, checkable=True)
             b.setProperty("kind", "chip")
+            b.setToolTip({"TestDaF": "A TestDaF practice set on the whole video (German videos)",
+                          "IELTS": "An IELTS Academic practice set on the whole video (English videos)"}.get(x, f"A text at {x} with exercises"))
             b.clicked.connect(lambda _=False, y=x: self._ai_level(y))
             self.ai_lv[x] = b
             r1.addWidget(b)
@@ -222,7 +226,7 @@ class StudyPage(QWidget):
         mine = self._saved()
         self.stats.setText(f"{len(cues)} lines · {words} words · {len(self.vocab)} different · " + " · ".join(
             f"<span style='color:{COLORS[n]}'>{NAMES[n]} {counts[n]}</span>" for n in range(1, 7)) +
-            f" · you saved {len(mine)}" + (" · <span style='color:#7F7A9E'>German levels are estimates</span>" if lang == "de" else ""))
+            f" · you saved {len(mine)}" + (" · <span style='color:#7F7A9E'>German levels: word list where listed, else estimated</span>" if lang == "de" else ""))
         self._fill_vocab()
         self._fill_saved()
         self.detail.setHtml(f"<p style='font-size:17pt;font-weight:800;color:{theme.CYAN}'>Pick a word</p>"
@@ -248,8 +252,12 @@ class StudyPage(QWidget):
     def _ai_level(self, lv: str):
         from . import lessons
         self._ai_save()
-        if lv not in lessons.LEVELS:
+        if lv not in lessons.ALL:
             lv = "B1"
+        if lv in lessons.EXAMS and lv != lessons.exam_for(self.lang):
+            lv = lessons.exam_for(self.lang)                 # TestDaF for German videos, IELTS for English ones
+        for x in lessons.EXAMS:
+            self.ai_lv[x].setVisible(x == lessons.exam_for(self.lang))
         self._ai_level_name = lv
         self.main.settings["lesson_level"] = lv
         self.main.save_settings()
@@ -278,7 +286,18 @@ class StudyPage(QWidget):
     def _ai_prompt(self) -> str:
         from . import lessons
         mine = [(w.lemma or w.text) for w in self._saved()]
-        return lessons.prompt(self._ai_level_name, self.lang, self.name, self.cues, mine, self.ai_explain.currentData())
+        return lessons.prompt(self._ai_level_name, self.lang, self.name, self.cues, mine, self.ai_explain.currentData(),
+                              self._exam_words())
+
+    def _exam_words(self, limit: int = 60) -> list[str]:
+        """The video's words of level B2 and above, most frequent first (the base words, as the word lists know them)."""
+        out = []
+        for w, n, lv in (getattr(self, "vocab", None) or []):
+            if lv >= 4 and len(w) > 3:
+                out.append(w)
+                if len(out) >= limit:
+                    break
+        return out
 
     def _ai_ask(self, source: str):
         if not self.cues:

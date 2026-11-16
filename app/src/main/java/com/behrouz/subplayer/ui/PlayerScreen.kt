@@ -490,18 +490,32 @@ private fun SubtitleLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
     }
 }
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun TranslationLine(vm: AppViewModel, cueIndex: Int, big: Boolean) {
     LaunchedEffect(cueIndex, vm.showTranslation) { vm.ensureTranslation(cueIndex) }
     val t = vm.translationFor(cueIndex) ?: return
     val rtl = vm.trLang() == "fa"
-    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides
-        if (rtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
-        Text(
-            t, color = Neon.Gold.copy(alpha = 0.95f), fontSize = if (big) 18.sp else 16.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp).widthIn(max = 760.dp).clip(RoundedCornerShape(12.dp))
-                .background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp)
-        )
+    val box = Modifier.padding(top = 4.dp).widthIn(max = 760.dp).clip(RoundedCornerShape(12.dp))
+        .background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 3.dp)
+    if (rtl) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+            Text(t, color = Neon.Gold.copy(alpha = 0.95f), fontSize = if (big) 18.sp else 16.sp, textAlign = TextAlign.Center, modifier = box)
+        }
+        return
+    }
+    // German (or English) translation: each word can be tapped and learnt like a subtitle word
+    val words = vm.tokens(t)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterHorizontally), modifier = box) {
+        words.forEachIndexed { i, w ->
+            val known = vm.isKnownWord(w)
+            Text(
+                w, color = if (known) Neon.Gold else Neon.Gold.copy(alpha = 0.92f), fontSize = if (big) 18.sp else 16.sp,
+                textDecoration = if (known) TextDecoration.Underline else null,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { vm.onTranslationWordTap(cueIndex, i) }
+                    .padding(horizontal = 2.dp, vertical = 1.dp)
+            )
+        }
     }
 }
 

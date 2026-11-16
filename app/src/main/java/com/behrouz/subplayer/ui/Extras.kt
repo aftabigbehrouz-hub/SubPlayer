@@ -108,6 +108,17 @@ private val HELP = listOf(
         "Tap “Translation”: under each subtitle its translation into Persian, English or German (choose in ⋯ Options). " +
             "Lines are translated as they come; “Translate all now” translates the whole video before you watch and keeps it, " +
             "so it works offline too. Switch it off any time."),
+    HelpItem(Icons.School, "AI lessons and exam practice (TestDaF · IELTS)",
+        "Study video ▸ AI lesson: choose A2, B1, B2 or C1 — or the exam: TestDaF for a German video, IELTS for an English one. " +
+            "The ready question holds the whole text of the video, its B2–C2 words and your saved words; ChatGPT, Gemini, DeepSeek or " +
+            "Grok answers with vocabulary (also words likely in future videos on the topic), listening tasks on the video, a reading " +
+            "text, writing and speaking tasks and the answers. Copy the answer and tap Paste: it is kept with the video, one per level."),
+    HelpItem(Icons.Subtitles, "Words of the translation line",
+        "Under an English video with the German translation line on (or the other way round), tap any word of the translation: " +
+            "its word card opens in that language and ★ Save keeps it with the translated sentence and the video moment."),
+    HelpItem(Icons.Download, "Downloads keep running",
+        "A download, transcribing or “translate all” goes on while you use another app or the screen is off — the notification " +
+            "shows how far it is. A dropped connection continues where it stopped. (Not in the Google Play version, which has no downloads.)"),
     HelpItem(Icons.Search, "Where else is a word used?",
         "In a word card tap “Where else is it used?”: every line of all your subtitled videos (made or loaded in SubPlayer, " +
             "also on your other devices) where the word or one of its forms is said. Tap a line to watch that moment. " +

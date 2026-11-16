@@ -1251,13 +1251,28 @@ class Main(QMainWindow):
             if self._tr_target() == "fa":
                 body += (f"<div dir='rtl' style='text-align:center;font-family:{theme.FA_FONT};font-size:{small + 1}pt;"
                          f"color:{theme.CYAN}'>{html.escape(tr)}</div>")
-            else:
+            elif tr in ("…", "(translation needs internet)"):
                 body += f"<div style='text-align:center;font-size:{small}pt;color:{theme.CYAN};font-style:italic'>{html.escape(tr)}</div>"
+            else:
+                # German or English translation: every word can be clicked and learnt like a subtitle word
+                saved_tr = self._saved_cache[1]
+                parts, last = [], 0
+                for k, (s0, e0, tok) in enumerate(subtitles.tokens(tr)):
+                    parts.append(html.escape(tr[last:s0]))
+                    col = theme.GOLD if tok.lower() in saved_tr else theme.CYAN
+                    parts.append(f"<a href='t:{i}:{k}' style='color:{col};text-decoration:none'>{html.escape(tok)}</a>")
+                    last = e0
+                parts.append(html.escape(tr[last:]))
+                body += (f"<div style='text-align:center;font-size:{small}pt;color:{theme.CYAN};font-style:italic'>"
+                         f"{''.join(parts)}</div>")
         self.sub_view.setHtml(body)
 
     # ================================================================== words in subtitles
     def _sub_click(self, url: QUrl):
         s = url.toString()
+        if s.startswith("t:"):
+            self._tr_click(s)
+            return
         if not s.startswith("w:"):
             return
         _, ci, ti = s.split(":")
@@ -1284,6 +1299,23 @@ class Main(QMainWindow):
         else:
             self.phrase_start = None
             self.open_word(word, sentence, start, end, cue=ci)
+        self._shown = None
+
+    def _tr_click(self, s: str):
+        """A word of the translation line (German under an English video, or English under a German one): its word card in
+        that language, with the translated line as the sentence and the video moment of the subtitle line."""
+        _, ci, ti = s.split(":")
+        ci, ti = int(ci), int(ti)
+        tr = self.tr_cache.get(self._tr_key(ci)) or ""
+        toks = subtitles.tokens(tr)
+        if ti >= len(toks):
+            return
+        self.player.pause()
+        self.shadow_resume = 0
+        self.phrase_start = None
+        lang = self._tr_target()
+        start, end = self.cues[ci].start_ms + self.sub_offset, self.cues[ci].end_ms + self.sub_offset
+        self.open_word(toks[ti][2], tr, start, end, lang=lang, cue=ci)
         self._shown = None
 
     def dictionary(self, lang: str) -> Dictionary | None:
@@ -1349,8 +1381,9 @@ class Main(QMainWindow):
             if n == 0:
                 lv = self.levels.level(c["word"], lang, self.dictionary(lang))
                 if lv:
-                    tip = "CEFR-J" if lang == "en" else "estimated from frequency"
-                    meta.append(f"<span style='color:{LV_COLORS[lv]};font-weight:800'>{'≈' if lang == 'de' else ''}{LV_NAMES[lv]}</span>"
+                    sure = lang == "en" or self.levels.listed(e.lemma, lang)
+                    tip = "CEFR-J" if lang == "en" else ("Goethe/telc word list" if sure else "estimated from frequency")
+                    meta.append(f"<span style='color:{LV_COLORS[lv]};font-weight:800'>{'' if sure else '≈'}{LV_NAMES[lv]}</span>"
                                 f"<span style='color:{theme.DIM};font-size:8pt'> ({tip})</span>")
             h.append(" &nbsp;·&nbsp; ".join(meta))
             if n == 0:

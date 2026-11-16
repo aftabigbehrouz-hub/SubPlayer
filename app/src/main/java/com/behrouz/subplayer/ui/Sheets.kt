@@ -126,7 +126,7 @@ private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
         val lv = remember(e.lemma, e.lang) { vm.levels.level(e.lemma, e.lang) }
         if (lv > 0) {
             Spacer(Modifier.width(8.dp))
-            Text(com.behrouz.subplayer.learn.Levels.NAMES[lv] + if (e.lang == "de") " ≈" else "",
+            Text(com.behrouz.subplayer.learn.Levels.NAMES[lv] + if (e.lang == "de" && !vm.levels.listed(e.lemma, e.lang)) " ≈" else "",
                 color = androidx.compose.ui.graphics.Color(0xFF0B0A1A), fontWeight = FontWeight.Bold, fontSize = 12.sp,
                 modifier = Modifier.background(androidx.compose.ui.graphics.Color(com.behrouz.subplayer.learn.Levels.COLORS[lv]), RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 1.dp))

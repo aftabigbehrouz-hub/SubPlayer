@@ -177,12 +177,13 @@ object LinkImporter {
         return s
     }
 
-    private fun open(url: String): HttpURLConnection {
+    private fun open(url: String, from: Long = 0): HttpURLConnection {
         var current = url
         repeat(5) {
             val c = (URL(current).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20_000; readTimeout = 60_000; instanceFollowRedirects = false
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) SubPlayer")
+                if (from > 0) setRequestProperty("Range", "bytes=$from-")
             }
             val code = c.responseCode
             if (code in 300..399) {
@@ -231,16 +232,33 @@ object LinkImporter {
                 file = File(dir, name); file!!.outputStream()
             }
             out.use { o ->
-                c.inputStream.use { input ->
-                    val buf = ByteArray(256 * 1024); var done = 0L; var last = -1
-                    while (true) {
+                // A dropped connection (switching networks, a short loss of signal) doesn't start the download again:
+                // it goes on from the last byte with an HTTP Range request, up to 12 times.
+                val buf = ByteArray(256 * 1024); var done = 0L; var last = -1; var tries = 0
+                var conn = c
+                while (true) {
+                    try {
+                        conn.inputStream.use { input ->
+                            while (true) {
+                                check()
+                                val r = input.read(buf); if (r < 0) break
+                                o.write(buf, 0, r); done += r; tries = 0
+                                val p = if (total > 0) (done * 100 / total).toInt() else -1
+                                if (p != last) { last = p; progress(p, done) }
+                            }
+                        }
+                        if (total <= 0 || done >= total) break
+                        throw IOException("The connection ended early")
+                    } catch (e: IOException) {
+                        if (++tries > 12) throw e
+                        if (conn !== c) conn.disconnect()
+                        Thread.sleep(minOf(30_000L, 1_000L * (1 shl minOf(tries, 5))))
                         check()
-                        val r = input.read(buf); if (r < 0) break
-                        o.write(buf, 0, r); done += r
-                        val p = if (total > 0) (done * 100 / total).toInt() else -1
-                        if (p != last) { last = p; progress(p, done) }
+                        conn = open(f.videoUrl, done)
+                        if (conn.responseCode != 206) { conn.disconnect(); throw IOException("The site doesn't allow continuing the download — please start it again") }
                     }
                 }
+                if (conn !== c) conn.disconnect()
             }
             if (Build.VERSION.SDK_INT >= 29) {
                 ctx.contentResolver.update(uri!!, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)

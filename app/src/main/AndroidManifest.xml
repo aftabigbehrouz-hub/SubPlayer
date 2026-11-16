@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Daily review reminder -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- downloads, transcribing and "translate all" keep running when you switch to another app (WorkService) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <!-- Which learning apps are installed (Android 11+ needs this list) -->
     <queries>
@@ -34,6 +39,11 @@
         android:label="${appLabel}"
         android:supportsRtl="true"
         android:theme="@style/Theme.SubPlayer">
+        <service
+            android:name=".WorkService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
 
         <!-- lets other apps (Telegram …) read a shared .srt file -->
         <provider

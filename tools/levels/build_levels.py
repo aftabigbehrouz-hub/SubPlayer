@@ -3,13 +3,17 @@ Builds the word-level files the apps colour subtitles with (levels-de.tsv, level
 
 English: CEFR-J Vocabulary Profile 1.5 (A1–B2; Tono Laboratory, TUFS — free incl. commercial use, with citation) and the
 Octanove Vocabulary Profile C1/C2 1.0 (CC BY-SA 4.0); words in neither list get an estimate from their frequency.
-German: there is no freely licensed CEFR list, so the level is ESTIMATED from how common the base word (lemma) is in
-subtitles — FrequencyWords 2018 (Hermit Dave, from OpenSubtitles; CC BY-SA 4.0) — with the forms joined to their base
-word through SubPlayer's German Wiktionary dictionary. Labelled as an estimate in the apps.
+German: the 3,041 words of the WordFeather list (Goethe/telc-oriented levels A1–C2, github.com/abdullahbutt/wordfeather,
+version of 6 June 2026 — released under CC0 1.0 then; later versions are CC BY-NC and are NOT used; the CC0 copy is in
+tools/levels/data) get their listed level, marked "L" in the file. Every other word's level is ESTIMATED from how common
+its base word (lemma) is in subtitles — FrequencyWords 2018 (Hermit Dave, from OpenSubtitles; CC BY-SA 4.0) — with the
+forms joined to their base word through SubPlayer's German Wiktionary dictionary. Labelled as an estimate in the apps.
+
+File format: "word<TAB>level" or "word<TAB>level<TAB>L" (L = from a published list, not estimated).
 
 usage: python build_levels.py DE_DICT.db EN_DICT.db de_50k.txt en_50k.txt cefrj.csv octanove.csv OUT_DIR
 """
-import csv, re, sqlite3, sys
+import csv, json, re, sqlite3, sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -59,9 +63,32 @@ def band(rank, cuts):
 # German: cumulative cut-offs by base-word rank (A1 1000, A2 2000, B1 4000, B2 7000, C1 12000, then C2)
 de_rank = lemma_freq(de_db, de_freq)
 de = {w: band(i, (1000, 2000, 4000, 7000, 12000)) for i, w in enumerate(de_rank)}
+
+
+def wordfeather_lemma(entry: str) -> str | None:
+    """"der Kollege, -n" → kollege · "die Zinsen (Pl.)" → zinsen · "sich erholen" → erholen · phrases → None."""
+    t = re.sub(r"\s*\(.*?\)", "", entry).split(",")[0].strip()
+    t = re.sub(r"^(der|die|das|der/die)\s+", "", t)
+    t = re.sub(r"^sich\s+", "", t)
+    if not t or " " in t or not re.fullmatch(r"[^\W\d_][\w\-]*", t):
+        return None
+    return t.lower()
+
+
+listed = {}
+wf = Path(__file__).resolve().parent / "data" / "wordfeather-cc0-2026-06-06.json"
+for e in json.loads(wf.read_text(encoding="utf-8")):
+    lem, lv = wordfeather_lemma(e.get("de", "")), LV.get(e.get("level", ""))
+    if lem and lv:
+        listed[lem] = min(lv, listed.get(lem, 9))       # a word listed twice (noun and verb) keeps its lower level
+changed = sum(1 for w, lv in listed.items() if w in de and de[w] != lv)
+for w, lv in listed.items():
+    de[w] = lv
+order = de_rank + [w for w in listed if w not in set(de_rank)]
 with open(out / "levels-de.tsv", "w", encoding="utf-8") as f:
-    for w in de_rank:
-        f.write(f"{w}\t{de[w]}\n")
+    for w in order:
+        f.write(f"{w}\t{de[w]}" + ("\tL" if w in listed else "") + "\n")
+print(f"German: {len(order)} words, {len(listed)} from the WordFeather list ({changed} estimates replaced)")
 
 # English: CEFR-J + Octanove first, frequency estimate for the rest
 en = {}

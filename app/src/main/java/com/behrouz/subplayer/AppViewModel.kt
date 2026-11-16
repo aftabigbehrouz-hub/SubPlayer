@@ -427,6 +427,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A word of the translation line: its word card in the translation's language, saved with the translated line and the moment. */
+    fun onTranslationWordTap(cueIndex: Int, wordIndex: Int) {
+        player.pause()
+        val cue = cues.getOrNull(cueIndex) ?: return
+        val t = translationFor(cueIndex) ?: return
+        val w = tokens(t).getOrNull(wordIndex) ?: return
+        clearSelection()
+        openWord(w, t, cue.startMs, cue.endMs, lang = trLang())
+    }
+
     fun onWordLongPress(cueIndex: Int, wordIndex: Int) {
         player.pause()
         selCue = cueIndex; selStart = wordIndex; selEnd = wordIndex; phraseMode = true
@@ -1105,10 +1115,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun lessonFile(level: String) = File(ctx.filesDir, "lessons/${videoKey(videoName)}.$level.txt")
 
     fun openLesson(level: String = lessonLevel) {
-        lessonLevel = if (level in com.behrouz.subplayer.learn.Lessons.LEVELS) level else "B1"
+        val L = com.behrouz.subplayer.learn.Lessons
+        lessonLevel = when {
+            level in L.EXAMS -> L.examFor(wordLang())          // TestDaF for German videos, IELTS for English ones
+            level in L.LEVELS -> level
+            else -> "B1"
+        }
         uiPrefs.edit().putString("lesson_level", lessonLevel).apply()
         lessonText = runCatching { lessonFile(lessonLevel).readText() }.getOrDefault("")
-        lessonKept = com.behrouz.subplayer.learn.Lessons.LEVELS.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
+        lessonKept = com.behrouz.subplayer.learn.Lessons.ALL.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
     }
 
     fun chooseLessonExplain(k: String) { lessonExplain = k; uiPrefs.edit().putString("lesson_explain", k).apply() }
@@ -1119,11 +1134,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val f = lessonFile(lessonLevel)
             if (text.isBlank()) f.delete() else { f.parentFile?.mkdirs(); f.writeText(text) }
         }
-        lessonKept = com.behrouz.subplayer.learn.Lessons.LEVELS.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
+        lessonKept = com.behrouz.subplayer.learn.Lessons.ALL.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
     }
 
     fun lessonPrompt(): String = com.behrouz.subplayer.learn.Lessons.prompt(lessonLevel, wordLang(), videoName, cues,
-        videoWords().map { it.lemma.ifEmpty { it.text } }, lessonExplain)
+        videoWords().map { it.lemma.ifEmpty { it.text } }, lessonExplain,
+        studyWords.filter { it.level >= 4 && it.shown.length > 3 }.take(60).map { it.shown })      // the video's B2+ words
 
     /** [source] null = only copy the question. */
     fun askLesson(source: Source?) {
@@ -1910,6 +1926,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 audioOnly = !tracks.isEmpty && !tracks.containsType(androidx.media3.common.C.TRACK_TYPE_VIDEO)
             }
         })
+        // a long task (download, transcribing, translating all) keeps running in the background with a notification
+        viewModelScope.launch {
+            androidx.compose.runtime.snapshotFlow { task }.collect { t ->
+                if (t == null) WorkService.stop(ctx)
+                else WorkService.show(ctx, "SubPlayer · ${t.title}", t.message, t.progress)
+            }
+        }
         // new subtitles (opened, made, loaded, edited): their saved translation and word levels
         viewModelScope.launch {
             androidx.compose.runtime.snapshotFlow { cues to cueLang }.collect {

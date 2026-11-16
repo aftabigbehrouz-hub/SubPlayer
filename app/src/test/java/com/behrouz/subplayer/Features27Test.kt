@@ -59,6 +59,9 @@ class Features27Test {
         assertEquals(0, lv.level("2026", "de"))
         assertEquals(0, lv.level("Xyzzy", "de"))
         assertEquals("C2", Levels.NAMES[6]); assertEquals(7, Levels.COLORS.size)
+        val listed = Levels { "wetter\t1\tL\nmiete\t3\n" }
+        assertEquals(1, listed.level("Wetter", "de")); assertTrue(listed.listed("Wetter", "de"))
+        assertEquals(3, listed.level("Miete", "de")); assertTrue(!listed.listed("Miete", "de"))
     }
 
     @Test fun vocabularyKeepsNounsAndLowercasesSentenceStarts() {
@@ -169,5 +172,21 @@ class Features27Test {
         val en = com.behrouz.subplayer.learn.Lessons.prompt("C1", "en", "News.mp4", cues, emptyList(), "de")
         assertTrue("Gap-fill" in en && "---ANSWERS---" in en && "Words I am learning" !in en)
         assertEquals(listOf("A2", "B1", "B2", "C1"), com.behrouz.subplayer.learn.Lessons.LEVELS)
+    }
+
+    @Test fun examSets() {
+        val L = com.behrouz.subplayer.learn.Lessons
+        assertEquals("TestDaF", L.examFor("de")); assertEquals("IELTS", L.examFor("en"))
+        val cues = listOf(Cue(0, 1, "Der Klimawandel verändert die Niederschläge."))
+        val t = L.prompt("TestDaF", "de", "Klima.mp4", cues, listOf("Klima"), "fa", listOf("Klimawandel", "Niederschlag"))
+        for (part in listOf("TestDaF", "THEMENWORTSCHATZ", "künftigen Videos", "HÖREN", "LESEN", "SCHREIBEN", "SPRECHEN", "---LÖSUNGEN---",
+            "Persian (فارسی)", "B2–C2 words in this video (from the CEFR word lists): Klimawandel, Niederschlag",
+            "Words I have already saved from this video: Klima", "TRANSCRIPT (German):\nDer Klimawandel verändert die Niederschläge."))
+            assertTrue(part, part in t)
+        assertTrue("§EX§" !in t)
+        val e = L.prompt("IELTS", "en", "Climate.mp4", cues, emptyList(), "en")
+        for (part in listOf("IELTS Academic", "TOPIC VOCABULARY", "TRUE / FALSE / NOT GIVEN", "Task 2", "---ANSWERS---", "TRANSCRIPT (English):"))
+            assertTrue(part, part in e)
+        assertEquals(listOf("A2", "B1", "B2", "C1", "TestDaF", "IELTS"), L.ALL)
     }
 }

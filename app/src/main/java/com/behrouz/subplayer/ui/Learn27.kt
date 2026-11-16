@@ -515,7 +515,7 @@ fun StudyScreen(vm: AppViewModel) {
                     items(list, key = { it.shown }) { w ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).glass(RoundedCornerShape(14.dp), 0.05f).clickable { vm.studyWordCard(w.shown) }
                             .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(34.dp)) { LevelChip(w.level, approx = vm.wordLang() == "de") }
+                            Box(Modifier.width(34.dp)) { LevelChip(w.level, approx = vm.wordLang() == "de" && !vm.levels.listed(w.shown, "de")) }
                             Text(w.shown, color = if (vm.isKnownWord(w.shown)) Neon.Gold else L, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             if (vm.isKnownWord(w.shown)) Icon(Icons.Star, "Saved", tint = Neon.Gold, modifier = Modifier.size(16.dp))
                             Text("${w.count}×", color = L.copy(alpha = 0.55f), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp))
@@ -545,14 +545,18 @@ fun StudyScreen(vm: AppViewModel) {
                 }
             }
             3 -> Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).imePadding()) {
-                Explain("1. Choose a level.  2. Send the ready question — with the whole text of the video and your saved words — to an " +
+                Explain("1. Choose a level — or the exam (TestDaF for German videos, IELTS for English ones).  2. Send the ready question — with the whole text of the video and your saved words — to an " +
                     "assistant: it writes a text at that level, the key words, the structures, exercises and the answers.  " +
                     "3. Copy its answer, come back and tap Paste: it is kept with the video.", Modifier.padding(start = 8.dp, bottom = 10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    com.behrouz.subplayer.learn.Lessons.LEVELS.forEach { lv ->
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val exam = com.behrouz.subplayer.learn.Lessons.examFor(vm.wordLang())
+                    (com.behrouz.subplayer.learn.Lessons.LEVELS + exam).forEach { lv ->
                         Pill(lv + if (lv in vm.lessonKept) " ●" else "", active = vm.lessonLevel == lv) { vm.openLesson(lv) }
                     }
                 }
+                Explain(if (vm.wordLang() == "en") "IELTS: vocabulary (with words likely in future videos on the topic), listening tasks on the video, an academic reading text, Writing Task 1 and 2, Speaking Parts 1–3, answers."
+                        else "TestDaF: Wortschatz (auch Themenwörter für künftige Videos), Hören zum Video, ein Lesetext mit Aufgaben, Schreiben mit Grafik, vier Sprechaufgaben, Lösungen.",
+                    Modifier.padding(start = 8.dp, top = 4.dp))
                 Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Explanations in", color = L.copy(alpha = 0.6f), fontSize = 12.sp)

@@ -145,6 +145,33 @@ class Lessons(unittest.TestCase):
         self.assertEqual(lessons.all_lessons(), [])
         self.assertEqual(set(lessons.ASSISTANTS), {"chatgpt", "gemini", "deepseek", "grok"})
 
+    def test_exam_sets(self):
+        os.environ["SUBPLAYER_HOME"] = tempfile.mkdtemp()
+        from subplayer_win import lessons, subtitles
+        cues = subtitles.parse("1\n00:00:01,000 --> 00:00:02,000\nDer Klimawandel verändert die Niederschläge.\n")
+        self.assertEqual(lessons.exam_for("de"), "TestDaF")
+        self.assertEqual(lessons.exam_for("en"), "IELTS")
+        t = lessons.prompt("TestDaF", "de", "Klima.mp4", cues, ["Klima"], "fa", ["Klimawandel", "Niederschlag"])
+        for part in ("TestDaF", "TDN", "THEMENWORTSCHATZ", "NICHT im Video", "künftigen Videos", "HÖREN", "LESEN", "SCHREIBEN",
+                     "SPRECHEN", "---LÖSUNGEN---", "erfundenen Zahlen", "Persian", "B2–C2 words in this video (from the CEFR word lists): Klimawandel, Niederschlag",
+                     "Der Klimawandel verändert die Niederschläge."):
+            self.assertIn(part, t)
+        e = lessons.prompt("IELTS", "en", "Climate.mp4", cues, [], "en")
+        for part in ("IELTS Academic", "band 7", "TOPIC VOCABULARY", "future videos", "TRUE / FALSE / NOT GIVEN", "Task 1", "Task 2",
+                     "cue card", "---ANSWERS---", "invented"):
+            self.assertIn(part, e)
+        self.assertNotIn("B2–C2 words in this video", e)
+        lessons.save("Klima.mp4", "de", "TestDaF", "Antworten …")
+        self.assertEqual(lessons.kept("Klima.mp4"), ["TestDaF"])
+        self.assertEqual(lessons.all_lessons(), [("Klima.mp4", ["TestDaF"])])
+
+    def test_listed_levels(self):
+        from subplayer_win.levels import Levels
+        lv = Levels()
+        self.assertTrue(lv.listed("Wetter", "de"))                 # WordFeather list (A1)
+        self.assertEqual(lv.level("Wetter", "de"), 1)
+        self.assertFalse(lv.listed("vorhersehbar", "de"))           # estimated from frequency
+
 
 class Themes(unittest.TestCase):
     def test_themes(self):

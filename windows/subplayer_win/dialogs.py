@@ -530,6 +530,12 @@ HELP = [
                   "that level, the key words, the structures, exercises (gaps, matching, rewriting, questions, writing) and the "
                   "answers. Copy its answer and press Paste: the lesson is kept with the video, one per level; Hide answers lets you "
                   "test yourself, Save as file makes a text file to print."),
+    ("TestDaF · IELTS", "Study this video ▸ AI lesson ▸ TestDaF (German videos) or IELTS (English videos): a full practice set on the "
+                        "whole video — exam vocabulary from the video plus topic words likely in future videos and exam texts, "
+                        "listening tasks on the video, a new reading text with exam-style questions, writing (with a chart) and "
+                        "speaking tasks, and the answers. The question also lists the video's B2–C2 words from the word lists."),
+    ("Translation words", "With the translation line on, the words of the translation can be clicked too: under an English video "
+                          "the German translation's words open their German word card and can be saved with the moment."),
     ("Themes", "Settings ▸ Theme & colours: eight looks (Nebula, Ocean, Aurora, Forest, Sunset, Rose, Graphite, Midnight) or your "
                "own colour. The window is rebuilt at once and your video stays where it was."),
     ("Correct subtitles", "Wrong word in a subtitle? The pencil beside it (E), or right-click a transcript line: fix the text and "

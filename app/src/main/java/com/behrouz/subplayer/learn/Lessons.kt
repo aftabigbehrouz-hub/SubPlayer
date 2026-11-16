@@ -9,6 +9,33 @@ import com.behrouz.subplayer.subs.Cue
  */
 object Lessons {
     val LEVELS = listOf("A2", "B1", "B2", "C1")
+    val EXAMS = listOf("TestDaF", "IELTS")
+    val ALL = LEVELS + EXAMS
+
+    /** The exam that fits the video's language: TestDaF for German, IELTS for English. */
+    fun examFor(lang: String) = if (lang == "en") "IELTS" else "TestDaF"
+
+    // generated from the Windows app's lessons.exam_prompt (tools: same wording in both apps); §EX§ = language of the explanations
+    private val EXAM_TEXT = mapOf(
+        "IELTS" to "You are an experienced IELTS Academic examiner and teacher. I am preparing for IELTS (target band 7+) with an English video. Build a complete practice set on the WHOLE video below — its topic, arguments, facts and language.\n\n1. VOCABULARY FOR IELTS\n   a) 20 words and expressions FROM THE VIDEO that are most useful for band 7+ (use the B2–C2 words listed below where they fit): word family (noun / verb / adjective / adverb), 2 typical collocations, the meaning in §EX§, and the sentence from the video.\n   b) TOPIC VOCABULARY: 15 further words and collocations that are NOT in the video but are very likely to appear in future videos and in IELTS reading, listening and writing on this topic, each with meaning and one example.\n2. LISTENING (the video is the recording; do not quote the answers in the questions)\n   Part A — note completion: 8 gaps, NO MORE THAN TWO WORDS AND/OR A NUMBER.\n   Part B — 5 multiple-choice questions (A–C).\n   Part C — matching: 5 statements to the people / options / parts of the video they belong to.\n3. READING — write an academic passage of about 600 words on the topic of the video (new text, IELTS style, with paragraphs A–F), then 13 questions: 5 TRUE / FALSE / NOT GIVEN, 4 matching headings to paragraphs, 4 summary completion with words from the passage.\n4. WRITING\n   Task 1 (150 words): a chart or table on the topic with numbers you invent — say clearly that the data are invented for practice — and the usual instruction.\n   Task 2 (250 words): an essay question on the topic (opinion, discuss both views, or problem–solution).\n   Then: a band-7 checklist (task response, coherence, lexical resource, grammar) and 10 useful linking phrases.\n5. SPEAKING — Part 1: 4 questions · Part 2: a cue card with 4 prompts · Part 3: 5 discussion questions; plus 8 useful phrases for giving and supporting opinions.\n6. ANSWERS — after a line “---ANSWERS---”: all answers of Listening and Reading (with the sentence that proves each one), and a short band-8 model answer for Writing Task 2.\n\nWrite everything in English, except the meanings and short explanations, which are in §EX§. Plain text with clear headings, no tables.\n\n",
+        "TestDaF" to "You are an experienced TestDaF examiner and German teacher. I am preparing for the (digital) TestDaF, aiming at TDN 4–5 (B2–C1), with a German video. Build a complete practice set on the WHOLE video below — its topic, arguments, facts and language.\n\n1. WORTSCHATZ FÜR DEN TESTDAF\n   a) 20 Wörter und Ausdrücke AUS DEM VIDEO, die für TestDaF-Texte (Hochschule, Wissenschaft, Gesellschaft, Umwelt, Arbeit) am wichtigsten sind (nimm die B2–C2-Wörter unten, wo sie passen): Artikel und Plural bzw. Präteritum und Perfekt, typische Nomen-Verb-Verbindungen und Präpositionen, die Bedeutung auf §EX§ und den Satz aus dem Video.\n   b) THEMENWORTSCHATZ: 15 weitere Wörter und Wendungen, die NICHT im Video vorkommen, aber in künftigen Videos und in TestDaF-Lese- und Hörtexten zu diesem Thema sehr wahrscheinlich sind — mit Bedeutung und einem Beispiel.\n2. HÖREN (das Video ist der Hörtext; die Lösungen nicht in den Aufgaben verraten)\n   Aufgabe 1 — 8 Notizen mit Lücken zu den wichtigsten Informationen (Stichworte).\n   Aufgabe 2 — 8 Aussagen: richtig oder falsch?\n   Aufgabe 3 — 5 Fragen mit kurzen Antworten (Meinungen, Gründe, Folgen).\n3. LESEN — schreibe einen neuen wissenschaftsnahen Text von etwa 450 Wörtern zum Thema des Videos (Absätze A–E), dann 10 Aufgaben: 4 Zuordnungen von Überschriften zu Absätzen, 3 Multiple-Choice-Fragen, 3 Aussagen mit „Ja / Nein / Text sagt dazu nichts“.\n4. SCHREIBEN — eine TestDaF-Schreibaufgabe zum Thema: eine kleine Grafik oder Tabelle mit erfundenen Zahlen (sag deutlich, dass die Zahlen zur Übung erfunden sind), zwei Positionen; ich soll die Grafik beschreiben, die Positionen vergleichen und begründet Stellung nehmen (mindestens 250 Wörter). Dazu 12 Redemittel für Grafikbeschreibung und Argumentation.\n5. SPRECHEN — 4 Aufgaben wie im TestDaF: (1) eine Situation beschreiben / Auskunft geben, (2) Optionen vergleichen und eine Empfehlung geben, (3) zu einer These Stellung nehmen, (4) Hypothesen zu einer Entwicklung bilden — jeweils mit Vorbereitungs- und Sprechzeit und 6 passenden Redemitteln.\n6. LÖSUNGEN — nach einer Zeile „---LÖSUNGEN---“: alle Lösungen zu Hören und Lesen (mit dem Satz, der sie belegt), dazu ein kurzer Mustertext auf Niveau TDN 5 für Schreiben und was ihn zu TDN 5 macht.\n\nSchreibe alles auf Deutsch, nur die Bedeutungen und kurzen Erklärungen auf §EX§. Klarer Text mit Überschriften, keine Tabellen.\n\n",
+    )
+
+    /** A TestDaF (German) or IELTS Academic (English) practice set built on the whole video. */
+    fun examPrompt(exam: String, name: String, cues: List<Cue>, myWords: List<String>, explain: String = "en", examWords: List<String> = emptyList()): String {
+        val ex = EXPLAIN[explain] ?: "English"
+        var text = transcript(cues)
+        val cut = text.length > MAX_TRANSCRIPT
+        if (cut) text = text.take(MAX_TRANSCRIPT).substringBeforeLast(' ') + " …"
+        val mine = myWords.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ").take(1200)
+        val found = examWords.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ").take(1500)
+        val sb = StringBuilder(EXAM_TEXT.getValue(exam).replace("§EX§", ex))
+        if (found.isNotEmpty()) sb.append("B2–C2 words in this video (from the CEFR word lists): ").append(found).append("\n\n")
+        if (mine.isNotEmpty()) sb.append("Words I have already saved from this video: ").append(mine).append("\n\n")
+        sb.append("Video: ").append(name).append(if (cut) " (the transcript is long — only its first part is given)" else "").append('\n')
+        sb.append("TRANSCRIPT (").append(if (exam == "IELTS") "English" else "German").append("):\n").append(text)
+        return sb.toString()
+    }
     val EXPLAIN = linkedMapOf("en" to "English", "fa" to "Persian (فارسی)", "de" to "German (einfaches Deutsch)")
     const val MAX_TRANSCRIPT = 60_000
 
@@ -25,7 +52,9 @@ object Lessons {
 
     fun transcript(cues: List<Cue>) = cues.joinToString(" ") { it.text }.replace(Regex("\\s+"), " ").trim()
 
-    fun prompt(level: String, lang: String, name: String, cues: List<Cue>, myWords: List<String>, explain: String = "en"): String {
+    fun prompt(level: String, lang: String, name: String, cues: List<Cue>, myWords: List<String>, explain: String = "en",
+               examWords: List<String> = emptyList()): String {
+        if (level in EXAMS) return examPrompt(level, name, cues, myWords, explain, examWords)
         val german = lang != "en"
         val target = if (german) "German" else "English"
         val ex = EXPLAIN[explain] ?: "English"

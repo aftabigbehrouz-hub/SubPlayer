@@ -158,6 +158,9 @@ Das Wetter in Hamburg bleibt regnerisch.
 Auch morgen ist das Wetter wechselhaft.
 """
 
+# the emulator's own launcher sometimes freezes ("Pixel Launcher isn't responding") and covers the app: switch it off
+adb("shell", "pm", "disable-user", "--user", "0", "com.google.android.apps.nexuslauncher", check=False)
+adb("shell", "settings", "put", "global", "hide_error_dialogs", "1", check=False)
 print("install")
 adb("install", "-r", "-g", APK, timeout=300)
 adb("logcat", "-c")

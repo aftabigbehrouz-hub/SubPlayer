@@ -23,7 +23,7 @@ class WordLevels(unittest.TestCase):
         self.assertEqual(NAMES[self.lv.level("why", "en")], "A1")
         self.assertEqual(NAMES[self.lv.level("journey", "en")], "A2")
         self.assertEqual(NAMES[self.lv.level("reluctant", "en")], "B2")
-        self.assertIn(NAMES[self.lv.level("Bilanz", "de")], ("C1", "C2"))
+        self.assertEqual(NAMES[self.lv.level("Bilanz", "de")], "B2")          # WordFeather list (was a C1 estimate)
 
     def test_no_level_for_numbers_and_punctuation(self):
         self.assertEqual(self.lv.level("2026", "de"), 0)
