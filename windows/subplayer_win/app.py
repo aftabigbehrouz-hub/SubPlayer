@@ -1242,7 +1242,7 @@ class Main(QMainWindow):
         if show_lv and not self.show_tr:
             body += ("<div style='text-align:center;font-size:8pt'>" + " ".join(
                 f"<span style='color:{LV_COLORS[n]}'>■ {LV_NAMES[n]}</span>" for n in range(max(1, lv_min), 7)) +
-                (" <span style='color:#7F7A9E'>· estimated</span>" if self.cue_lang == "de" else "") + "</div>")
+                (" <span style='color:#7F7A9E'>· word list + estimate</span>" if self.cue_lang == "de" else "") + "</div>")
         if self.show_tr:
             tr = self.tr_cache.get(self._tr_key(i), "…")
             if tr is None:

@@ -1,6 +1,25 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.7.1 + Windows 2.3
+# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.4
 
-**New in Windows 2.3 and Android 2.7.1**
+**New in Windows 2.4 and Android 2.8**
+- **TestDaF and IELTS practice from the whole video** (Study this video ▸ AI lesson ▸ *TestDaF* for German videos, *IELTS* for
+  English ones). The question holds the whole transcript, the video's B2–C2 words (from the level lists) and your saved
+  words. ChatGPT / Gemini / DeepSeek / Grok writes: exam vocabulary from the video **plus topic words likely in future videos
+  and exam texts**, listening tasks on the video, a new reading text with exam-style questions (TestDaF: Zuordnung, MC,
+  Ja/Nein/Text sagt dazu nichts · IELTS: True/False/Not Given, headings, summary), writing with a chart (invented, marked
+  as practice data) and an essay, speaking tasks, and the answers. Kept with the video like the level lessons.
+- **Words of the translation line can be learnt:** under an English video with the German translation on, tap/click a German
+  word — its German card opens, and Save keeps it with the translated sentence and the video moment (and the other way round).
+- **Real German levels for 2,557 words** from the WordFeather list (Goethe/telc-oriented; the version of 6 June 2026, which
+  was released under CC0 — later versions are non-commercial and are not used). 1,163 frequency estimates were replaced
+  (*Wetter* B1 → A1, *Großeltern* B2 → A1, *Bilanz* C1 → B2). Cards show "A1 (Goethe/telc word list)" or "≈B1 (estimated)".
+- **Phone: downloads keep running in the background** — and so do transcribing and "translate all": a notification shows the
+  progress while you use another app or the screen is off. A dropped connection continues from where it stopped (up to 12
+  times). Not in the Google Play version, which has no downloads.
+- Word lists checked but not used: *CEFR Mega Dataset* (no licence — all rights reserved — and its levels are automatic
+  estimates), current *WordFeather* (CC BY-NC: no paid apps), *Einlang* and *LingvoBerry* (terms could not be verified).
+
+**Windows 2.3 and Android 2.7.1**
+
 - **"Where else is it used?" finds the right lines.** The dictionary file hangs the helper verbs of the compound tenses
   (*sein, haben, werden, worden, gewesen*), the polite *Sie*, reflexive pronouns and the particles of separable verbs under
   thousands of verbs — so a search for *bringen* also listed every line with *haben* or *worden*. Now only real forms of a
@@ -267,7 +286,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 52 Android unit tests (+ 56 Windows tests) — only real word forms (helper verbs, particles), separable verbs, AI-lesson question and keeping, themes; — broadcaster subtitles (TTML/VTT, 10:00:00 offset), word levels (lowest base word, rare = C2), where-else across videos incl. forms, a video's vocabulary, catalogue and podcast parsing, time fields; — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 54 Android unit tests (+ 58 Windows tests) — exam sets (TestDaF / IELTS, same question in both apps), listed vs. estimated levels; — only real word forms (helper verbs, particles), separable verbs, AI-lesson question and keeping, themes; — broadcaster subtitles (TTML/VTT, 10:00:00 offset), word levels (lowest base word, rare = C2), where-else across videos incl. forms, a video's vocabulary, catalogue and podcast parsing, time fields; — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 
