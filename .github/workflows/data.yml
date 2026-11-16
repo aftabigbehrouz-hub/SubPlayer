@@ -1,11 +1,9 @@
 name: Build dictionary and mirror models
 
-# Runs when the dictionary builder changes. Publishes everything the app downloads
-# to the 'data-v1' release of this repository (reachable wherever GitHub is).
+# Started by hand only. The apps check every download against a fixed SHA-256, so a rebuilt dictionary must NOT replace
+# dict-de-v1.zip: publish it under a new name (dict-de-v2.zip) and put its SHA-256 into the apps first.
 on:
-  push:
-    branches: [main]
-    paths: ['tools/build_dict.py', 'tools/test_dict.py']
+  workflow_dispatch:
 
 permissions:
   contents: write
