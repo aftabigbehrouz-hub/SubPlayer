@@ -46,9 +46,7 @@ class Levels:
         lv = t.get(w, 0)
         if dictionary is not None:
             try:
-                rows = dictionary.db.execute("SELECT DISTINCT e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? "
-                                             "AND e.pos NOT IN ('name','abbrev','symbol','letter','character') LIMIT 30",
-                                             (w,)).fetchall()
+                rows = [(x,) for x in dictionary.lemmas_for(w)]
             except Exception:
                 rows = []
             if rows:

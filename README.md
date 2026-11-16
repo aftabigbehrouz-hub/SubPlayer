@@ -1,6 +1,28 @@
-# SubPlayer 2.7 — learn German (and English) with your own videos · Android + Windows
+# SubPlayer — learn German (and English) with your own videos · Android 2.7.1 + Windows 2.3
 
-**New in Android 2.7** (versionCode 11 — the phone gets the features of Windows 2.1 and 2.2)
+**New in Windows 2.3 and Android 2.7.1**
+- **"Where else is it used?" finds the right lines.** The dictionary file hangs the helper verbs of the compound tenses
+  (*sein, haben, werden, worden, gewesen*), the polite *Sie*, reflexive pronouns and the particles of separable verbs under
+  thousands of verbs — so a search for *bringen* also listed every line with *haben* or *worden*. Now only real forms of a
+  word count (bringen → bringe, bringst, bringt, brachte, gebracht …), taken from the dictionary; no new download is needed.
+  - Separable verbs are found split as well: *mitbringen* → "Bringst du das Buch **mit**?" (but not "bringt *mit dem Auto*").
+  - Windows: the list shows each line with the word highlighted, the forms that were found with their counts (click a form to
+    see only its lines), and plays the moment on double-click. The title names the base word.
+- **Word cards for those words are right again:** tapping *worden* opens *werden*, *gewesen* → *sein*, *haben* → *haben*
+  (they used to open an arbitrary verb such as *abbeten*). Word levels use the same rule; 12 of 24,388 German levels changed.
+- **Word card (Windows):** a *Formen* list of the word's forms, and a hint when the word you clicked belongs to a separable
+  verb in that sentence ("↪ part of mitbringen (bringst … mit)").
+- **Gemini and DeepSeek** beside ChatGPT and Grok in *Learn more*.
+- **AI lesson of a video** (Study this video ▸ AI lesson): choose **A2, B1, B2 or C1**; the ready question contains the whole
+  text of the video and your saved words and asks for a text at that level, 15 key words, 3 structures, exercises
+  (gap-fill, matching, rewriting, questions, writing) and the answers. Paste the answer back: it is **kept with the video,
+  one lesson per level** (Windows: *Hide answers* to test yourself, *Save as file*; phone: *Share / save*).
+- **Themes (Windows):** Settings ▸ Theme & colours — Nebula, Ocean, Aurora, Forest, Sunset, Rose, Graphite, Midnight, or your
+  own colour. The window is rebuilt at once; the video stays where it was.
+- The dictionary builder (tools/build_dict.py) no longer creates those wrong links for future dictionary versions.
+
+
+**Android 2.7** (versionCode 11 — the phone gets the features of Windows 2.1 and 2.2)
 - **Word levels in colour** (pill *A1–C2* under the video): A1 green · A2 cyan · B1 blue · B2 violet · C1 orange · C2 pink;
   *⋯ Options* colours only words from a chosen level up. Same lists as Windows (English CEFR-J + Octanove; German estimated
   from word frequency). The word card shows the level too.
@@ -245,7 +267,7 @@ in brackets so you can judge it). Rare words may have English only.
   voice detector built in) or online; the same dictionary files, word database layout, review steps and activation
   check as the phone. Built by `.github/workflows/windows.yml` with PyInstaller; the build runs the tests and starts
   the packaged SubPlayer.exe in a self‑test before publishing.
-- **Checks on every build:** 49 Android unit tests (+ 50 Windows tests) — broadcaster subtitles (TTML/VTT, 10:00:00 offset), word levels (lowest base word, rare = C2), where-else across videos incl. forms, a video's vocabulary, catalogue and podcast parsing, time fields; — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
+- **Checks on every build:** 52 Android unit tests (+ 56 Windows tests) — only real word forms (helper verbs, particles), separable verbs, AI-lesson question and keeping, themes; — broadcaster subtitles (TTML/VTT, 10:00:00 offset), word levels (lowest base word, rare = C2), where-else across videos incl. forms, a video's vocabulary, catalogue and podcast parsing, time fields; — sentence joining across lines, long-line splitting, MP4 discovery on pages; — sentence parsing (AI answers, tables, plain lines), gap creation for
   inflected words, dictation marking, lenient answers (ae/oe/ue, ss); — subtitle reading, writing, grouping, timing, line lookup; activation codes made by
   the PC tool are accepted only on their phone, tampered codes rejected; review scheduling (intervals, Again, counts).
 

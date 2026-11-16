@@ -78,6 +78,39 @@ def words_of(text):
     return {w for w in re.findall(r"[a-z]+", (text or "").lower()) if len(w) > 2 and w not in STOP}
 
 
+# Last words of multi-word table forms that are no forms of the word itself: helper verbs of compound tenses
+# ("wird gebracht worden sein"), the polite "bringen Sie", reflexive pronouns, table labels.
+NOT_A_FORM = {"sein", "haben", "werden", "worden", "gewesen", "sie", "pers", "höflichkeitsform"}
+REFLEXIVE = {"sich", "mich", "dich", "mir", "dir", "uns", "euch"}
+OWN_FORMS = {("sein", "gewesen"), ("werden", "worden")}
+
+
+def form_key(word, fw):
+    """Lookup key for one inflected form of `word`, or None. One-word forms are kept as they are. Of a multi-word form
+    ("des Hauses", "hat gemacht", "ich gehe", "ich freue mich") the last word is kept — a tapped word is one word —
+    after a reflexive pronoun at the end is dropped, and unless that word is a helper verb or the polite "Sie".
+    Of a separable verb's split form ("ich bringe mit" of mitbringen) the particle alone is no form: the verb form and
+    the particle are kept together as a two-word key ("bringe mit"), so the apps can find "bringe … mit"."""
+    clean_word = lambda p: p.strip("!,.;:()").lower()
+    parts = [clean_word(p) for p in fw.split()]
+    parts = [p for p in parts if p]
+    lw = word.lower()
+    if len(parts) > 1:
+        while len(parts) > 1 and parts[-1] in REFLEXIVE:
+            parts.pop()
+    if not parts:
+        return None
+    last = parts[-1]
+    if len(parts) == 1:
+        return last if (len(last) > 1 and any(ch.isalpha() for ch in last)) or last == lw else None
+    if last == lw or not any(ch.isalpha() for ch in last) or (last in NOT_A_FORM and (lw, last) not in OWN_FORMS):
+        return None
+    first = parts[-2]
+    if lw.startswith(last) and len(last) < len(lw) and first[:1] == lw[len(last):len(last) + 1]:   # verb form + particle
+        return f"{first} {last}" if first.isalpha() and len(first) > 1 else None
+    return last
+
+
 def via_keys(ent):
     """The 2 main English meanings of a German entry, as (english word, part of speech)."""
     pos = EN_POS.get(ent["pos"])
@@ -163,19 +196,11 @@ def main(out_path):
             # skip auxiliary phrases like "hat gemacht" -> keep last word too
             if not fw or fw.lower() == word.lower() or len(fw) >= 40:
                 continue
-            parts = fw.split()
             if " " in word:
                 continue   # phrases ("die direkte Frage") are not reached by tapping one word
-            if len(parts) == 1:
-                k1 = fw.strip("!,.;:()").lower()
-                if k1:
-                    lookup[k1].add(key)
-            else:
-                # "des Hauses", "hat gemacht", "ich gehe": a tapped word is one word -> keep the last
-                # word only if it differs from the lemma (Hauses, gemacht, gehe)
-                last = parts[-1].strip("!,.;:()").lower()
-                if last and last != word.lower() and not last.startswith("("):
-                    lookup[last].add(key)
+            k1 = form_key(word, fw)
+            if k1:
+                lookup[k1].add(key)
     print("A entries read:", nA, "lemmas kept:", len(entries), flush=True)
 
     by_lemma = collections.defaultdict(list)

@@ -105,7 +105,7 @@ class WordsPage(QWidget):
         self.cal.setMaximumHeight(250)
         self.cal.clicked.connect(self.pick_day)
         self.cal.currentPageChanged.connect(lambda *_: self._mark_calendar())
-        self.cal.setStyleSheet(
+        self.cal.setStyleSheet(theme.recolor(
             "QCalendarWidget QWidget#qt_calendar_navigationbar{background:rgba(40,32,84,0.95);border-radius:8px}"
             "QCalendarWidget QToolButton{color:#FFFFFF;background:transparent;font-weight:700;padding:4px 10px}"
             "QCalendarWidget QToolButton:hover{background:rgba(255,255,255,0.08);border-radius:6px}"
@@ -113,14 +113,14 @@ class WordsPage(QWidget):
             "QCalendarWidget QSpinBox{background:#1A1638;color:#FFFFFF;border:0}"
             "QCalendarWidget QAbstractItemView{background:#110E26;color:#E8E6FF;selection-background-color:#8A5CFF;"
             "selection-color:#FFFFFF;outline:0;border:0}"
-            "QCalendarWidget QAbstractItemView:disabled{color:#4A4670}")
+            "QCalendarWidget QAbstractItemView:disabled{color:#4A4670}"))
         from PySide6.QtGui import QTextCharFormat, QColor as _QC, QBrush as _QB
         wk = QTextCharFormat()
-        wk.setForeground(_QB(_QC("#E8E6FF")))
+        wk.setForeground(_QB(_QC(theme.shade("#E8E6FF"))))
         for d in (Qt.Saturday, Qt.Sunday):
             self.cal.setWeekdayTextFormat(d, wk)
         hd = QTextCharFormat()
-        hd.setForeground(_QB(_QC("#9A98B5")))
+        hd.setForeground(_QB(_QC(theme.DIM)))
         self.cal.setHeaderTextFormat(hd)
         self.cal.hide()
         left.addWidget(self.cal)
@@ -152,7 +152,7 @@ class WordsPage(QWidget):
         btns = QHBoxLayout()
         self.b_play = ibtn("play", "Play this moment in the video", self.play, kind="", text=" Play in video")
         self.b_speak = ibtn("volume", "Speak", self.speak, kind="", text=" Speak")
-        self.b_learn = ibtn("sparkles", "ChatGPT / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
+        self.b_learn = ibtn("sparkles", "ChatGPT / Gemini / DeepSeek / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
         self.b_del = ibtn("trash", "Delete this word", self.delete, kind="", text=" Delete", color=theme.MAGENTA)
         for b in (self.b_play, self.b_speak, self.b_learn, self.b_del):
             btns.addWidget(b)

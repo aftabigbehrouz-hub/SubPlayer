@@ -5,8 +5,8 @@ import html
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-                               QStackedWidget, QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QPlainTextEdit, QPushButton, QStackedWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 from . import library, subtitles, theme
 from .cosmos import GradientLabel
@@ -47,7 +47,7 @@ class StudyPage(QWidget):
         tabs = QHBoxLayout()
         self.tab_btns = []
         for k, (ic, label) in enumerate((("bars", " Its words by level"), ("star", " My words from it"),
-                                         ("puzzle", " Practise its whole text"))):
+                                         ("puzzle", " Practise its whole text"), ("sparkles", " AI lesson"))):
             b = ibtn(ic, label.strip(), lambda _=False, i=k: self.tab(i), checkable=True, kind="chip", text=label, size=15)
             self.tab_btns.append(b)
             tabs.addWidget(b)
@@ -119,9 +119,73 @@ class StudyPage(QWidget):
             v2.addWidget(b)
         v2.addStretch(1)
         self.stack.addWidget(p2)
+
+        # 3 — AI lesson: a text at my level + exercises from the whole video, and the place to keep the answer
+        from . import lessons
+        p3 = QWidget(objectName="clear")
+        v3 = QVBoxLayout(p3)
+        v3.setContentsMargins(0, 8, 0, 0)
+        v3.setSpacing(8)
+        h3 = QLabel("<b>1.</b> Choose a level. &nbsp;<b>2.</b> Send the ready question (with the whole text of the video) to an assistant: "
+                    "it writes a text at that level, the key words, the structures, exercises and the answers. &nbsp;<b>3.</b> Copy the "
+                    "answer and paste it here — it is kept with the video for practice.", objectName="hint")
+        h3.setWordWrap(True)
+        v3.addWidget(h3)
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Level", objectName="small"))
+        self.ai_lv = {}
+        for x in lessons.LEVELS:
+            b = QPushButton(x, checkable=True)
+            b.setProperty("kind", "chip")
+            b.clicked.connect(lambda _=False, y=x: self._ai_level(y))
+            self.ai_lv[x] = b
+            r1.addWidget(b)
+        r1.addSpacing(14)
+        r1.addWidget(QLabel("Explanations in", objectName="small"))
+        self.ai_explain = QComboBox()
+        for k, label in (("en", "English"), ("fa", "فارسی"), ("de", "Deutsch")):
+            self.ai_explain.addItem(label, k)
+        self.ai_explain.setCurrentIndex(max(0, self.ai_explain.findData(main.settings.get("lesson_explain", "en"))))
+        self.ai_explain.currentIndexChanged.connect(self._ai_explain_changed)
+        r1.addWidget(self.ai_explain)
+        r1.addStretch(1)
+        v3.addLayout(r1)
+        r2 = QHBoxLayout()
+        for key, col in (("chatgpt", theme.CYAN), ("gemini", theme.GOLD), ("deepseek", theme.MINT), ("grok", theme.MAGENTA)):
+            b = ibtn("sparkles", f"Copy the question and open {lessons.ASSISTANTS[key][0]}", lambda _=False, k=key: self._ai_ask(k),
+                     kind="", text=" " + lessons.ASSISTANTS[key][0], size=15, color=col)
+            r2.addWidget(b)
+        b = ibtn("copy", "Only copy the question (for any other assistant)", lambda: self._ai_ask(""), kind="", text=" Copy question", size=15)
+        r2.addWidget(b)
+        r2.addStretch(1)
+        v3.addLayout(r2)
+        self.ai_text = QPlainTextEdit(placeholderText="Paste the assistant's answer here (Ctrl+V) — the text, word list, structures, "
+                                                      "exercises and answers. It is saved by itself, one lesson per level.")
+        self.ai_text.textChanged.connect(self._ai_changed)
+        v3.addWidget(self.ai_text, 1)
+        r3 = QHBoxLayout()
+        self.ai_state = QLabel("", objectName="small")
+        r3.addWidget(self.ai_state, 1)
+        for ic, label, tip, fn in (("paste", " Paste", "Put the copied answer here (replaces what is here if it is empty, otherwise adds it below)", self._ai_paste),
+                                   ("eye", " Hide answers", "Hide / show everything after ---LÖSUNGEN--- so you can test yourself", self._ai_toggle_answers),
+                                   ("copy", " Copy", "Copy this lesson", lambda: (QApplication.clipboard().setText(self._ai_full()), main.msg("Lesson copied"))),
+                                   ("download", " Save as file…", "Save this lesson as a text file (to print or keep elsewhere)", self._ai_export),
+                                   ("trash", " Delete", "Delete this level's lesson", self._ai_delete)):
+            b = ibtn(ic, tip, fn, kind="", text=label, size=15)
+            if ic == "eye":
+                b.setCheckable(True)
+                self.ai_hide = b
+            r3.addWidget(b)
+        v3.addLayout(r3)
+        self.stack.addWidget(p3)
+        self._ai_level_name, self._ai_loading, self._ai_hidden = "B1", False, ""
+        from PySide6.QtCore import QTimer
+        self._ai_timer = QTimer(self, singleShot=True, interval=700)
+        self._ai_timer.timeout.connect(self._ai_save)
         root.addWidget(left, 3)
 
         right = QFrame(objectName="card")
+        self.right = right
         right.setFixedWidth(400)
         rv = QVBoxLayout(right)
         rv.setContentsMargins(20, 18, 16, 16)
@@ -142,6 +206,7 @@ class StudyPage(QWidget):
 
     # ------------------------------------------------------------------ load
     def load(self, video: str, name: str, cues: list, lang: str):
+        self._ai_save()                                # the lesson being typed belongs to the video shown until now
         self.video, self.name, self.cues, self.lang = video, name, cues, lang
         self.title.setText(f"Study: {name[:60]}")
         d = self.main.dictionary(lang)
@@ -163,15 +228,150 @@ class StudyPage(QWidget):
         self.detail.setHtml(f"<p style='font-size:17pt;font-weight:800;color:{theme.CYAN}'>Pick a word</p>"
                             f"<p style='color:{theme.DIM}'>Words of this video, most frequent first. Filter by level to find the ones "
                             "worth learning, save them with the moment they are said, and practise with the whole text.</p>")
+        if self.stack.currentIndex() == 3:
+            self._ai_level(self.main.settings.get("lesson_level", "B1"))
 
     def _saved(self) -> list[SavedWord]:
         return [w for w in self.main.store.all() if (self.video and w.video_uri == self.video) or
                 (w.video_name and w.video_name.lower() == self.name.lower())]
 
     def tab(self, i: int):
+        self._ai_save()
         self.stack.setCurrentIndex(i)
         for k, b in enumerate(self.tab_btns):
             b.setChecked(k == i)
+        self.right.setVisible(i != 3)                 # the lesson gets the whole width
+        if i == 3:
+            self._ai_level(self.main.settings.get("lesson_level", "B1"))
+
+    # ------------------------------------------------------------------ AI lesson
+    def _ai_level(self, lv: str):
+        from . import lessons
+        self._ai_save()
+        if lv not in lessons.LEVELS:
+            lv = "B1"
+        self._ai_level_name = lv
+        self.main.settings["lesson_level"] = lv
+        self.main.save_settings()
+        have = lessons.kept(self.name) if self.name else []
+        for k, b in self.ai_lv.items():
+            b.setChecked(k == lv)
+            b.setText(k + (" ●" if k in have else ""))
+            b.setToolTip("A lesson is kept for this level" if k in have else "No lesson kept yet")
+        self._ai_loading = True
+        self._ai_hidden = ""
+        self.ai_hide.setChecked(False)
+        self.ai_hide.setText(" Hide answers")
+        self.ai_text.setPlainText(lessons.text(self.name, lv) if self.name else "")
+        self._ai_loading = False
+        self._ai_note()
+
+    def _ai_note(self, saved: bool = False):
+        n = len(self._ai_full().split())
+        self.ai_state.setText((f"{self._ai_level_name} lesson · {n} words · " + ("saved ✓" if saved else "kept with this video")) if n else
+                              f"No {self._ai_level_name} lesson yet for this video")
+
+    def _ai_explain_changed(self, *_):
+        self.main.settings["lesson_explain"] = self.ai_explain.currentData()
+        self.main.save_settings()
+
+    def _ai_prompt(self) -> str:
+        from . import lessons
+        mine = [(w.lemma or w.text) for w in self._saved()]
+        return lessons.prompt(self._ai_level_name, self.lang, self.name, self.cues, mine, self.ai_explain.currentData())
+
+    def _ai_ask(self, source: str):
+        if not self.cues:
+            self.main.msg("This video has no subtitles yet")
+            return
+        q = self._ai_prompt()
+        if source:
+            self.main.ask_ai(source, q, "When the answer is there, copy it and press Paste here.")
+        else:
+            QApplication.clipboard().setText(q)
+            self.main.msg(f"Question for a {self._ai_level_name} lesson copied ({len(q):,} characters) — paste it into any assistant", 9000)
+
+    def _ai_full(self) -> str:
+        return self.ai_text.toPlainText() + self._ai_hidden
+
+    def _ai_changed(self):
+        if not self._ai_loading:
+            self._ai_timer.start()
+
+    def _ai_save(self):
+        from . import lessons
+        self._ai_timer.stop()
+        if not self.name or self._ai_loading:
+            return
+        body = self._ai_full()
+        if body != lessons.text(self.name, self._ai_level_name):
+            lessons.save(self.name, self.lang, self._ai_level_name, body)
+            have = lessons.kept(self.name)
+            for k, b in self.ai_lv.items():
+                b.setText(k + (" ●" if k in have else ""))
+            self._ai_note(saved=True)
+
+    def _ai_paste(self):
+        t = QApplication.clipboard().text().strip()
+        if not t:
+            self.main.msg("Nothing copied yet — copy the assistant's answer first")
+            return
+        if t.startswith("You are an experienced") and "TRANSCRIPT" in t:
+            self.main.msg("That is still the question — copy the assistant's ANSWER, then press Paste", 9000)
+            return
+        cur = self.ai_text.toPlainText().strip()
+        self.ai_text.setPlainText(t if not cur else cur + "\n\n" + "─" * 30 + "\n\n" + t)
+        self._ai_save()
+
+    _ANSWERS = ("---LÖSUNGEN---", "---ANSWERS---", "LÖSUNGEN", "ANSWERS", "Lösungen", "Answers")
+
+    def _ai_toggle_answers(self):
+        if self.ai_hide.isChecked():
+            body = self.ai_text.toPlainText()
+            cut = -1
+            for mark in self._ANSWERS:
+                cut = body.rfind(mark)
+                if cut > len(body) // 3:
+                    break
+                cut = -1
+            if cut < 0:
+                self.ai_hide.setChecked(False)
+                self.main.msg("No answer part found (a line with LÖSUNGEN or ANSWERS)")
+                return
+            self._ai_save()
+            self._ai_loading = True
+            self._ai_hidden = body[cut:]
+            self.ai_text.setPlainText(body[:cut])
+            self._ai_loading = False
+            self.ai_hide.setText(" Show answers")
+        else:
+            self._ai_loading = True
+            self.ai_text.setPlainText(self._ai_full())
+            self._ai_hidden = ""
+            self._ai_loading = False
+            self.ai_hide.setText(" Hide answers")
+
+    def _ai_export(self):
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+        body = self._ai_full()
+        if not body.strip():
+            self.main.msg("Nothing to save yet")
+            return
+        f, _ = QFileDialog.getSaveFileName(self, "Save the lesson", f"{Path(self.name).stem} - {self._ai_level_name} lesson.txt", "Text (*.txt)")
+        if f:
+            Path(f).write_text(f"{Path(self.name).stem} — {self._ai_level_name}\n\n{body}\n", encoding="utf-8-sig")
+            self.main.msg("Lesson saved as a file")
+
+    def _ai_delete(self):
+        from . import lessons
+        if not self._ai_full().strip():
+            return
+        from PySide6.QtWidgets import QMessageBox
+        if QMessageBox.question(self, "Delete lesson", f"Delete the {self._ai_level_name} lesson of this video?") != QMessageBox.Yes:
+            return
+        lessons.save(self.name, self.lang, self._ai_level_name, "")
+        self._ai_level(self._ai_level_name)
 
     def _pick_level(self, n: int):
         self.level_filter = n

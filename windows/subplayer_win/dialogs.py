@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QPlainTextEdit, QPushButton, QRadioButton, QScrollArea, QSpinBox, QTextBrowser, QVBoxLayout,
@@ -142,7 +142,7 @@ class AddSentencesDialog(QDialog):
         v = QVBoxLayout(self)
         v.addWidget(title(f"Add sentences to „{word.text}“", 17))
         fmt = "EN: … | DE: … | FA: …" if word.lang == "en" else "DE: … | EN: … | FA: …"
-        v.addWidget(hint(f"Paste the answer from ChatGPT, Grok, DWDS or dict.cc. Lines like  {fmt}  are read with their "
+        v.addWidget(hint(f"Paste the answer from ChatGPT, Gemini, DeepSeek, Grok, DWDS or dict.cc. Lines like  {fmt}  are read with their "
                          "translations; plain sentences work too. They then appear in review and practice."))
         self.text = QPlainTextEdit()
         self.text.setPlainText(QGuiApplication.clipboard().text()[:4000])
@@ -246,6 +246,37 @@ class SettingsDialog(QDialog):
         self.motion.setChecked(s.get("motion", True))
         self.motion.toggled.connect(self.set_motion)
         rv.addWidget(self.motion)
+        v.addWidget(f)
+
+        # themes & colours
+        f, tv = section("Theme & colours")
+        tv.addWidget(hint("Choose the look of the whole program. The colours of the word levels (A1–C2), der / die / das and saved "
+                          "words stay the same in every theme."))
+        from PySide6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        cur_key, cur_accent = theme.current()
+        self.theme_btns = {}
+        for n, (key, (name, a1, a2, a3, *_)) in enumerate(theme.THEMES.items()):
+            b = QPushButton("  " + name, checkable=True)
+            b.setIcon(_swatch(a1, a2, a3))
+            b.setIconSize(QSize(46, 18))
+            b.setChecked(key == cur_key and not cur_accent)
+            b.setStyleSheet("text-align:left; padding:8px 12px")
+            b.clicked.connect(lambda _=False, k=key: self.set_theme(k, ""))
+            self.theme_btns[key] = b
+            grid.addWidget(b, n // 2, n % 2)
+        tv.addLayout(grid)
+        crow = QHBoxLayout()
+        self.accent_b = ibtn("palette", "Pick any colour: buttons, links and highlights take it and its two neighbours on the colour wheel",
+                             self.pick_accent, kind="", text=" My own colour…", size=16)
+        if cur_accent:
+            self.accent_b.setIcon(_swatch(*theme.accents_from(cur_accent)))
+            self.accent_b.setIconSize(QSize(46, 18))
+            self.accent_b.setText("  My own colour (in use) — change…")
+        crow.addWidget(self.accent_b)
+        crow.addStretch(1)
+        tv.addLayout(crow)
         v.addWidget(f)
 
         # sync
@@ -439,6 +470,25 @@ class SettingsDialog(QDialog):
         self.main.save_settings()
         self.main.msg(msg, 8000)
 
+    def set_theme(self, key: str, accent: str):
+        m = self.main
+        if (key, accent) == theme.current():
+            for k, b in self.theme_btns.items():
+                b.setChecked(k == key and not accent)
+            return
+        m.settings["theme"], m.settings["accent"] = key, accent
+        m.save_settings()
+        self.accept()
+        QTimer.singleShot(50, m.restart_ui)              # the window is rebuilt in the new colours; the video stays where it was
+
+    def pick_accent(self):
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+        key, accent = theme.current()
+        col = QColorDialog.getColor(QColor(accent or theme.CYAN), self, "Your own colour")
+        if col.isValid():
+            self.set_theme(key, col.name().upper())
+
     def set_motion(self, on):
         self.main.settings["motion"] = on
         self.main.save_settings()
@@ -470,8 +520,18 @@ HELP = [
                     "C1 orange, C2 pink; saved words are underlined. Right-click it to colour only harder words (e.g. B2+). "
                     "English levels come from the CEFR-J list; German levels are estimated from how common a word is — "
                     "Goethe's and Oxford's own lists are copyrighted."),
-    ("Where else?", "On the word card, “Where else is it used in my videos?” lists every line in your subtitled videos with the word "
-                    "or its other forms (gehen → geht, ging, gegangen). Double-click to play that moment."),
+    ("Where else?", "On the word card, “Where else is … used in my videos?” lists every line of your subtitled videos with the word "
+                    "in any of its forms, taken from the dictionary (bringen → bringt, brachte, gebracht; Haus → Häuser). Separable "
+                    "verbs are found split too (mitbringen → “Bringst du das mit?”). Click a form to show only its lines; "
+                    "double-click a line to play that moment. The card lists the forms, and tells you when the word you clicked "
+                    "belongs to a separable verb in that sentence."),
+    ("AI lesson", "Transcript ▸ Study this video ▸ AI lesson: choose A2, B1, B2 or C1 and send the ready question — it contains the "
+                  "whole text of the video and your saved words — to ChatGPT, Gemini, DeepSeek or Grok. The assistant writes a text at "
+                  "that level, the key words, the structures, exercises (gaps, matching, rewriting, questions, writing) and the "
+                  "answers. Copy its answer and press Paste: the lesson is kept with the video, one per level; Hide answers lets you "
+                  "test yourself, Save as file makes a text file to print."),
+    ("Themes", "Settings ▸ Theme & colours: eight looks (Nebula, Ocean, Aurora, Forest, Sunset, Rose, Graphite, Midnight) or your "
+               "own colour. The window is rebuilt at once and your video stays where it was."),
     ("Correct subtitles", "Wrong word in a subtitle? The pencil beside it (E), or right-click a transcript line: fix the text and "
                           "the timing, delete a line or add one. Saved into the video's subtitles; the first version is kept."),
     ("Translate all", "Transcript ▸ Translate all translates every line at once (English or Persian — Aa button) and saves it: "
@@ -503,7 +563,7 @@ HELP = [
                             "Ctrl+click a word: the whole sentence. Translation needs internet."),
     ("Save & review", "Save keeps the word, meaning, sentence and the exact video moment. Review plays the moment; "
                       "Space shows the meaning, then Got it (1, 2, 4, 7, 15, 30, 60 days) or Again (10 minutes)."),
-    ("Learn more", "Learn more ▾: ChatGPT and Grok open with a ready question (3 example sentences with translations). Copy the "
+    ("Learn more", "Learn more ▾: ChatGPT, Gemini, DeepSeek and Grok open with a ready question (3 example sentences with translations). Copy the "
                    "answer and use ＋ Add sentences — review then shows a different sentence each time."),
     ("Practice", "Practice: Fill the gap, Dictation (hear the video line, type it) and der·die·das. Answers count for your 🔥 streak."),
     ("Repeat like VLC", "A = loop start, B = loop end (keys A and B); × or Esc stops. Loop line (L) repeats the current subtitle. "
@@ -770,7 +830,8 @@ class TourDialog(QDialog):
 
 # ==================================================================== where else is a word used
 class UsesDialog(QDialog):
-    """Every line in your subtitled videos that uses the word (or one of its forms)."""
+    """Every line in your subtitled videos that uses the word — in any of its forms (bringen: bringt, brachte, gebracht …;
+    separable verbs also split: bringt … mit)."""
 
     def __init__(self, main, word: str, lang: str):
         super().__init__(main)
@@ -780,14 +841,20 @@ class UsesDialog(QDialog):
         from PySide6.QtWidgets import QListWidget, QListWidgetItem
         self.main, self.word, self.lang = main, word, lang
         self.setWindowTitle(f"“{word}” in your videos")
-        self.resize(820, 620)
+        self.resize(860, 660)
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 18, 24, 18)
-        v.addWidget(title(f"“{word}” in your videos"))
+        self.head = title(f"“{word}” in your videos")
+        v.addWidget(self.head)
         self.info = hint("Searching your subtitled videos (SubPlayer's subtitles and .srt files next to your videos)…")
         v.addWidget(self.info)
+        self.forms = QLabel("")
+        self.forms.setWordWrap(True)
+        self.forms.setTextFormat(Qt.RichText)
+        self.forms.linkActivated.connect(self._pick_form)
+        v.addWidget(self.forms)
         self.list = QListWidget()
-        self.list.setWordWrap(True)
+        self.list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         self.list.itemDoubleClicked.connect(self.play)
         v.addWidget(self.list, 1)
         row = QHBoxLayout()
@@ -797,13 +864,14 @@ class UsesDialog(QDialog):
         row.addStretch(1)
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
-        self.play_b = ibtn("play", "Play this moment", lambda: self.play(self.list.currentItem()), kind="", text=" Play",
-                           size=16, color="#FFFFFF")
+        self.play_b = ibtn("play", "Play this moment (Enter or double-click)", lambda: self.play(self.list.currentItem()), kind="",
+                           text=" Play this moment", size=16, color="#FFFFFF")
         self.play_b.setProperty("accent", True)
+        self.play_b.setDefault(True)
         row.addWidget(close)
         row.addWidget(self.play_b)
         v.addLayout(row)
-        self.uses, self.files = [], 0
+        self.uses, self.files, self.meta, self.form = [], 0, {}, ""
         self._esc = _html.escape
         self._QLI = QListWidgetItem
         box = {}
@@ -812,7 +880,9 @@ class UsesDialog(QDialog):
             from . import library, syncer as _syncer
             try:
                 items = library.scan(main.settings, _syncer.subs_dir())
-                box["r"] = library.find_uses(word, lang, items, main.dictionary(lang))
+                meta = {}
+                box["r"] = library.find_uses(word, lang, items, main.dictionary(lang), info=meta)
+                box["m"] = meta
             except Exception as e:
                 box["e"] = str(e)
         t = threading.Thread(target=work, daemon=True)
@@ -826,43 +896,117 @@ class UsesDialog(QDialog):
                 self.info.setText("Search failed: " + box["e"])
                 return
             self.uses, self.files = box["r"]
+            self.meta = box.get("m") or {}
+            base = self.meta.get("base") or word
+            self.head.setText(f"“{base}” in your videos")
+            self.setWindowTitle(f"“{base}” in your videos")
             self._fill()
         poll()
 
+    def _pick_form(self, f: str):
+        self.form = "" if f in ("*", self.form) else f
+        self._fill()
+
     def _fill(self, *_):
-        from PySide6.QtGui import QColor
-        from . import library
         self.list.clear()
+        e = self._esc
         uses = [u for u in self.uses if not (self.only_this.isChecked() and u.item.video and u.item.video == self.main.video)]
+        found: dict[str, int] = {}
+        for u in uses:
+            for f in {u.text[a:b].lower() for a, b in u.spans}:
+                found[f] = found.get(f, 0) + 1
+        searched = self.meta.get("forms") or []
+        if self.form and self.form not in found:
+            self.form = ""
+        if self.form:
+            uses = [u for u in uses if any(u.text[a:b].lower() == self.form for a, b in u.spans)]
         vids = len({u.item.srt for u in uses})
-        self.info.setText(f"{len(uses)} lines in {vids} videos (searched {self.files} subtitle files in "
-                          f"{'German' if self.lang == 'de' else 'English'}, including the word's other forms). "
-                          "Double-click a line to play that moment." if uses else
-                          f"Not found in your other subtitled videos ({self.files} searched). Videos you open with subtitles "
-                          "are included automatically; .srt files next to videos in Videos, Downloads and recent folders too.")
+        lang = "German" if self.lang == "de" else "English"
+        no_dict = self.main.dictionary(self.lang) is None and " " not in self.word
+        self.info.setText((f"{len(uses)} line{'s' if len(uses) != 1 else ''} in {vids} video{'s' if vids != 1 else ''} "
+                           f"· {self.files} {lang} subtitle files searched. Double-click a line to play that moment."
+                           if uses else
+                           f"Not found in your subtitled videos ({self.files} {lang} subtitle files searched). Videos you open "
+                           "with subtitles are included automatically; .srt files next to videos in Videos, Downloads and recent "
+                           "folders too.")
+                          + (f" Only this exact form was searched — download the {lang} dictionary to find the other forms too."
+                             if no_dict else ""))
+        if found:
+            chips = [f"<a href='*' style='color:{theme.CYAN if not self.form else theme.DIM};text-decoration:none'>all</a>"]
+            for f, n in sorted(found.items(), key=lambda x: (-x[1], x[0])):
+                on = f == self.form
+                chips.append(f"<a href='{e(f)}' style='color:{theme.GOLD if on else theme.LIGHT};text-decoration:none'>"
+                             f"{'<b>' if on else ''}{e(f)}{'</b>' if on else ''}</a><span style='color:{theme.DIM}'> ×{n}</span>")
+            missing = [f for f in searched if f not in found and " … " not in f]
+            self.forms.setText("<span style='color:%s'>Forms found (click one to show only it): </span>" % theme.DIM + " &nbsp;·&nbsp; ".join(chips)
+                               + (f"<br><span style='color:{theme.DIM};font-size:8.5pt'>Also searched, not in your videos: "
+                                  f"{e(', '.join(missing[:14]))}{' …' if len(missing) > 14 else ''}</span>" if missing else ""))
+        else:
+            self.forms.setText(f"<span style='color:{theme.DIM};font-size:8.5pt'>Searched: {e(', '.join(searched[:24]))}"
+                               f"{' …' if len(searched) > 24 else ''}</span>" if searched else "")
+        width = max(300, self.list.viewport().width() - 44)
         for u in uses:
             parts, last = [], 0
             for a, b in u.spans:
-                parts.append(u.text[last:a])
-                parts.append("«" + u.text[a:b] + "»")
+                parts.append(e(u.text[last:a]))
+                parts.append(f"<b style='color:{theme.GOLD}'>{e(u.text[a:b])}</b>")
                 last = b
-            parts.append(u.text[last:])
+            parts.append(e(u.text[last:]))
             mm, ss = divmod(u.start_ms // 1000, 60)
-            it = self._QLI(f"{u.item.name}  ·  {mm}:{ss:02d}\n{' '.join(''.join(parts).split())}")
+            here = bool(u.item.video)
+            lbl = QLabel(f"<span style='color:{theme.CYAN if here else theme.DIM};font-size:9pt'>{e(u.item.name)} &nbsp;·&nbsp; {mm}:{ss:02d}"
+                         f"{'' if here else ' &nbsp;· subtitles only — the video is not on this PC'}</span><br>"
+                         f"<span style='font-size:11.5pt;color:{theme.LIGHT if here else theme.DIM}'>{' '.join(''.join(parts).split())}</span>")
+            lbl.setTextFormat(Qt.RichText)
+            lbl.setWordWrap(True)
+            lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            lbl.setContentsMargins(4, 2, 4, 2)
+            lbl.setStyleSheet("background: transparent")
+            it = self._QLI()
             it.setData(Qt.UserRole, u)
-            if not u.item.video:
-                it.setForeground(QColor(theme.DIM))
-                it.setToolTip("Only the subtitles are on this PC — the video wasn't found")
+            from PySide6.QtCore import QSize
+            it.setSizeHint(QSize(width, lbl.heightForWidth(width) + 30))
             self.list.addItem(it)
+            self.list.setItemWidget(it, lbl)
         if self.list.count():
             self.list.setCurrentRow(0)
+        self.play_b.setEnabled(bool(self.list.count()))
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        from PySide6.QtCore import QSize
+        width = max(300, self.list.viewport().width() - 44)
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            w = self.list.itemWidget(it)
+            if w is not None:
+                it.setSizeHint(QSize(width, w.heightForWidth(width) + 30))
 
     def play(self, it):
         if not it:
             return
         u = it.data(Qt.UserRole)
+        if not u.item.video:
+            self.info.setText("Only the subtitles of that video are on this PC (synced from your phone, or the video was moved). "
+                              "Open the video once and it plays from here.")
+            return
         self.accept()
         self.main.open_use(u.item.video, u.item.srt, u.start_ms, u.end_ms)
+
+
+def _swatch(a1: str, a2: str, a3: str):
+    """Three colour dots of a theme, as a button icon."""
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+    pm = QPixmap(92, 36)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    for i, col in enumerate((a1, a2, a3)):
+        p.setBrush(QColor(col))
+        p.drawEllipse(2 + i * 30, 4, 28, 28)
+    p.end()
+    return QIcon(pm)
 
 
 # ==================================================================== correct a subtitle line

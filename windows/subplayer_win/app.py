@@ -46,7 +46,8 @@ class Bus(QObject):
     failed = Signal(str, str)         # kind, message
 
 
-def ibtn(name, tip, fn=None, checkable=False, size=20, kind="icon", text="", color=theme.LIGHT, active=theme.CYAN):
+def ibtn(name, tip, fn=None, checkable=False, size=20, kind="icon", text="", color=None, active=None):
+    color, active = color or theme.LIGHT, active or theme.CYAN
     b = QPushButton(text, toolTip=tip, checkable=checkable)
     b.setIcon(icons.icon(name, color, size, active=active))
     b.setIconSize(QSize(size, size))
@@ -281,7 +282,7 @@ class Main(QMainWindow):
         b_slow = QPushButton("Slow", toolTip="Speak slowly")
         b_slow.clicked.connect(lambda: self.speak_card(True))
         b_sent = ibtn("translate", "Translate the whole sentence (online)", self.translate_sentence, kind="", text=" Sentence")
-        self.learn_btn = ibtn("sparkles", "ChatGPT / Grok with a ready question, DWDS or Cambridge, dict.cc", self.learn_menu,
+        self.learn_btn = ibtn("sparkles", "ChatGPT / Gemini / DeepSeek / Grok with a ready question, DWDS or Cambridge, dict.cc", self.learn_menu,
                               kind="", text=" Learn more")
         g.addWidget(self.save_btn, 0, 0)
         g.addWidget(b_speak, 0, 1)
@@ -456,8 +457,8 @@ class Main(QMainWindow):
         self.vstack.addWidget(self.vw)
         self.audio_cover = QLabel(alignment=Qt.AlignCenter)
         self.audio_cover.setWordWrap(True)
-        self.audio_cover.setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1B1240,stop:1 #0B2A3A);"
-                                       "border-radius:16px;color:#E8E6FF;font-size:15pt;padding:24px")
+        self.audio_cover.setStyleSheet(theme.recolor("background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1B1240,stop:1 #0B2A3A);"
+                                       "border-radius:16px;color:#E8E6FF;font-size:15pt;padding:24px"))
         self.audio_cover.mousePressEvent = lambda e: self.toggle_play()
         self.vstack.addWidget(self.audio_cover)
         self.player.hasVideoChanged.connect(self._has_video)
@@ -1353,8 +1354,34 @@ class Main(QMainWindow):
                                 f"<span style='color:{theme.DIM};font-size:8pt'> ({tip})</span>")
             h.append(" &nbsp;·&nbsp; ".join(meta))
             if n == 0:
+                d = self.dictionary(lang)
+                try:
+                    sep = d.separable_in(c["word"], c["sentence"]) if (d and lang == "de") else []
+                except Exception:
+                    sep = []
+                for lemma, vf, part in sep[:2]:                      # "bringt … mit" is the separable verb mitbringen
+                    h.append(f"<p style='margin:8px 0 0 0;padding:6px 9px;border-left:3px solid {theme.GOLD}'>"
+                             f"<span style='color:{theme.GOLD}'>↪ In this sentence it is part of </span>"
+                             f"<a href='pw:{urllib.parse.quote(lemma)}' style='color:{theme.CYAN};font-weight:700;text-decoration:none'>"
+                             f"{html.escape(lemma)}</a> <span style='color:{theme.DIM}'>({html.escape(vf)} … {html.escape(part)})</span></p>")
                 h.append(f"<p style='margin:6px 0 0 0'><a href='uses:' style='color:{theme.CYAN};text-decoration:none'>"
-                         f"🔎 Where else is “{html.escape(c['word'])}” used in my videos?</a></p>")
+                         f"🔎 Where else is “{html.escape(e.lemma)}” used in my videos?</a>"
+                         f"<span style='color:{theme.DIM};font-size:8.5pt'> — all its forms</span></p>")
+                try:
+                    _, fset, split = d.forms_of(e.lemma) if d else ("", set(), set())
+                except Exception:
+                    fset, split = set(), set()
+                tapped = c["word"].lower()
+                flist = sorted(f for f in fset if f != e.lemma.lower())
+                if split:
+                    flist = sorted({f"{a} … {b}" for a, b in split}) + flist
+                if flist:
+                    shown = flist[:24]
+                    if tapped in flist and tapped not in shown:
+                        shown.append(tapped)
+                    h.append(self._sec("Forms" if lang == "en" else "Formen") + " · ".join(
+                        (f"<b style='color:{theme.GOLD}'>{html.escape(f)}</b>" if f == tapped else html.escape(f)) for f in shown)
+                        + (f" <span style='color:{theme.DIM}'>… +{len(flist) - len(shown)}</span>" if len(flist) > len(shown) else ""))
             if e.lang == "en" and e.german:
                 h.append(self._sec("Deutsch") + html.escape(", ".join(e.german[:6])))
             if e.lang != "en" and e.english:
@@ -1422,7 +1449,8 @@ class Main(QMainWindow):
         elif kind == "pw":
             self.open_word(urllib.parse.unquote(val), self.card.get("sentence", ""), lang=self.card["lang"])
         elif kind == "uses":
-            self.show_uses(self.card["word"], self.card["lang"])
+            ents = self.card.get("entries") or []
+            self.show_uses(ents[0].lemma if ents else self.card["word"], self.card["lang"])
 
     def translate_word_online(self):
         c = self.card
@@ -1561,13 +1589,22 @@ class Main(QMainWindow):
                 "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt.\n"
                 "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\nDE: … | EN: … | FA: …")
 
+    def ask_ai(self, source: str, question: str, after: str = ""):
+        """Opens ChatGPT / Gemini / DeepSeek / Grok with the question: handed over in the address where the site takes
+        it and the question is short enough, and always copied, so Ctrl+V pastes it."""
+        from . import lessons
+        name, home, with_q = lessons.ASSISTANTS[source]
+        QApplication.clipboard().setText(question)
+        fits = bool(with_q) and len(urllib.parse.quote(question)) <= lessons.URL_LIMIT
+        QDesktopServices.openUrl(QUrl((with_q + urllib.parse.quote(question)) if fits else home))
+        self.msg((f"{name} opens with the question. " if fits else f"The question is copied — click into {name}'s box and press Ctrl+V. ")
+                 + after, 12000)
+
     def learn_more(self, source, word, sentence, lang):
         q = urllib.parse.quote
-        if source in ("chatgpt", "grok"):
-            p = self.ai_prompt(word, sentence, lang)
-            QApplication.clipboard().setText(p)
-            url = ("https://chatgpt.com/?q=" if source == "chatgpt" else "https://grok.com/?q=") + q(p)
-            self.msg("Question copied too — paste it if the chat opens empty. Then copy the 3 sentences back and use ＋ Add sentences.", 10000)
+        if source in ("chatgpt", "gemini", "deepseek", "grok"):
+            self.ask_ai(source, self.ai_prompt(word, sentence, lang), "Then copy the 3 sentences back and use ＋ Add sentences.")
+            return
         elif source == "dwds":
             url = "https://www.dwds.de/wb/" + q(word)
         elif source == "cambridge":
@@ -1587,6 +1624,8 @@ class Main(QMainWindow):
 
     def fill_learn_menu(self, m: QMenu, word, sentence, lang, saved_getter):
         m.addAction(icons.icon("sparkles", theme.CYAN, 16), "ChatGPT — meaning + 3 sentences", lambda: self.learn_more("chatgpt", word, sentence, lang))
+        m.addAction(icons.icon("sparkles", theme.GOLD, 16), "Gemini — meaning + 3 sentences", lambda: self.learn_more("gemini", word, sentence, lang))
+        m.addAction(icons.icon("sparkles", theme.MINT, 16), "DeepSeek — meaning + 3 sentences", lambda: self.learn_more("deepseek", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.MAGENTA, 16), "Grok — meaning + 3 sentences", lambda: self.learn_more("grok", word, sentence, lang))
         if lang == "en":
             m.addAction(icons.icon("book", theme.GOLD, 16), "Cambridge Dictionary", lambda: self.learn_more("cambridge", word, sentence, lang))
@@ -1963,7 +2002,32 @@ class Main(QMainWindow):
         from .dialogs import HelpDialog
         HelpDialog(self).exec()
 
+    def restart_ui(self):
+        """Builds the window again in the chosen theme and carries on where you were (same video, same moment)."""
+        video, pos = self.video, (self.player.position() if self.video else 0)
+        geo, maxi = self.geometry(), self.isMaximized()
+        self.player.pause()
+        self.remember_position()
+        theme.apply(self.settings.get("theme", "nebula"), self.settings.get("accent", ""))
+        w = Main()
+        w.setGeometry(geo)
+        (w.showMaximized if maxi else w.show)()
+        QApplication.instance()._main_window = w                      # keep it alive
+        self._replaced = True
+        QApplication.instance().removeEventFilter(self)
+        for t in self.findChildren(QTimer):
+            t.stop()
+        self.player.stop()
+        self.close()
+        self.deleteLater()
+        if video and os.path.exists(video):
+            QTimer.singleShot(700, lambda: w.open_video(video, at_ms=pos, play=False))
+        w.msg("Theme changed: " + theme.THEMES[theme.current()[0]][0] + (" · your own colour" if theme.current()[1] else ""), 6000)
+
     def closeEvent(self, e):
+        if getattr(self, "_replaced", False):                         # the old window of a theme change: nothing left to save
+            super().closeEvent(e)
+            return
         self.remember_position()
         if self.sync_timer.isActive() and self.settings.get("sync_token"):
             try:   # last changes go up before closing
@@ -2247,7 +2311,7 @@ def selftest(out: str) -> int:
     for mod in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "numpy", "PySide6.QtMultimedia", "PySide6.QtTextToSpeech",
                 "PySide6.QtSvg", "cryptography", "requests", "socks", "urllib3.contrib.socks", "subplayer_win.discover",
                 "subplayer_win.mediathek", "subplayer_win.netcfg", "subplayer_win.english", "subplayer_win.study",
-                "subplayer_win.library", "subplayer_win.levels"):
+                "subplayer_win.library", "subplayer_win.levels", "subplayer_win.lessons"):
         try:
             __import__(mod)
             lines.append(f"OK   {mod}")
@@ -2333,6 +2397,9 @@ def main():
     f.setFamilies(["Segoe UI Variable Text", "Segoe UI", "Inter", "Vazirmatn"])
     f.setPointSize(10)
     app.setFont(f)
+    st = load_settings()
+    theme.apply(st.get("theme", "nebula"), st.get("accent", ""))
     w = Main()
     w.show()
+    app._main_window = w
     sys.exit(app.exec())

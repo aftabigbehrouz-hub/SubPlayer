@@ -93,44 +93,56 @@ def scan(settings: dict, subs_dir: Path, max_files: int = 4000) -> list[Item]:
     return items
 
 
-def word_forms(word: str, dictionary=None) -> set[str]:
-    """The word and, through the dictionary, its other forms (warum; gehen → geht, ging, gegangen…)."""
+def word_forms(word: str, dictionary=None) -> tuple[str, set[str], set[tuple[str, str]]]:
+    """(base word, one-word forms, split forms of a separable verb) — through the dictionary when there is one."""
     w = word.strip().lower()
-    forms = {w}
     if dictionary is None:
-        return forms
+        return word.strip(), {w}, set()
     try:
-        rows = dictionary.db.execute("SELECT DISTINCT l.id FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? AND e.pos!='name' "
-                                     "LIMIT 6", (w,)).fetchall()
-        ids = [r[0] for r in rows]
-        lemmas = [r[0].lower() for r in dictionary.db.execute(
-            f"SELECT lemma FROM entry WHERE id IN ({','.join('?' * len(ids))})", ids)] if ids else []
-        # only the entries whose base word is this word or the word's base word (not every homograph)
-        base = ""
-        try:
-            ranked = [e for e in dictionary.lookup(word) if e.pos != "name"]
-            base = ranked[0].lemma.lower() if ranked else ""
-        except Exception:
-            pass
-        keep = [i for i, lem in zip(ids, lemmas) if lem in (w, base)]
-        if keep:
-            for (k,) in dictionary.db.execute(f"SELECT key FROM lookup WHERE id IN ({','.join('?' * len(keep))})", keep):
-                if k and " " not in k and max(2, len(w) // 2) <= len(k) <= 40:
-                    forms.add(k.lower())
+        return dictionary.forms_of(word)
     except Exception:
-        pass
-    return forms
+        return word.strip(), {w}, set()
 
 
 TOKEN = re.compile(r"[^\W\d_][\w\-'’]*", re.UNICODE)
+_CLAUSE_END = re.compile(r"[.!?;:,…]")
+
+
+def match_spans(text: str, forms: set[str], split: set[tuple[str, str]]) -> list[tuple[int, int]]:
+    """Where the word is in a subtitle line: its forms, and for separable verbs the verb form with its particle
+    later in the same clause ("Er bringt das Buch mit" → bringt … mit)."""
+    toks = [(m.start(), m.end(), m.group(0).lower().strip("'’-")) for m in TOKEN.finditer(text)]
+    spans = [(a, b) for a, b, t in toks if t in forms]
+    if split:
+        by_verb: dict[str, set[str]] = {}
+        for vf, part in split:
+            by_verb.setdefault(vf, set()).add(part)
+        for i, (a, b, t) in enumerate(toks):
+            parts = by_verb.get(t)
+            if not parts:
+                continue
+            for a2, b2, t2 in toks[i + 1:]:
+                if t2 in parts:
+                    after = text[b2:].lstrip(" \t\"“”»«)")
+                    # the particle closes the clause: end of the line, or punctuation / "und", "oder" follows
+                    if not after or after[0] in ".!?;:,…\n" or re.match(r"(und|oder|aber|denn)\b", after):
+                        spans += [(a, b), (a2, b2)]
+                    break
+                if _CLAUSE_END.search(text[b:a2]):
+                    break
+    return sorted(set(spans))
 
 
 def find_uses(word: str, lang: str, items: list[Item], dictionary=None, limit: int = 400,
-              cancelled=lambda: False) -> tuple[list[Use], int]:
-    """Every subtitle line (in the given language) that contains the word or one of its forms; (uses, files searched)."""
+              cancelled=lambda: False, info: dict | None = None) -> tuple[list[Use], int]:
+    """Every subtitle line (in the given language) that contains the word or one of its forms; (uses, files searched).
+    `info` (optional dict) receives: base (the base word), forms (searched), found ({form: lines})."""
     phrase = " " in word.strip()
-    forms = {word.strip().lower()} if phrase else word_forms(word, dictionary)
+    base, forms, split = (word.strip(), {word.strip().lower()}, set()) if phrase else word_forms(word, dictionary)
+    found: dict[str, int] = {}
     out, n = [], 0
+    if info is not None:
+        info.update(base=base, forms=sorted(forms) + sorted({f"{a} … {b}" for a, b in split}), found=found)
     for it in items:
         if it.lang != lang:
             continue
@@ -138,14 +150,19 @@ def find_uses(word: str, lang: str, items: list[Item], dictionary=None, limit: i
             break
         n += 1
         for k, c in enumerate(it.cues()):
-            low = c.text.lower()
             if phrase:
-                i = low.find(next(iter(forms)))
-                spans = [(i, i + len(word.strip()))] if i >= 0 else []
+                i = " ".join(c.text.lower().split()).find(" ".join(word.lower().split()))
+                flat = " ".join(c.text.split())
+                spans = [(i, i + len(" ".join(word.split())))] if i >= 0 else []
+                text = flat
             else:
-                spans = [(m.start(), m.end()) for m in TOKEN.finditer(c.text) if m.group(0).lower().strip("'’-") in forms]
+                text = c.text
+                spans = match_spans(text, forms, split)
             if spans:
-                out.append(Use(it, k, c.start_ms, c.end_ms, c.text, spans))
+                for a, b in spans:
+                    f = text[a:b].lower()
+                    found[f] = found.get(f, 0) + 1
+                out.append(Use(it, k, c.start_ms, c.end_ms, text, spans))
                 if len(out) >= limit:
                     return out, n
     return out, n

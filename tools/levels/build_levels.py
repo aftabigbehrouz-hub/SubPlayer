@@ -18,8 +18,14 @@ out = Path(out); out.mkdir(parents=True, exist_ok=True)
 LV = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "windows"))
+from subplayer_win.dictionary import Dictionary  # noqa: E402  (its _rows() leaves out links that are no word forms)
+
+
 def lemmas_of(db, form):
-    rows = db.execute("SELECT e.lemma, e.pos FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? LIMIT 20", (form,)).fetchall()
+    # "worden", "gewesen", "mich", "ab" … hang under thousands of verbs in the dictionary file (helper verbs, pronouns and
+    # particles of their conjugation tables); counted there they made rare verbs look like everyday words
+    rows = db._rows(form, "e.lemma, e.pos", 20)
     rows = [(l, p) for l, p in rows if p not in ("name", "abbrev", "symbol", "character", "suffix", "prefix", "letter")]
     if not rows:
         return []
@@ -28,7 +34,7 @@ def lemmas_of(db, form):
 
 
 def lemma_freq(db_file, freq_file):
-    db = sqlite3.connect(db_file)
+    db = Dictionary(db_file)
     tot = defaultdict(int)
     for line in open(freq_file, encoding="utf-8"):
         try:

@@ -21,7 +21,7 @@ FA_FONT = "Vazirmatn"           # bundled (SIL Open Font License) — clean Pers
 GLASS = "rgba(20, 17, 44, 0.62)"
 GLASS_BORDER = "rgba(160, 140, 255, 0.22)"
 
-QSS = f"""
+_QSS_DEFAULT = f"""
 * {{ font-family: {UI_FONT}; font-size: 10.5pt; color: {LIGHT}; }}
 QMainWindow, QDialog {{ background: {BG}; }}
 QDialog {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #0B0920, stop:0.6 #120C2C, stop:1 #071226); }}
@@ -133,6 +133,115 @@ QMessageBox QLabel {{ color: {LIGHT}; }}
 """
 
 
+# ====================================================================== themes
+# A theme = three accent colours (highlights / buttons from → to) and the tint of the dark surfaces. Every colour of the
+# default "Nebula" look — in this style sheet, in the space background and in the widgets — is re-coloured through shade():
+# cyan-ish colours follow the theme's first accent, violet-ish the second, magenta-ish the third, dark and greyish
+# colours take the theme's tint. Level colours (A1…C2), der/die/das and the gold of saved words stay as they are.
+import colorsys
+import re as _re
+
+THEMES = {   # key: (name, accent 1, accent 2, accent 3, tint hue °, tint strength, darkness)
+    "nebula":   ("Nebula — violet night (standard)", "#3EF0FF", "#8B5CFF", "#FF4FD8", 250, 1.00, 1.00),
+    "ocean":    ("Ocean — deep blue",                "#6CCBFF", "#2F7BFF", "#6A5CFF", 218, 1.00, 1.00),
+    "aurora":   ("Aurora — green and teal",          "#4DFFC0", "#12B5A0", "#2E86E0", 172, 0.90, 1.00),
+    "forest":   ("Forest — moss and lime",           "#B8F06A", "#2FA35F", "#1FA890", 135, 0.70, 1.00),
+    "sunset":   ("Sunset — amber and coral",         "#FFB86B", "#FF6A4D", "#E8408A", 345, 0.80, 1.00),
+    "rose":     ("Rose — pink and plum",             "#FF9BD0", "#B45CFF", "#FF4F8B", 312, 0.80, 1.00),
+    "graphite": ("Graphite — calm grey",             "#A9C7FF", "#5B6E94", "#7C8FBF", 220, 0.22, 1.00),
+    "midnight": ("Midnight — pure black",            "#3EF0FF", "#8B5CFF", "#FF4FD8", 250, 0.55, 0.35),
+}
+_DEFAULTS = dict(CYAN=CYAN, MAGENTA=MAGENTA, VIOLET=VIOLET, BG=BG, CARD=CARD, LIGHT=LIGHT, DIM=DIM)
+_current = {"key": "nebula", "accent": ""}
+_fam: list = []          # [(default hue, default l, default s, target h, target l, target s)] for cyan / violet / magenta
+_tint = (250.0, 1.0, 1.0)
+
+
+def _hls(hexc: str):
+    r, g, b = (int(hexc[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    return h * 360, l, s
+
+
+def _hex(h: float, l: float, s: float) -> str:
+    r, g, b = colorsys.hls_to_rgb((h % 360) / 360, min(1.0, max(0.0, l)), min(1.0, max(0.0, s)))
+    return "#%02X%02X%02X" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+def _rgb(r: int, g: int, b: int) -> tuple[int, int, int]:
+    """One colour of the default look in the current theme."""
+    if _current["key"] == "nebula" and not _current["accent"]:
+        return r, g, b
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    h *= 360
+    if l < 0.02 or l > 0.985 or s < 0.08:
+        return r, g, b                                              # black, white, pure greys
+    th, ts, tl = _tint
+    if l < 0.24 or s < 0.42:                                        # dark surfaces and greyish text: the theme's tint
+        out = _hex(th + (h - 250) * 0.3, l * (tl if l < 0.24 else 1.0), s * ts)
+    else:
+        best = min(_fam, key=lambda f: abs((h - f[0] + 180) % 360 - 180))
+        if abs((h - best[0] + 180) % 360 - 180) > 36:
+            return r, g, b                                          # gold, green, orange, red … keep their meaning
+        dh, dl, ds, t_h, t_l, t_s = best
+        out = _hex(t_h + (h - dh), l if l > 0.85 else l * (t_l / dl), s * (t_s / ds))
+    return int(out[1:3], 16), int(out[3:5], 16), int(out[5:7], 16)
+
+
+def shade(color: str) -> str:
+    """A "#RRGGBB" colour of the default look → the same role in the current theme."""
+    if not (isinstance(color, str) and len(color) == 7 and color[0] == "#"):
+        return color
+    try:
+        return "#%02X%02X%02X" % _rgb(int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+    except ValueError:
+        return color
+
+
+c = shade
+
+
+def recolor(text: str) -> str:
+    """Every #RRGGBB and rgb()/rgba() colour in a style sheet or HTML snippet → current theme."""
+    text = _re.sub(r"#[0-9A-Fa-f]{6}\b", lambda m: shade(m.group(0)), text)
+    return _re.sub(r"(rgba?\(\s*)(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})",
+                   lambda m: m.group(1) + "%d, %d, %d" % _rgb(int(m.group(2)), int(m.group(3)), int(m.group(4))), text)
+
+
+def accents_from(color: str) -> tuple[str, str, str]:
+    """Three accents from one colour of your choice (its two neighbours on the colour wheel join it)."""
+    h, l, s = _hls(color)
+    s = max(0.6, s)
+    return _hex(h, max(0.58, min(0.75, l)), s), _hex(h - 28, 0.52, s * 0.9), _hex(h + 28, 0.56, s)
+
+
+def apply(key: str = "nebula", accent: str = "") -> None:
+    """Chooses the theme (and optionally your own accent colour). Call before the window is built."""
+    global CYAN, MAGENTA, VIOLET, BG, CARD, LIGHT, DIM, GLASS, GLASS_BORDER, QSS, _tint
+    if key not in THEMES:
+        key = "nebula"
+    if not (isinstance(accent, str) and _re.fullmatch(r"#[0-9A-Fa-f]{6}", accent or "")):
+        accent = ""
+    _, a1, a2, a3, th, ts, tl = THEMES[key]
+    if accent:
+        a1, a2, a3 = accents_from(accent)
+    _current.update(key=key, accent=accent)
+    _tint = (float(th), ts, tl)
+    _fam[:] = [(*_hls(d), *_hls(t)) for d, t in ((_DEFAULTS["CYAN"], a1), (_DEFAULTS["VIOLET"], a2), (_DEFAULTS["MAGENTA"], a3))]
+    CYAN, VIOLET, MAGENTA = a1, a2, a3
+    BG, CARD, LIGHT, DIM = (shade(_DEFAULTS[k]) for k in ("BG", "CARD", "LIGHT", "DIM"))
+    GLASS = recolor("rgba(20, 17, 44, 0.62)")
+    GLASS_BORDER = recolor("rgba(160, 140, 255, 0.22)")
+    QSS = recolor(_QSS_DEFAULT)
+
+
+def current() -> tuple[str, str]:
+    return _current["key"], _current["accent"]
+
+
+apply()
+
+
 def fa_span(text: str, size: str = "14pt", color: str = "") -> str:
     """Right-to-left Persian block in the bundled font."""
     c = f"color:{color};" if color else ""
@@ -151,14 +260,14 @@ def load_fonts() -> list[str]:
     return out
 
 
-def glow(widget, color: str = VIOLET, blur: int = 38, alpha: int = 150, dy: int = 0):
+def glow(widget, color: str | None = None, blur: int = 38, alpha: int = 150, dy: int = 0):
     """Soft neon halo around a widget."""
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QGraphicsDropShadowEffect
     eff = QGraphicsDropShadowEffect(widget)
-    c = QColor(color)
-    c.setAlpha(alpha)
-    eff.setColor(c)
+    col = QColor(color or VIOLET)
+    col.setAlpha(alpha)
+    eff.setColor(col)
     eff.setBlurRadius(blur)
     eff.setOffset(0, dy)
     widget.setGraphicsEffect(eff)
@@ -183,9 +292,9 @@ def dark_title_bar(window):
         for attr in (20, 19):                                        # DWMWA_USE_IMMERSIVE_DARK_MODE (new / old builds)
             if dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), 4) == 0:
                 break
-        caption = ctypes.c_int(0x00200A0B)                            # COLORREF 0x00BBGGRR → #0B0A20
-        dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption), 4)  # DWMWA_CAPTION_COLOR (Windows 11)
-        border = ctypes.c_int(0x00FF5C8B)                             # violet frame line
-        dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), 4)   # DWMWA_BORDER_COLOR
+        def colorref(hexc):                                           # COLORREF is 0x00BBGGRR
+            return ctypes.c_int(int(hexc[5:7] + hexc[3:5] + hexc[1:3], 16))
+        dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(colorref(shade("#0B0A20"))), 4)   # DWMWA_CAPTION_COLOR (Windows 11)
+        dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(colorref(VIOLET)), 4)             # DWMWA_BORDER_COLOR
     except Exception:
         pass

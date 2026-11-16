@@ -12,6 +12,15 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPa
 from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
 
 
+
+from . import theme as _theme
+_QColor = QColor
+
+
+def QColor(*a):                                   # noqa: N802 — the colours below are the standard look; shown in the chosen theme
+    return _QColor(_theme.shade(a[0])) if len(a) == 1 and isinstance(a[0], str) else _QColor(*a)
+
+
 class Cosmos(QWidget):
     FPS = 24
 
