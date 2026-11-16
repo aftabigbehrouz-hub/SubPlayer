@@ -229,17 +229,38 @@ def clock():
     ts = [n["text"] for n in nodes() if re.fullmatch(r"\d+:\d\d", n["text"] or "")]
     return ts[0] if ts else "?"
 time.sleep(4)                                # let the video load and play
-print("  before Space:", clock())
-adb("shell", "input", "keyevent", "62")      # Space = pause (keyboard)
-time.sleep(1.5); a = clock(); time.sleep(2.5); b = clock()
-print(f"  Space pauses: {'yes' if a == b and a != '?' else 'NO'} ({a} → {b})")
-if a != b:
+
+
+def toggles():
+    """What each Space press did, from the app's own log: 'pause' (it was playing) or 'play'."""
+    log = adb("logcat", "-d", "-s", "SubPlayer:D", check=False)
+    return ["pause" if "playWhenReady=true" in ln else "play" for ln in log.splitlines() if "play/pause:" in ln]
+
+
+def press_space(n_before):
+    adb("shell", "input", "keyevent", "62")
+    for _ in range(30):                      # a slow emulator delivers the key seconds later
+        t = toggles()
+        if len(t) > n_before:
+            return t
+        time.sleep(1)
+    return toggles()
+
+
+t = press_space(0)
+print("  Space pauses:", "yes" if t[:1] == ["pause"] else f"NO {t}")
+if t[:1] != ["pause"]:
     problems.append("Space did not pause")
-adb("shell", "input", "keyevent", "62")      # Space = play again
-time.sleep(1.5); c = clock(); time.sleep(2.5); d = clock()
-print(f"  Space plays again: {'yes' if c != d else 'NO'} ({c} → {d})")
-adb("shell", "input", "keyevent", "62")
-time.sleep(1.5)
+time.sleep(2); a = clock(); time.sleep(3); b = clock()
+print(f"  the video stands still while paused: {'yes' if a == b and a != '?' else 'NO'} ({a} → {b})")
+if a != b or a == "?":
+    problems.append("the video went on after Space")
+t = press_space(1)
+print("  Space plays again:", "yes" if t[1:2] == ["play"] else f"NO {t}")
+time.sleep(4)
+t = press_space(2)                           # paused again for the word cards
+print("  paused for the word cards:", "yes" if t[2:3] == ["pause"] else f"NO {t}")
+time.sleep(2)
 shot("05_player_levels_translation")
 
 print(adb("logcat", "-d", "-s", "SubPlayer", check=False)[-3000:])
@@ -257,8 +278,8 @@ if tap("Wetter"):
         time.sleep(3)
         shot("07_word_card_dictionary")
     tap("Save", required=False)
-    # "worden" hangs under thousands of verbs in the dictionary file — the card must show its real base word, werden
     back()
+    # "worden" hangs under thousands of verbs in the dictionary file — the card must show its real base word, werden
     if tap("worden"):
         time.sleep(2)
         shot("07b_card_worden")
@@ -267,17 +288,21 @@ if tap("Wetter"):
         else:
             problems.append("the card of 'worden' does not show 'werden'")
             print("  worden → werden: NO")
-    for _ in range(4):
-        if find("Where else is it used?", timeout=2):
-            break
-        adb("shell", "input", "swipe", "540", "2000", "540", "900", "400")
-        time.sleep(1)
-    if tap("Where else is it used?"):
-        time.sleep(4)
-        shot("08_where_else")
         back()
-    else:
-        back()
+    if tap("Wetter"):
+        for _ in range(4):
+            if find("Where else is it used?", timeout=2):
+                break
+            n = find("ENGLISH", timeout=1) or find("Save", timeout=1)
+            if n:                                # scroll the card itself, starting on the card
+                adb("shell", "input", "swipe", "540", str(n["y"]), "540", str(max(300, n["y"] - 700)), "400")
+            time.sleep(1)
+        if tap("Where else is it used?"):
+            time.sleep(5)
+            shot("08_where_else")
+            back()
+        else:
+            back()
 
 print("options, transcript, edit")
 if tap("Options"):
@@ -320,5 +345,5 @@ if crashed():
 log = adb("logcat", "-d", check=False)
 open(os.path.join(OUT, "logcat.txt"), "w").write(log[-400000:])
 print("problems:", problems or "none")
-if len(problems) > 4:
-    sys.exit("too many screens not found")
+if len(problems) > 2:
+    sys.exit("too many problems")
