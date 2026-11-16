@@ -10,6 +10,8 @@
     <queries>
         <package android:name="com.openai.chatgpt" />
         <package android:name="ai.x.grok" />
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.deepseek.chat" />
         <package android:name="cc.dict.dictcc" />
         <package android:name="cc.dict.dictccplus" />
         <intent>

@@ -46,9 +46,37 @@ object Library {
         return out
     }
 
+    private val CLAUSE_END = Regex("""[.!?;:,…]""")
+    private val GOES_ON = Regex("""^(und|oder|aber|denn)\b""")
+
+    /**
+     * Where the word is in a subtitle line: its [forms], and for separable verbs ([split] = verb form to particle) the
+     * verb form with its particle closing the same clause ("Er bringt das Buch mit" → bringt … mit).
+     */
+    fun matchSpans(text: String, forms: Set<String>, split: Set<Pair<String, String>>): List<IntRange> {
+        val toks = TOKEN.findAll(text).map { it.range to it.value.lowercase().trim('\'', '’', '-') }.toList()
+        val spans = toks.filter { it.second in forms }.map { it.first }.toMutableList()
+        if (split.isNotEmpty()) {
+            val byVerb = split.groupBy({ it.first }, { it.second })
+            for ((i, t) in toks.withIndex()) {
+                val parts = byVerb[t.second] ?: continue
+                for (j in i + 1 until toks.size) {
+                    val (r2, t2) = toks[j]
+                    if (t2 in parts) {
+                        val after = text.substring(r2.last + 1).trimStart(' ', '\t', '"', '“', '”', '»', '«', ')')
+                        if (after.isEmpty() || after[0] in ".!?;:,…\n" || GOES_ON.containsMatchIn(after)) { spans.add(t.first); spans.add(r2) }
+                        break
+                    }
+                    if (CLAUSE_END.containsMatchIn(text.substring(t.first.last + 1, r2.first))) break
+                }
+            }
+        }
+        return spans.distinct().sortedBy { it.first }
+    }
+
     /** Every subtitle line in [lang] containing one of [forms] (or the phrase); (uses, files searched). */
     fun findUses(word: String, lang: String, items: List<Item>, forms: Set<String>, limit: Int = 300,
-                 cancelled: () -> Boolean = { false }): Pair<List<Use>, Int> {
+                 split: Set<Pair<String, String>> = emptySet(), cancelled: () -> Boolean = { false }): Pair<List<Use>, Int> {
         val phrase = word.trim().contains(' ')
         val p = word.trim().lowercase()
         val out = ArrayList<Use>(); var n = 0
@@ -57,10 +85,9 @@ object Library {
             if (cancelled()) break
             n++
             it.cues().forEachIndexed { k, c ->
-                val low = c.text.lowercase()
                 val spans = if (phrase) {
-                    val i = low.replace('\n', ' ').indexOf(p); if (i >= 0) listOf(i until i + p.length) else emptyList()
-                } else TOKEN.findAll(c.text).filter { m -> m.value.lowercase().trim('\'', '’', '-') in forms }.map { m -> m.range }.toList()
+                    val i = c.text.lowercase().replace('\n', ' ').indexOf(p); if (i >= 0) listOf(i until i + p.length) else emptyList()
+                } else matchSpans(c.text, forms, split)
                 if (spans.isNotEmpty()) {
                     out.add(Use(it, k, c.startMs, c.endMs, c.text, spans))
                     if (out.size >= limit) return out to n

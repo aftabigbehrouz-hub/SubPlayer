@@ -51,43 +51,76 @@ class Dictionary(file: File) {
         return emptyList()
     }
 
-    /** Base words (lemmas) of a word form, names and abbreviations left out (for word levels). */
-    fun lemmasFor(key: String): List<String> {
-        val out = ArrayList<String>()
-        db.rawQuery("SELECT DISTINCT e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? " +
-            "AND e.pos NOT IN ('name','abbrev','symbol','letter','character') LIMIT 30", arrayOf(key.lowercase())).use { c ->
-            while (c.moveToNext()) c.getString(0)?.let { out.add(it) }
-        }
-        return out
+    // ------------------------------------------------------------------ trustworthy links only
+    // The dictionary file links every word form to its base word. Conjugation tables also left links that are no forms:
+    // the helper verbs of compound tenses ("gebracht worden sein" → sein, haben, werden, worden, gewesen under ~13,000
+    // verbs), "sie", reflexive pronouns, and the particle of separable verbs ("bringt mit" → mit). A key that many
+    // entries share is therefore trusted only for the entry it names (or a pronoun); two true forms are kept by hand.
+    // (The same rules as the Windows app: dictionary.py.)
+    private val linkCount = HashMap<String, Int>()
+
+    @Synchronized
+    fun links(key: String): Int = linkCount.getOrPut(key) {
+        if (linkCount.size > 50_000) linkCount.clear()
+        db.rawQuery("SELECT count(*) FROM (SELECT 1 FROM lookup WHERE key=? LIMIT 60)", arrayOf(key)).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
-    /** The word and its other forms (gehen → geht, ging, gegangen …), only from its own base word, not every homograph. */
-    fun formsOf(raw: String): Set<String> {
+    /** SQL condition + arguments selecting the entries a key truly belongs to. */
+    private fun trusted(key: String): Pair<String, Array<String>> {
+        val n = links(key)
+        if (n <= SHARED) return "l.key=?" to arrayOf(key)
+        val bad = if (n > POPULAR) NOT_A_FORM else listOf("verb")
+        val variants = listOf(key, key.replaceFirstChar { it.uppercase() }, key.uppercase()).distinct()
+        val extra = KEEP.filter { it.second == key }.map { it.first }
+        val sql = "l.key=? AND (e.lemma IN (${variants.joinToString(",") { "?" }}) OR e.pos NOT IN (${bad.joinToString(",") { "?" }})" +
+            (if (extra.isNotEmpty()) " OR (e.pos='verb' AND e.lemma IN (${extra.joinToString(",") { "?" }}))" else "") + ")"
+        return sql to (listOf(key) + variants + bad + extra).toTypedArray()
+    }
+
+    /** Base words (lemmas) of a word form, names and abbreviations left out (for word levels). */
+    fun lemmasFor(key: String): List<String> {
+        val out = LinkedHashSet<String>()
+        val (where, args) = trusted(key.lowercase())
+        db.rawQuery("SELECT e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE $where " +
+            "AND e.pos NOT IN ('name','abbrev','symbol','letter','character') LIMIT 60", args).use { c ->
+            while (c.moveToNext()) c.getString(0)?.let { out.add(it) }
+        }
+        return out.toList()
+    }
+
+    /** [base] word, its one-word [forms], and the [split] forms of a separable verb as (verb form, particle). */
+    data class Forms(val base: String, val forms: Set<String>, val split: Set<Pair<String, String>>)
+
+    /** gehen → geht, ging, gegangen …;  mitbringen → mitbringt, mitgebracht … and (bringt, mit), (brachte, mit) … */
+    fun formsOf(raw: String): Forms {
         val w = normalize(raw).lowercase()
         val forms = linkedSetOf(w)
-        if (w.isEmpty()) return forms
+        val split = LinkedHashSet<Pair<String, String>>()
+        if (w.isEmpty()) return Forms(w, forms, split)
+        val top = runCatching { lookup(raw).firstOrNull { it.pos != "name" } }.getOrNull() ?: return Forms(w, forms, split)
+        val base = top.lemma
+        val bl = base.lowercase()
+        forms.add(bl)
         runCatching {
-            val base = lookup(raw).firstOrNull { it.pos != "name" }?.lemma?.lowercase() ?: ""
-            val keep = ArrayList<Long>()
-            db.rawQuery("SELECT DISTINCT e.id, e.lemma FROM lookup l JOIN entry e ON e.id=l.id WHERE l.key=? AND e.pos!='name' LIMIT 8",
-                arrayOf(w)).use { c -> while (c.moveToNext()) { val lem = (c.getString(1) ?: "").lowercase(); if (lem == w || lem == base) keep.add(c.getLong(0)) } }
-            if (keep.isNotEmpty()) {
-                db.rawQuery("SELECT key FROM lookup WHERE id IN (${keep.joinToString(",")})", emptyArray()).use { c ->
-                    while (c.moveToNext()) {
-                        val k = (c.getString(0) ?: "").lowercase()
-                        if (k.isNotEmpty() && ' ' !in k && k.length in maxOf(2, w.length / 2)..40) forms.add(k)
-                    }
-                }
+            val ids = ArrayList<Long>()
+            db.rawQuery("SELECT id FROM entry WHERE lemma=? AND pos=?", arrayOf(base, top.pos)).use { c -> while (c.moveToNext()) ids.add(c.getLong(0)) }
+            if (ids.isEmpty()) return@runCatching
+            val keys = LinkedHashSet<String>()
+            db.rawQuery("SELECT DISTINCT key FROM lookup WHERE id IN (${ids.joinToString(",")})", emptyArray()).use { c ->
+                while (c.moveToNext()) c.getString(0)?.lowercase()?.let { if (it.isNotEmpty()) keys.add(it) }
             }
+            val (f, s) = pickForms(bl, w, keys) { links(it) }
+            forms.addAll(f); split.addAll(s)
         }
-        return forms
+        return Forms(base, forms, split)
     }
 
     private fun query(key: String): List<Entry> {
         val out = ArrayList<Entry>()
+        val (where, args) = trusted(key)
         db.rawQuery(
             "SELECT e.lemma,e.pos,e.gender,e.ipa,e.hyph,e.audio,e.data FROM lookup l " +
-                "JOIN entry e ON e.id=l.id WHERE l.key=? LIMIT 40", arrayOf(key)
+                "JOIN entry e ON e.id=l.id WHERE $where LIMIT 60", args
         ).use { c ->
             while (c.moveToNext()) {
                 val d = JSONObject(c.getString(6))
@@ -138,6 +171,30 @@ class Dictionary(file: File) {
     }
 
     companion object {
+        const val POPULAR = 25                  // a word card looks at up to this many entries of a key before filtering
+        const val SHARED = 5                    // a real word form belongs to at most this many base words
+        val KEEP = listOf("sein" to "gewesen", "werden" to "worden")
+        val NOT_A_FORM = listOf("verb", "adj", "suffix", "num")
+
+        /** Which of an entry's lookup [keys] are real forms of the base word [bl] ([links] = how many entries share a key). */
+        fun pickForms(bl: String, w: String, keys: Set<String>, links: (String) -> Int): Pair<Set<String>, Set<Pair<String, String>>> {
+            val forms = LinkedHashSet<String>(); val split = LinkedHashSet<Pair<String, String>>()
+            val particles = keys.filter { it.count { ch -> ch == ' ' } == 1 }.map { it.substringAfter(' ') }.toSet()
+            for (k in keys) {
+                if (' ' in k) {
+                    val a = k.substringBefore(' '); val b = k.substringAfter(' ')
+                    if (' ' !in b && bl.startsWith(b) && a.length >= 2 && a.all { it.isLetter() }) split.add(a to b)   // "bringt mit" of mitbringen
+                    continue
+                }
+                if (k == bl || k == w) continue
+                if (k.length < 2 || k.none { it.isLetter() } || !k.all { it.isLetter() || it in "-'’" }) continue      // "…", "%ig", single letters
+                if (k in particles && bl.startsWith(k)) continue                                                         // the particle alone is not a form
+                if (links(k) > SHARED && (bl to k) !in KEEP) continue                                                    // helper verbs, pronouns, other verbs' base words
+                forms.add(k)
+            }
+            return forms to split
+        }
+
         private val EDGE = Regex("""^[\p{Punct}„“”‚‘’«»–—…\s]+|[\p{Punct}„“”‚‘’«»–—…\s]+$""")
 
         fun normalize(raw: String): String {

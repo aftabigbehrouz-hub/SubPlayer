@@ -21,8 +21,8 @@ android {
         targetSdk = 36    // Google Play: new apps and updates must target Android 16 (API 36)
         // Home-screen name; the test copies below get "SubPlayer Bazaar", "SubPlayer Myket" …
         manifestPlaceholders["appLabel"] = "@string/app_name"
-        versionCode = 11
-        versionName = "2.7"
+        versionCode = 12
+        versionName = "2.7.1"
 
         // 64-bit ARM phones (practically every phone from the last ~7 years)
         // (-Pabis=x86_64 builds a copy for the emulator check in GitHub Actions; never uploaded anywhere)

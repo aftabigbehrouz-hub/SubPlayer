@@ -1025,7 +1025,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------ learn more
 
-    enum class Source { CHATGPT, GROK, DWDS, DICTCC, CAMBRIDGE, OTHER }
+    enum class Source { CHATGPT, GEMINI, DEEPSEEK, GROK, DWDS, DICTCC, CAMBRIDGE, OTHER }
 
     private fun aiPrompt(word: String, sentence: String, lang: String = wordLang()) = if (lang == "en")
         "Explain the English word “$word”" + (if (sentence.isNotBlank()) " as used in: “${sentence.replace('\n', ' ')}”" else "") + ".\n" +
@@ -1040,20 +1040,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\n" +
             "DE: … | EN: … | FA: …"
 
-    /** Opens ChatGPT / Grok with a ready question, or DWDS / dict.cc for the word. */
+    private fun isAi(s: Source) = s == Source.CHATGPT || s == Source.GEMINI || s == Source.DEEPSEEK || s == Source.GROK
+
+    /**
+     * Hands a question to ChatGPT / Gemini / DeepSeek / Grok: into the installed app when there is one, otherwise the web
+     * page (ChatGPT and Grok take a short question in the address). The question is always copied too.
+     */
+    fun askAi(source: Source, question: String, after: String) {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        runCatching { cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", question)) }
+        val (pkg, home, withQ) = when (source) {
+            Source.CHATGPT -> Triple(AppLinks.CHATGPT, "https://chatgpt.com/", "https://chatgpt.com/?q=")
+            Source.GEMINI -> Triple(AppLinks.GEMINI, "https://gemini.google.com/app", "")
+            Source.DEEPSEEK -> Triple(AppLinks.DEEPSEEK, "https://chat.deepseek.com/", "")
+            else -> Triple(AppLinks.GROK, "https://grok.com/", "https://grok.com/?q=")
+        }
+        if (AppLinks.installed(ctx, pkg) && AppLinks.sendText(ctx, pkg, question)) {
+            android.widget.Toast.makeText(ctx, "Question placed in the app — tap send. $after", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val fits = withQ.isNotEmpty() && Uri.encode(question).length <= 6000
+        android.widget.Toast.makeText(ctx, (if (fits) "Question copied too — paste it if the chat opens empty. " else
+            "Question copied — long-press the chat box and tap Paste. ") + after, android.widget.Toast.LENGTH_LONG).show()
+        runCatching {
+            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(if (fits) withQ + Uri.encode(question) else home)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { message = "No browser or app found to open it" }
+    }
+
+    /** Opens ChatGPT / Gemini / DeepSeek / Grok with a ready question, or DWDS / dict.cc for the word. */
     fun learnMore(source: Source, word: String, sentence: String, lang: String = wordLang()) {
         val w = word.trim()
-        fun aiPrompt(word: String, sentence: String) = this@AppViewModel.aiPrompt(word, sentence, lang)
-        // installed apps first
+        if (isAi(source)) {
+            askAi(source, aiPrompt(w, sentence, lang), "Then copy the 3 sentences back and tap “Add sentences”.")
+            return
+        }
         when (source) {
-            Source.CHATGPT, Source.GROK -> {
-                val pkg = if (source == Source.CHATGPT) AppLinks.CHATGPT else AppLinks.GROK
-                if (AppLinks.installed(ctx, pkg) && AppLinks.sendText(ctx, pkg, aiPrompt(w, sentence))) {
-                    android.widget.Toast.makeText(ctx, "Question placed in the app — tap send. Then copy the 3 sentences back " +
-                        "and tap “Add sentences”.", android.widget.Toast.LENGTH_LONG).show()
-                    return
-                }
-            }
             Source.DICTCC -> {
                 val pkg = AppLinks.DICTCC.firstOrNull { AppLinks.installed(ctx, it) }
                 if (pkg != null && (AppLinks.lookUp(ctx, pkg, w) || AppLinks.sendText(ctx, pkg, w))) return
@@ -1062,25 +1083,71 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (!AppLinks.lookUp(ctx, null, w)) AppLinks.sendText(ctx, null, w)
                 return
             }
-            Source.DWDS, Source.CAMBRIDGE -> {}
+            else -> {}
         }
         val url = when (source) {
-            Source.CHATGPT -> "https://chatgpt.com/?q=" + Uri.encode(aiPrompt(w, sentence))
-            Source.GROK -> "https://grok.com/?q=" + Uri.encode(aiPrompt(w, sentence))
             Source.DWDS -> "https://www.dwds.de/wb/" + Uri.encode(w)
             Source.DICTCC -> "https://www.dict.cc/?s=" + Uri.encode(w)
             Source.CAMBRIDGE -> "https://dictionary.cambridge.org/dictionary/english/" + Uri.encode(w.lowercase())
-            Source.OTHER -> return
-        }
-        if (source == Source.CHATGPT || source == Source.GROK) {
-            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", aiPrompt(w, sentence)))
-            android.widget.Toast.makeText(ctx, "Question copied too — paste it if the chat opens empty. " +
-                "Then copy the 3 sentences back and tap “Add sentences”.", android.widget.Toast.LENGTH_LONG).show()
+            else -> return
         }
         runCatching {
             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.onFailure { message = "No browser or app found to open it" }
+    }
+
+    // ---- AI lesson of the video (Study ▸ AI lesson): the question, and the kept answers (one per video and level)
+    var lessonLevel by mutableStateOf(uiPrefs.getString("lesson_level", "B1") ?: "B1"); private set
+    var lessonExplain by mutableStateOf(uiPrefs.getString("lesson_explain", "en") ?: "en"); private set
+    var lessonText by mutableStateOf(""); private set
+    var lessonKept by mutableStateOf<List<String>>(emptyList()); private set
+
+    private fun lessonFile(level: String) = File(ctx.filesDir, "lessons/${videoKey(videoName)}.$level.txt")
+
+    fun openLesson(level: String = lessonLevel) {
+        lessonLevel = if (level in com.behrouz.subplayer.learn.Lessons.LEVELS) level else "B1"
+        uiPrefs.edit().putString("lesson_level", lessonLevel).apply()
+        lessonText = runCatching { lessonFile(lessonLevel).readText() }.getOrDefault("")
+        lessonKept = com.behrouz.subplayer.learn.Lessons.LEVELS.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
+    }
+
+    fun chooseLessonExplain(k: String) { lessonExplain = k; uiPrefs.edit().putString("lesson_explain", k).apply() }
+
+    fun saveLesson(text: String) {
+        lessonText = text
+        runCatching {
+            val f = lessonFile(lessonLevel)
+            if (text.isBlank()) f.delete() else { f.parentFile?.mkdirs(); f.writeText(text) }
+        }
+        lessonKept = com.behrouz.subplayer.learn.Lessons.LEVELS.filter { lessonFile(it).let { f -> f.exists() && f.length() > 0 } }
+    }
+
+    fun lessonPrompt(): String = com.behrouz.subplayer.learn.Lessons.prompt(lessonLevel, wordLang(), videoName, cues,
+        videoWords().map { it.lemma.ifEmpty { it.text } }, lessonExplain)
+
+    /** [source] null = only copy the question. */
+    fun askLesson(source: Source?) {
+        if (cues.isEmpty()) { message = "This video has no subtitles yet"; return }
+        val q = lessonPrompt()
+        if (source == null) {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", q))
+            message = "Question for a $lessonLevel lesson copied — paste it into any assistant"
+        } else askAi(source, q, "Copy the answer, come back and tap Paste.")
+    }
+
+    fun pasteLesson() {
+        val t = clipboardText().trim()
+        when {
+            t.isEmpty() -> message = "Nothing copied yet — copy the assistant's answer first"
+            t.startsWith("You are an experienced") && "TRANSCRIPT" in t -> message = "That is still the question — copy the assistant's ANSWER, then tap Paste"
+            else -> { saveLesson(if (lessonText.isBlank()) t else lessonText.trimEnd() + "\n\n──────────\n\n" + t); message = "Lesson kept ($lessonLevel)" }
+        }
+    }
+
+    fun shareLesson() {
+        if (lessonText.isBlank()) { message = "No lesson to share yet"; return }
+        AppLinks.sendText(ctx, null, "${videoName.substringBeforeLast('.')} — $lessonLevel\n\n$lessonText")
     }
 
     fun clipboardText(): String {
@@ -1459,13 +1526,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         usesJob?.cancel()
         usesJob = viewModelScope.launch {
             val d = if (w.contains(' ')) null else dictionaryOrNull(lang)
+            var base = w
             val (uses, n) = withContext(Dispatchers.IO) {
-                val forms = if (w.contains(' ')) setOf(w.lowercase()) else d?.formsOf(w) ?: setOf(w.lowercase())
-                Library.findUses(w, lang, library(), forms)
+                // every form of the word from the dictionary (bringen → bringt, brachte, gebracht; mitbringen → bringt … mit)
+                val f = if (w.contains(' ') || d == null) Dictionary.Forms(w, setOf(w.lowercase()), emptySet()) else d.formsOf(w)
+                base = f.base
+                Library.findUses(w, lang, library(), f.forms, split = f.split)
             }
             update<Sheet.Uses> {
-                if (it.word != w) it else it.copy(busy = false, uses = uses, files = n,
-                    note = if (d == null && !w.contains(' ')) "Only this exact form. With the ${langName(lang)} dictionary other forms are found too (geht, ging, gegangen …)." else "")
+                if (it.word != w) it else it.copy(word = base, busy = false, uses = uses, files = n,
+                    note = if (d == null && !w.contains(' ')) "Only this exact form. With the ${langName(lang)} dictionary other forms are found too (geht, ging, gegangen …)."
+                           else uses.flatMap { u -> u.spans.map { r -> u.text.substring(r).lowercase() } }.groupingBy { it }.eachCount()
+                               .entries.sortedByDescending { it.value }.take(8).joinToString(" · ") { "${it.key} ×${it.value}" })
             }
         }
     }

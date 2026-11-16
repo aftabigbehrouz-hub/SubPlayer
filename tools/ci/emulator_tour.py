@@ -118,36 +118,36 @@ def java_hash(s: str) -> str:
 
 
 SRT = """1
-00:00:01,000 --> 00:00:04,000
-Guten Abend und willkommen zum Wetterbericht.
+00:00:00,000 --> 00:00:04,800
+Das Wetter im Norden ist gemeldet worden.
 
 2
-00:00:04,500 --> 00:00:08,000
-Morgen wird das Wetter im Norden sonnig und warm.
+00:00:05,000 --> 00:00:09,800
+Das Wetter im Süden ist geprüft worden.
 
 3
-00:00:08,500 --> 00:00:12,000
-Im Süden gibt es Gewitter und starke Niederschläge.
+00:00:10,000 --> 00:00:14,800
+Das Wetter am Wochenende ist besprochen worden.
 
 4
-00:00:12,500 --> 00:00:16,000
-Die Temperaturen steigen auf dreißig Grad.
+00:00:15,000 --> 00:00:19,800
+Das Wetter für morgen ist berechnet worden.
 
 5
-00:00:16,500 --> 00:00:20,000
-Am Wochenende kühlt es deutlich ab.
+00:00:20,000 --> 00:00:24,800
+Das Wetter im Gebirge ist beobachtet worden.
 
 6
-00:00:20,500 --> 00:00:24,000
-Vergessen Sie Ihren Regenschirm nicht!
+00:00:25,000 --> 00:00:29,800
+Das Wetter an der Küste ist gemessen worden.
 
 7
-00:00:24,500 --> 00:00:28,000
-Das war das Wetter für heute.
+00:00:30,000 --> 00:00:34,800
+Das Wetter in der Stadt ist gezeigt worden.
 
 8
-00:00:28,500 --> 00:00:40,000
-Ich wünsche Ihnen einen schönen Abend.
+00:00:35,000 --> 00:00:39,800
+Das Wetter für heute ist erklärt worden.
 """
 OTHER = """1
 00:00:02,000 --> 00:00:05,000
@@ -203,7 +203,7 @@ def repeat_srt(srt, times, every_s):
             n += 1
             out.append(f"{n}\n{sh(a)} --> {sh(b2)}\n" + "\n".join(lines[2:]))
     return "\n\n".join(out) + "\n"
-open("/tmp/a.srt", "w", encoding="utf-8").write(repeat_srt(SRT.replace("00:00:40,000", "00:00:39,500"), 6, 40))
+open("/tmp/a.srt", "w", encoding="utf-8").write(repeat_srt(SRT, 6, 40))
 open("/tmp/b.srt", "w", encoding="utf-8").write(OTHER)
 # The files go into the app's own private folder, written by the app's user (run-as works for the debug build): the video,
 # and the subtitles as if synced from another device (files/synced_subs/<name>.de.srt) — the app picks them up by file name.
@@ -257,6 +257,16 @@ if tap("Wetter"):
         time.sleep(3)
         shot("07_word_card_dictionary")
     tap("Save", required=False)
+    # "worden" hangs under thousands of verbs in the dictionary file — the card must show its real base word, werden
+    back()
+    if tap("worden"):
+        time.sleep(2)
+        shot("07b_card_worden")
+        if find("werden", timeout=6):
+            print("  worden → werden: yes")
+        else:
+            problems.append("the card of 'worden' does not show 'werden'")
+            print("  worden → werden: NO")
     for _ in range(4):
         if find("Where else is it used?", timeout=2):
             break
@@ -290,6 +300,11 @@ if tap("Study video"):
         time.sleep(2)
         shot("14_gap_from_video")
         back()
+    if tap("AI lesson"):
+        time.sleep(1)
+        tap("Copy question")
+        time.sleep(1)
+        shot("14b_ai_lesson")
     back()
 
 print("my words")

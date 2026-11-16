@@ -96,7 +96,7 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
             }
             if (!s.loading) {
                 Row(Modifier.padding(top = 10.dp)) {
-                    Pill("Where else is it used?", icon = Icons.Search) { vm.openUses(s.entries.firstOrNull()?.takeIf { it.lemma.equals(s.word, true) }?.lemma ?: s.word, s.lang) }
+                    Pill("Where else is it used?", icon = Icons.Search) { vm.openUses(s.entries.firstOrNull()?.lemma ?: s.word, s.lang) }
                 }
             }
             if (!s.loading) LearnMore(vm, s.entries.firstOrNull()?.lemma ?: s.word, s.sentence, s.lang)
@@ -493,6 +493,8 @@ fun LearnMore(vm: AppViewModel, word: String, sentence: String, lang: String = "
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(top = 8.dp)) {
         Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, word, sentence, lang) }
+        Pill("Gemini") { vm.learnMore(AppViewModel.Source.GEMINI, word, sentence, lang) }
+        Pill("DeepSeek") { vm.learnMore(AppViewModel.Source.DEEPSEEK, word, sentence, lang) }
         Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence, lang) }
         if (lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, word, sentence, lang) }
         else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence, lang) }

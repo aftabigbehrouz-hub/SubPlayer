@@ -261,6 +261,8 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val lw = w.lemma.ifEmpty { w.text }
                     Pill("ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, lw, w.sentence, w.lang) }
+                    Pill("Gemini") { vm.learnMore(AppViewModel.Source.GEMINI, lw, w.sentence, w.lang) }
+                    Pill("DeepSeek") { vm.learnMore(AppViewModel.Source.DEEPSEEK, lw, w.sentence, w.lang) }
                     Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, lw, w.sentence, w.lang) }
                     if (w.lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, lw, w.sentence, w.lang) }
                     else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, lw, w.sentence, w.lang) }

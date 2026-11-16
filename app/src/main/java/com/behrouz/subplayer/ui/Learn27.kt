@@ -487,10 +487,11 @@ fun StudyScreen(vm: AppViewModel) {
                 Text(vm.videoName, color = L.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(vertical = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill("Words", active = tab == 0) { tab = 0 }
             Pill("My words (${vm.videoWords().size})", active = tab == 1) { tab = 1 }
             Pill("Practise", active = tab == 2) { tab = 2 }
+            Pill("AI lesson", active = tab == 3) { tab = 3; vm.openLesson() }
         }
         when (tab) {
             0 -> {
@@ -541,6 +542,42 @@ fun StudyScreen(vm: AppViewModel) {
                             Text(w.sentence.replace('\n', ' '), color = L.copy(alpha = 0.6f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                }
+            }
+            3 -> Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).imePadding()) {
+                Explain("1. Choose a level.  2. Send the ready question — with the whole text of the video and your saved words — to an " +
+                    "assistant: it writes a text at that level, the key words, the structures, exercises and the answers.  " +
+                    "3. Copy its answer, come back and tap Paste: it is kept with the video.", Modifier.padding(start = 8.dp, bottom = 10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.behrouz.subplayer.learn.Lessons.LEVELS.forEach { lv ->
+                        Pill(lv + if (lv in vm.lessonKept) " ●" else "", active = vm.lessonLevel == lv) { vm.openLesson(lv) }
+                    }
+                }
+                Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Explanations in", color = L.copy(alpha = 0.6f), fontSize = 12.sp)
+                    listOf("en" to "English", "fa" to "فارسی", "de" to "Deutsch").forEach { (k, t) -> Pill(t, active = vm.lessonExplain == k) { vm.chooseLessonExplain(k) } }
+                }
+                Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill("ChatGPT", active = true) { vm.askLesson(AppViewModel.Source.CHATGPT) }
+                    Pill("Gemini", active = true) { vm.askLesson(AppViewModel.Source.GEMINI) }
+                    Pill("DeepSeek", active = true) { vm.askLesson(AppViewModel.Source.DEEPSEEK) }
+                    Pill("Grok", active = true) { vm.askLesson(AppViewModel.Source.GROK) }
+                    Pill("Copy question") { vm.askLesson(null) }
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    vm.lessonText, { vm.saveLesson(it) }, modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
+                    placeholder = { Text("Paste the assistant's answer here — the text, word list, structures, exercises and answers. Kept by itself, one lesson per level.") },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = L, unfocusedTextColor = L, focusedBorderColor = Neon.Cyan,
+                        unfocusedBorderColor = L.copy(alpha = 0.25f), cursorColor = Neon.Cyan, focusedPlaceholderColor = L.copy(alpha = 0.4f),
+                        unfocusedPlaceholderColor = L.copy(alpha = 0.4f))
+                )
+                Row(Modifier.padding(top = 8.dp, bottom = 20.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GlowButton("Paste", icon = Icons.Download) { vm.pasteLesson() }
+                    Pill("Share / save", icon = Icons.Share) { vm.shareLesson() }
+                    Pill("Delete", icon = Icons.Delete) { vm.saveLesson("") }
                 }
             }
             else -> Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {

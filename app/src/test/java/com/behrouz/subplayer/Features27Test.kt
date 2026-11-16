@@ -129,4 +129,45 @@ class Features27Test {
         assertEquals(7_000L, parseMs("7"))
         assertNull(parseMs("abc"))
     }
+
+    // ------------------------------------------------------------------ 2.7.1
+
+    @Test fun onlyRealFormsOfAWord() {
+        // the keys the dictionary file has for "bringen" — with the helper verbs and "sie" of its conjugation table
+        val keys = setOf("bringen", "bringe", "bringst", "bringt", "brachte", "gebracht", "sein", "haben", "werden", "worden", "gewesen", "sie", "…")
+        val shared = mapOf("sein" to 60, "haben" to 60, "werden" to 60, "worden" to 60, "gewesen" to 60, "sie" to 60, "…" to 60)
+        val (forms, split) = com.behrouz.subplayer.dict.Dictionary.pickForms("bringen", "bringst", keys) { shared[it] ?: 1 }
+        assertEquals(setOf("bringe", "bringt", "brachte", "gebracht"), forms)
+        assertTrue(split.isEmpty())
+        // sein keeps "gewesen", werden keeps "worden" — real forms although thousands of verbs share them
+        assertTrue("gewesen" in com.behrouz.subplayer.dict.Dictionary.pickForms("sein", "sein", setOf("bin", "ist", "gewesen", "sie")) { shared[it] ?: 1 }.first)
+        assertTrue("worden" in com.behrouz.subplayer.dict.Dictionary.pickForms("werden", "wird", setOf("wird", "worden", "sein")) { shared[it] ?: 1 }.first)
+        // separable verb: the particle alone is no form, the split forms are found as pairs
+        val (f2, s2) = com.behrouz.subplayer.dict.Dictionary.pickForms("mitbringen", "mitbringen",
+            setOf("mitbringt", "mitgebracht", "bringt mit", "brachte mit", "mit", "haben", "h")) { if (it == "mit" || it == "haben") 60 else 1 }
+        assertEquals(setOf("mitbringt", "mitgebracht"), f2)
+        assertEquals(setOf("bringt" to "mit", "brachte" to "mit"), s2)
+    }
+
+    @Test fun separableVerbsAreFoundSplit() {
+        val forms = setOf("mitbringen", "mitgebracht"); val split = setOf("bringt" to "mit", "bringst" to "mit")
+        fun hit(t: String) = Library.matchSpans(t, forms, split).map { t.substring(it) }
+        assertEquals(listOf("Bringst", "mit"), hit("Bringst du bitte das Buch mit?"))
+        assertEquals(listOf("bringt", "mit"), hit("Er bringt es mit und geht."))
+        assertEquals(emptyList<String>(), hit("Er bringt mit dem Auto die Kinder."))      // "mit" is a preposition here
+        assertEquals(emptyList<String>(), hit("Er bringt es, aber nicht mit."))           // another clause
+        assertEquals(listOf("mitgebracht"), hit("Ich habe es mitgebracht."))
+        assertEquals(listOf("bringt"), Library.matchSpans("Sie bringt Blumen.", setOf("bringt"), emptySet()).map { "Sie bringt Blumen.".substring(it) })
+    }
+
+    @Test fun lessonQuestion() {
+        val cues = listOf(Cue(0, 1, "Guten Abend und\nwillkommen."), Cue(2, 3, "Das Wetter wird schön."))
+        val p = com.behrouz.subplayer.learn.Lessons.prompt("B1", "de", "Wetter.mp4", cues, listOf("Wetter", "schön", "Wetter"), "fa")
+        for (part in listOf("level B1", "German teacher", "Lückentext", "Umformung", "---LÖSUNGEN---", "Persian",
+            "Words I am learning from this video: Wetter, schön", "Guten Abend und willkommen. Das Wetter wird schön."))
+            assertTrue(part, part in p)
+        val en = com.behrouz.subplayer.learn.Lessons.prompt("C1", "en", "News.mp4", cues, emptyList(), "de")
+        assertTrue("Gap-fill" in en && "---ANSWERS---" in en && "Words I am learning" !in en)
+        assertEquals(listOf("A2", "B1", "B2", "C1"), com.behrouz.subplayer.learn.Lessons.LEVELS)
+    }
 }

@@ -3,10 +3,12 @@ package com.behrouz.subplayer.net
 import android.content.Context
 import android.content.Intent
 
-/** Sends a word or question to an installed app (ChatGPT, Grok, dict.cc, any dictionary). */
+/** Sends a word or question to an installed app (ChatGPT, Gemini, DeepSeek, Grok, dict.cc, any dictionary). */
 object AppLinks {
     const val CHATGPT = "com.openai.chatgpt"
     const val GROK = "ai.x.grok"
+    const val GEMINI = "com.google.android.apps.bard"
+    const val DEEPSEEK = "com.deepseek.chat"
     val DICTCC = listOf("cc.dict.dictcc", "cc.dict.dictccplus")
 
     fun installed(ctx: Context, pkg: String) = try { ctx.packageManager.getPackageInfo(pkg, 0); true } catch (_: Exception) { false }
