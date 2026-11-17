@@ -1,4 +1,26 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.4
+# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.5
+
+**New in Windows 2.5 — a private AI teacher on your own PC (Ollama)**
+- **Word card ▸ Teacher** (and *Learn more ▸ Teacher on this PC*) asks a language model that runs on your PC — free, no API
+  key, nothing leaves the computer, works offline once the model is downloaded. Four tabs:
+  - **Word & collocations:** the meaning *in this line*, forms (article/plural · Präteritum/Perfekt/case), **8 collocations**
+    (verb + noun, adjective + noun, noun + preposition, fixed expressions) each with an example, **5 new example sentences at
+    your level** (A2–C1) with translations, the preposition/case it takes, synonyms with the difference, an opposite and the
+    typical learner mistake. 🔊 reads a sentence aloud. **＋ Add the example sentences to my word** puts them (and the
+    collocation examples) into review and practice. Answers are kept, so the same word opens instantly next time.
+  - **Explain the line:** translation, sentence structure (verb position, cases, separable verbs, tense), useful expressions
+    and three new sentences on the same pattern.
+  - **Check my sentence:** write your own sentence with the word — it is corrected with the rule behind the mistake, a score
+    and a more natural version; the corrected sentence is added to the word so it comes back in review.
+  - **Ask the teacher:** any question about the word, the line or the video (“Is it formal?”, “Give me a dialogue with it”).
+  - Explanations in English, فارسی or Deutsch; level and language are remembered.
+- **Study this video ▸ AI lesson ▸ Ollama (this PC)** writes the A2–C1 lesson or the TestDaF / IELTS set from the whole
+  transcript straight into the box (press again to stop); it is saved with the video like a pasted one.
+- **Set-up (Settings ▸ Local AI teacher):** 1. download Ollama from <https://ollama.com/download> and install it (it then runs in
+  the system tray), 2. *Check*, 3. *Download suggested model*, 4. use it. The suggestion follows the PC's memory:
+  **gemma3:4b** (3.3 GB, 8 GB RAM) · **qwen3:8b** (5.2 GB, 12 GB) · **gemma3:12b** (8.1 GB, 16 GB — best balance) ·
+  mistral-small3.2 (15 GB, 32 GB). Embedding/OCR models are ignored; old English-only ones (phi, starling) get a warning.
+- The ChatGPT word question now asks for 6 collocations as well.
 
 **New in Windows 2.4 and Android 2.8**
 - **TestDaF and IELTS practice from the whole video** (Study this video ▸ AI lesson ▸ *TestDaF* for German videos, *IELTS* for
@@ -254,6 +276,7 @@ Esc stop loop, **S** shadowing, **R** repeat count, **T** transcript, **V** list
 | DWDS | – | opens dwds.de |
 | Phrase / sentence translation | word‑by‑word meanings | full sentence (Google Translate, fallback MyMemory) |
 | Clip export | ✓ | – |
+| AI teacher on this PC (Ollama, Windows) | ✓ once Ollama and a model are installed | model download from ollama.com |
 
 **About Persian:** about 4,400 words have a Persian translation written for them in German Wiktionary; about
 16,400 more get Persian through their main English meaning (shown as *via English*, with the English word

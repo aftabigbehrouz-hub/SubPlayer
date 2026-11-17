@@ -248,6 +248,14 @@ class SettingsDialog(QDialog):
         rv.addWidget(self.motion)
         v.addWidget(f)
 
+        # local AI teacher
+        f, ov = section("Local AI teacher (Ollama)")
+        from .teacher import SetupPanel
+        ov.addWidget(SetupPanel(main, f))
+        v.addWidget(f)
+        self._sections = getattr(self, "_sections", {})
+        self._sections["Local AI teacher"] = f
+
         # themes & colours
         f, tv = section("Theme & colours")
         tv.addWidget(hint("Choose the look of the whole program. The colours of the word levels (A1–C2), der / die / das and saved "
@@ -470,6 +478,17 @@ class SettingsDialog(QDialog):
         self.main.save_settings()
         self.main.msg(msg, 8000)
 
+    def show_section(self, name: str):
+        """Scrolls Settings to a section (used by 'set up the teacher first')."""
+        f = getattr(self, "_sections", {}).get(name)
+        if f is None:
+            return
+        from PySide6.QtWidgets import QScrollArea
+        sa = self.findChild(QScrollArea)
+        if sa is not None:
+            from PySide6.QtCore import QTimer as _T
+            _T.singleShot(80, lambda: sa.ensureWidgetVisible(f, 0, 0))
+
     def set_theme(self, key: str, accent: str):
         m = self.main
         if (key, accent) == theme.current():
@@ -530,6 +549,12 @@ HELP = [
                   "that level, the key words, the structures, exercises (gaps, matching, rewriting, questions, writing) and the "
                   "answers. Copy its answer and press Paste: the lesson is kept with the video, one per level; Hide answers lets you "
                   "test yourself, Save as file makes a text file to print."),
+    ("Local AI teacher", "Ollama runs a free AI model on your own PC (Settings ▸ Local AI teacher: install Ollama from ollama.com/download, "
+                         "press Check, download the suggested model). Then the word card's Teacher button gives the meaning in this "
+                         "line, 8 collocations, 5 example sentences at your level (add them to the word with one click), the "
+                         "preposition/case, synonyms and a memory tip; it explains the whole line; it corrects a sentence you "
+                         "write yourself (the corrected sentence is added to the word); and it answers any question. In Study "
+                         "this video ▸ AI lesson the Ollama button writes the lesson or the TestDaF / IELTS set straight into the box."),
     ("TestDaF · IELTS", "Study this video ▸ AI lesson ▸ TestDaF (German videos) or IELTS (English videos): a full practice set on the "
                         "whole video — exam vocabulary from the video plus topic words likely in future videos and exam texts, "
                         "listening tasks on the video, a new reading text with exam-style questions, writing (with a chart) and "

@@ -126,7 +126,7 @@ class StudyPage(QWidget):
         v3 = QVBoxLayout(p3)
         v3.setContentsMargins(0, 8, 0, 0)
         v3.setSpacing(8)
-        h3 = QLabel("<b>1.</b> Choose a level — or the exam: TestDaF for a German video, IELTS for an English one. &nbsp;<b>2.</b> Send the ready question (with the whole text of the video) to an assistant: "
+        h3 = QLabel("<b>1.</b> Choose a level — or the exam: TestDaF for a German video, IELTS for an English one. &nbsp;<b>2.</b> Send the ready question (with the whole text of the video) to an assistant — or let Ollama on this PC write it: "
                     "it writes a text at that level, the key words, the structures, exercises and the answers. &nbsp;<b>3.</b> Copy the "
                     "answer and paste it here — it is kept with the video for practice.", objectName="hint")
         h3.setWordWrap(True)
@@ -159,6 +159,9 @@ class StudyPage(QWidget):
             b = ibtn("sparkles", f"Copy the question and open {lessons.ASSISTANTS[key][0]}", lambda _=False, k=key: self._ai_ask(k),
                      kind="", text=" " + lessons.ASSISTANTS[key][0], size=15, color=col)
             r2.addWidget(b)
+        self.ai_local = ibtn("study", "Your AI teacher on this PC (Ollama) writes the lesson straight into the box — free and offline",
+                             self._ai_local, kind="", text=" Ollama (this PC)", size=15, color=theme.MINT)
+        r2.addWidget(self.ai_local)
         b = ibtn("copy", "Only copy the question (for any other assistant)", lambda: self._ai_ask(""), kind="", text=" Copy question", size=15)
         r2.addWidget(b)
         r2.addStretch(1)
@@ -251,6 +254,12 @@ class StudyPage(QWidget):
     # ------------------------------------------------------------------ AI lesson
     def _ai_level(self, lv: str):
         from . import lessons
+        r = getattr(self, "_ai_runner", None)
+        if r and r.busy:                                     # Ollama is still writing the current level: keep it there
+            for k, b in self.ai_lv.items():
+                b.setChecked(k == self._ai_level_name)
+            self.main.msg("Ollama is still writing this lesson — wait, or press Stop first")
+            return
         self._ai_save()
         if lv not in lessons.ALL:
             lv = "B1"
@@ -309,6 +318,54 @@ class StudyPage(QWidget):
         else:
             QApplication.clipboard().setText(q)
             self.main.msg(f"Question for a {self._ai_level_name} lesson copied ({len(q):,} characters) — paste it into any assistant", 9000)
+
+    def _ai_local(self):
+        """Writes the lesson with Ollama on this PC, piece by piece into the box (Stop: press the button again)."""
+        from . import ollama
+        from .teacher import Runner, client
+        if getattr(self, "_ai_runner", None) and self._ai_runner.busy:
+            self._ai_runner.stop = True
+            return
+        if not self.cues:
+            self.main.msg("This video has no subtitles yet")
+            return
+        if not self.main.ensure_teacher():                          # opens the set-up first
+            return
+        if self._ai_full().strip():
+            from PySide6.QtWidgets import QMessageBox
+            if QMessageBox.question(self, "AI lesson", f"Replace the {self._ai_level_name} lesson in the box with a new one from Ollama?") != QMessageBox.Yes:
+                return
+        q = self._ai_prompt()
+        c = client(self.main)
+        self._ai_runner = r = Runner(self)
+        self._ai_loading, self._ai_hidden = True, ""
+        self.ai_text.setPlainText("")
+        self._ai_loading = False
+        self.ai_local.setText(" Stop")
+        self.ai_state.setText(f"Ollama ({c.model}) is writing the {self._ai_level_name} lesson… the first words can take a minute; "
+                              "long videos take several minutes")
+
+        def piece(t):
+            self._ai_loading = True
+            cur = self.ai_text.textCursor()
+            cur.movePosition(cur.MoveOperation.End)
+            cur.insertText(t)
+            self._ai_loading = False
+
+        def finish(_=""):
+            self.ai_local.setText(" Ollama (this PC)")
+            self._ai_save()
+            self._ai_note(saved=True)
+
+        def fail(m):
+            self.ai_local.setText(" Ollama (this PC)")
+            self.ai_state.setText("⚠ " + m)
+            if self._ai_full().strip():
+                self._ai_save()
+        r.text.connect(piece)
+        r.done.connect(finish)
+        r.failed.connect(fail)
+        r.run(lambda on, stop: c.chat(q, "", on_text=on, cancelled=stop, ctx=ollama.lesson_ctx(q), temperature=0.6))
 
     def _ai_full(self) -> str:
         return self.ai_text.toPlainText() + self._ai_hidden

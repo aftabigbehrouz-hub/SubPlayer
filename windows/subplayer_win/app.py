@@ -287,8 +287,11 @@ class Main(QMainWindow):
         g.addWidget(self.save_btn, 0, 0)
         g.addWidget(b_speak, 0, 1)
         g.addWidget(b_slow, 0, 2)
-        g.addWidget(b_sent, 1, 0, 1, 1)
-        g.addWidget(self.learn_btn, 1, 1, 1, 2)
+        self.b_teach = b_teach = ibtn("study", "Your AI teacher on this PC (Ollama): collocations, example sentences at your level, the line "
+                       "explained, your own sentence corrected", self.open_teacher, kind="", text=" Teacher")
+        g.addWidget(b_sent, 1, 0)
+        g.addWidget(b_teach, 1, 1)
+        g.addWidget(self.learn_btn, 1, 2)
         cv.addLayout(g)
         self.panel_stack.addWidget(card_page)
 
@@ -1615,11 +1618,13 @@ class Main(QMainWindow):
         if lang == "en":
             return (f"Explain the English word “{word}”" + (f" as used in: “{s}”" if s else "") + ".\n"
                     "1) Meaning in simple English, plus the German and the Persian translation.\n"
-                    "2) IPA (UK and US), word forms, and common collocations.\n"
+                    "2) IPA (UK and US) and word forms.\n"
+                    "2b) 6 typical collocations (verb + noun, adjective + noun, with prepositions) with their meaning.\n"
                     "3) Exactly 3 natural example sentences of everyday English, one per line, in this format:\nEN: … | DE: … | FA: …")
         return (f"Explain the German word „{word}“" + (f" as used in: „{s}“" if s else "") + ".\n"
                 "1) Meaning in English and in Persian.\n"
-                "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt.\n"
+                "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt; the preposition or case it goes with.\n"
+                "2b) 6 typical collocations (Kollokationen: Nomen-Verb-Verbindungen, Adjektiv + Nomen, feste Wendungen) with their meaning.\n"
                 "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\nDE: … | EN: … | FA: …")
 
     def ask_ai(self, source: str, question: str, after: str = ""):
@@ -1655,8 +1660,42 @@ class Main(QMainWindow):
         self.fill_learn_menu(m, word, c["sentence"], c["lang"], saved_getter=self.ensure_saved_from_card)
         m.exec(self.learn_btn.mapToGlobal(self.learn_btn.rect().bottomLeft()))
 
+    def open_teacher(self, tab: int = 0):
+        """The local AI teacher (Ollama) for the word on the card."""
+        c = self.card
+        if not c:
+            self.msg("Click a word in the subtitles first")
+            return
+        lemma = c["entries"][0].lemma if c.get("entries") else c["word"]
+        self.teacher_for(c["word"], lemma, c["sentence"], c["lang"], self.ensure_saved_from_card, tab)
+
+    def ensure_teacher(self) -> bool:
+        """True when a local model is chosen; otherwise opens the set-up (Settings ▸ Local AI teacher) first."""
+        if self.settings.get("ollama_model"):
+            return True
+        from .dialogs import SettingsDialog
+        self.msg("Set up the local AI teacher first: install Ollama and download a model (Settings ▸ Local AI teacher)", 9000)
+        d = SettingsDialog(self)
+        d.show_section("Local AI teacher")
+        d.exec()
+        return bool(self.settings.get("ollama_model"))
+
+    def teacher_for(self, word, lemma, sentence, lang, saved_getter=None, tab: int = 0):
+        if not self.ensure_teacher():
+            return
+        from .teacher import TeacherDialog
+        self.player.pause()
+        TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab).exec()
+
     def fill_learn_menu(self, m: QMenu, word, sentence, lang, saved_getter):
-        m.addAction(icons.icon("sparkles", theme.CYAN, 16), "ChatGPT — meaning + 3 sentences", lambda: self.learn_more("chatgpt", word, sentence, lang))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC (Ollama) — collocations + sentences at your level",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 0))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC — explain the line",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 1))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC — check my own sentence",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 2))
+        m.addSeparator()
+        m.addAction(icons.icon("sparkles", theme.CYAN, 16), "ChatGPT — meaning, collocations + 3 sentences", lambda: self.learn_more("chatgpt", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.GOLD, 16), "Gemini — meaning + 3 sentences", lambda: self.learn_more("gemini", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.MINT, 16), "DeepSeek — meaning + 3 sentences", lambda: self.learn_more("deepseek", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.MAGENTA, 16), "Grok — meaning + 3 sentences", lambda: self.learn_more("grok", word, sentence, lang))
