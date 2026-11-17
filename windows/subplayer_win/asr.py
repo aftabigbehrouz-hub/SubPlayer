@@ -6,6 +6,7 @@ Speech → subtitles.
 from __future__ import annotations
 
 import io
+import os
 import wave
 from dataclasses import dataclass
 
@@ -59,25 +60,70 @@ def decode_audio(path: str, cancelled=lambda: False):
     return np.concatenate(parts).astype(np.float32) / 32768.0
 
 
+# NVIDIA libraries the graphics card needs (CUDA 12 / cuDNN 9). They are not part of SubPlayer (over 1 GB) and are usually
+# missing even when the PC has an NVIDIA card — then the speech model must run on the processor.
+_GPU_DLLS = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn_ops64_9.dll")
+
+
+def gpu_usable() -> bool:
+    """True only when an NVIDIA card AND the CUDA libraries that CTranslate2 needs are present."""
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() < 1:
+            return False
+    except Exception:
+        return False
+    if os.name == "nt":
+        import ctypes
+        for dll in _GPU_DLLS:
+            try:
+                ctypes.WinDLL(dll)
+            except OSError:
+                return False
+    return True
+
+
+def _gpu_error(e: Exception) -> bool:
+    t = str(e).lower()
+    return any(k in t for k in ("cublas", "cudnn", "cuda", ".dll", "cannot be loaded", "gpu"))
+
+
 def transcribe_offline(video: str, model_dir: str, lang: str, progress=lambda f, msg: None, cancelled=lambda: False) -> list[Cue]:
     from faster_whisper import WhisperModel
     progress(0.0, "Loading the speech model…")
+    device = "cuda" if gpu_usable() else "cpu"
     try:
-        model = WhisperModel(model_dir, device="auto", compute_type="int8")
+        model = WhisperModel(model_dir, device=device, compute_type="int8")
     except Exception:
+        device = "cpu"
         model = WhisperModel(model_dir, device="cpu", compute_type="int8")
     progress(0.0, "Reading the audio…")
     audio = decode_audio(video, cancelled)
-    segments, info = model.transcribe(audio, language=lang, beam_size=5, vad_filter=True, word_timestamps=True,
+
+    def run(m):
+        segments, info = m.transcribe(audio, language=lang, beam_size=5, vad_filter=True, word_timestamps=True,
                                       condition_on_previous_text=False)
-    total = max(1.0, float(info.duration or 1))
-    segs = []
-    for s in segments:
-        if cancelled():
-            raise Cancelled()
-        words = [(w.start, w.end, w.word) for w in (s.words or [])]
-        segs.append((s.start, s.end, s.text, words))
-        progress(min(0.99, s.end / total), f"{int(s.end // 60)}:{int(s.end % 60):02d} of {int(total // 60)}:{int(total % 60):02d}")
+        total = max(1.0, float(info.duration or 1))
+        segs = []
+        for s in segments:
+            if cancelled():
+                raise Cancelled()
+            words = [(w.start, w.end, w.word) for w in (s.words or [])]
+            segs.append((s.start, s.end, s.text, words))
+            progress(min(0.99, s.end / total), f"{int(s.end // 60)}:{int(s.end % 60):02d} of {int(total // 60)}:{int(total % 60):02d}")
+        return segs
+
+    try:
+        segs = run(model)
+    except Cancelled:
+        raise
+    except Exception as e:
+        if device == "cpu" or not _gpu_error(e):
+            raise
+        # the graphics card failed half-way (a library missing or too old): start again on the processor
+        progress(0.0, "The graphics card can't be used — transcribing on the processor…")
+        del model
+        segs = run(WhisperModel(model_dir, device="cpu", compute_type="int8"))
     return from_segments(segs)
 
 
