@@ -1,5 +1,17 @@
 # SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.6
 
+**New in Windows 2.6.2**
+- **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,
+  DeepSeek, Grok or another AI nothing is asked by itself: **➜ Ask** copies the tab's question (and opens the site), then
+  **📋 Paste answer** — it always fills the tab that is open.
+- **The length of a part** (button **⟷** next to Shadowing): the whole sentence, or 1, 2 or 3 subtitle lines — used by Pause
+  each line, Loop line and Shadowing (↑ / ↓ move by a part). The translation line stays by whole sentence.
+- **Video panel (My Words):** the buttons above the picture no longer freeze the program — the picture is painted to fit,
+  the video window exists only while a moment plays in the panel, and the video is paused for a moment whenever its picture
+  moves to another window (switching while it plays can hang the Windows video driver).
+- An unexpected error no longer closes SubPlayer: it is written to **errors.log** in the data folder (a hard crash to
+  **crash.log**) — send that file if something goes wrong.
+
 **New in Windows 2.6.1**
 - **The teacher works with online assistants too:** *Answer from* — Ollama (this PC), ChatGPT, Gemini, DeepSeek, Grok, or
   any other AI (the question is only copied). Every tab works with each: the question is copied and the site opens; copy the

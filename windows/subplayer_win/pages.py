@@ -89,33 +89,33 @@ class Pane(QFrame):
 
 
 class SnapLabel(QLabel):
-    """The picture of the video moment, scaled to the panel (click = play it here)."""
+    """The picture of the video moment, drawn to fit the panel (click = play it here). It is painted, not set as the label's
+    pixmap, so a new size never asks the layout for another size (that loop could freeze the window)."""
     clicked = Signal()
 
     def __init__(self):
         super().__init__(alignment=Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setMinimumSize(10, 10)
         self.setCursor(Qt.PointingHandCursor)
         self._pm = None
 
     def set_file(self, path, text=""):
         from PySide6.QtGui import QPixmap
-        self._pm = QPixmap(str(path)) if path else None
-        if not self._pm or self._pm.isNull():
-            self._pm = None
-            self.setPixmap(QPixmap())
-            self.setText(text)
-        else:
-            self.setText("")
-            self._fit()
+        pm = QPixmap(str(path)) if path else None
+        self._pm = pm if pm is not None and not pm.isNull() else None
+        self.setText("" if self._pm else text)
+        self.update()
 
-    def _fit(self):
-        if self._pm:
-            self.setPixmap(self._pm.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._fit()
+    def paintEvent(self, e):
+        if not self._pm:
+            return super().paintEvent(e)
+        from PySide6.QtGui import QPainter
+        r = self.rect()
+        pm = self._pm.scaled(r.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        p = QPainter(self)
+        p.drawPixmap((r.width() - pm.width()) // 2, (r.height() - pm.height()) // 2, pm)
+        p.end()
 
     def mousePressEvent(self, e):
         self.clicked.emit()
@@ -288,11 +288,7 @@ class WordsPage(QWidget):
         self.snap = SnapLabel()
         self.snap.clicked.connect(self.play_here)
         self.p_video.body.addWidget(self.snap, 1)
-        from PySide6.QtMultimediaWidgets import QVideoWidget
-        self.vw = QVideoWidget()
-        self.vw.setStyleSheet("background:#000")
-        self.vw.hide()
-        self.p_video.body.addWidget(self.vw, 1)
+        self.vw = None                       # the video widget is made only while a moment plays here (see play_here)
         self.vname = QLabel("", objectName="small", wordWrap=True)
         self.p_video.body.addWidget(self.vname)
         self.vmsg = QLabel("", objectName="hint", wordWrap=True)
@@ -548,18 +544,18 @@ class WordsPage(QWidget):
 
     # ------------------------------------------------------------------ the four panels
     def toggle_pane(self, pane):
-        if self.big is pane:
-            self.big = None
-            for p, r, c in self.panes:
-                self.grid.addWidget(p, r, c)
-                p.setVisible(True)
-                p.set_big(False)
-        else:
-            self.big = pane
-            for p, _, _ in self.panes:
-                p.setVisible(p is pane)
-                p.set_big(p is pane)
-            self.grid.addWidget(pane, 0, 0, 2, 2)
+        """One panel big (the others hidden, their row and column get no space) — or back to the four."""
+        self.big = None if self.big is pane else pane
+        rr = cc = None
+        for p, r, c in self.panes:
+            on = self.big is None or p is self.big
+            p.setVisible(on)
+            p.set_big(p is self.big)
+            if p is self.big:
+                rr, cc = r, c
+        for k in (0, 1):
+            self.grid.setRowStretch(k, 1 if rr is None or k == rr else 0)
+            self.grid.setColumnStretch(k, 1 if cc is None or k == cc else 0)
 
     def show_word(self, *_):
         w = self.current()
@@ -675,27 +671,34 @@ class WordsPage(QWidget):
         w = self.current()
         if not w:
             return
-        if self.vw.isVisible():
+        if self.vw is not None:
             return self.stop_video()
         if not self.main.find_video(w):
             self.vmsg.setText(f"The video “{w.video_name}” isn't on this PC (or was renamed) — put it in Videos, Downloads or a "
                               "folder you opened before.")
             self.vmsg.show()
             return
+        from PySide6.QtMultimediaWidgets import QVideoWidget
         self.main.hide_mini()
-        self.main.player.setVideoOutput(self.vw)
+        self.vw = QVideoWidget()
+        self.vw.setStyleSheet("background:#000")
+        self.p_video.body.insertWidget(1, self.vw, 1)
         self.snap.hide()
         self.vw.show()
+        self.main.set_output(self.vw)
         self.main.play_clip(w, quiet=True)
 
     def stop_video(self):
         self.vmsg.hide()
-        if self.vw.isVisible():
+        if self.vw is not None:
             self.main.player.pause()
             self.main.clear_ab()
-            self.vw.hide()
-            self.snap.show()
             self.main.player.setVideoOutput(self.main.vw)
+            vw, self.vw = self.vw, None
+            vw.hide()
+            vw.setParent(None)
+            vw.deleteLater()
+            self.snap.show()
 
     def add_sentences(self):
         w = self.current()
@@ -724,6 +727,7 @@ class WordsPage(QWidget):
 
     def play(self):
         w = self.current()
+        self.stop_video()
         if w and self.main.play_clip(w):
             self.main.show_page("player")
 

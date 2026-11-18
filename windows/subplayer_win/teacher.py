@@ -28,10 +28,15 @@ class Runner(QObject):
 
         def work():
             try:
-                res = fn(lambda t: self.text.emit(t), lambda: self.stop)
-                self.done.emit(res or "")
-            except Exception as e:
-                self.failed.emit(str(e))
+                try:
+                    res = fn(lambda t: self.text.emit(t), lambda: self.stop)
+                    self.done.emit(res or "")
+                except RuntimeError:
+                    raise
+                except Exception as e:
+                    self.failed.emit(str(e))
+            except RuntimeError:
+                pass                                       # the window was closed while the answer was coming
             finally:
                 self.busy = False
         threading.Thread(target=work, daemon=True).start()
@@ -181,6 +186,10 @@ class TeacherDialog(QDialog):
         self.manual_b.setToolTip("Write meanings, collocations and sentences yourself (Word tab), or your own exam question (TestDaF tab)")
         self.manual_b.clicked.connect(self.manual)
         foot.addWidget(self.manual_b)
+        self.ask_b = QPushButton("➜ Ask")
+        self.ask_b.setToolTip("Copy this tab's question and open the assistant")
+        self.ask_b.clicked.connect(self.ask_online)
+        foot.addWidget(self.ask_b)
         self.paste_b = QPushButton("📋 Paste answer")
         self.paste_b.setProperty("accent", True)
         self.paste_b.setToolTip("Copy the assistant's whole answer, then press this — it is shown here like Ollama's")
@@ -201,9 +210,10 @@ class TeacherDialog(QDialog):
         v.addLayout(foot)
 
         self.runner = Runner(self)
-        self.runner.text.connect(self._piece)
-        self.runner.done.connect(self._done)
-        self.runner.failed.connect(self._failed)
+        self._gen, self._run_gen = 0, -1               # answers of an Ollama request made before the source changed are ignored
+        self.runner.text.connect(lambda t: self._piece(t) if self._run_gen == self._gen else None)
+        self.runner.done.connect(lambda r: self._done(r) if self._run_gen == self._gen else None)
+        self.runner.failed.connect(lambda m: self._failed(m) if self._run_gen == self._gen else None)
         self._target_view, self._buf, self._mode = None, "", ""
         self.cache = ollama.Cache()
         self._source_changed()
@@ -218,11 +228,44 @@ class TeacherDialog(QDialog):
         self.main.settings["teacher_source"] = k
         self.main.save_settings()
         online = k != "ollama"
+        self._gen += 1                                  # whatever Ollama is still writing is dropped
+        if getattr(self, "runner", None) and self.runner.busy:
+            self.runner.stop = True
         self.paste_b.setVisible(online)
+        self.ask_b.setVisible(online)
+        self.ask_b.setText("➜ Ask " + dict(SOURCES)[k].split(" —")[0] if k != "copy" else "➜ Copy the question")
         self.stop_b.setVisible(not online)
+        if hasattr(self, "stack"):
+            self.state.setText("")
+            v = self._tab_view(self.stack.currentIndex())
+            if online and v is not None:
+                v.setHtml(self._ask_hint())
         self.src_hint.setText("" if not online else
                               "The question is copied and the site opens — paste it there (Ctrl+V) if it isn't filled in, "
                               "then copy the whole answer and press 📋 Paste answer.")
+
+    def _tab_view(self, i: int):
+        return {0: self.view, 1: self.view2, 2: self.view3, 3: self.view4, 4: self.view5}.get(i)
+
+    def _ask_hint(self) -> str:
+        name = dict(SOURCES)[self.source()].split(" —")[0]
+        how = {2: "Write your sentence above first. ", 3: "Write your question above first. "}.get(self.stack.currentIndex(), "")
+        return (f"<p style='color:{theme.DIM}'>{how}Press <b style='color:{theme.CYAN}'>➜ Ask</b> below: the question is copied"
+                + ("" if self.source() == "copy" else f" and {html.escape(name)} opens")
+                + f". Then copy the whole answer and press <b style='color:{theme.CYAN}'>📋 Paste answer</b>.</p>")
+
+    def ask_online(self):
+        i = self.stack.currentIndex()
+        if i == 0:
+            self.coach(fresh=True)
+        elif i == 1:
+            self.explain_line()
+        elif i == 2:
+            self.check()
+        elif i == 3:
+            self.ask()
+        else:
+            self.exam_questions(fresh=True)
 
     def _model_tag(self) -> str:
         return self.main.settings.get("ollama_model", "") if self.source() == "ollama" else self.source()
@@ -250,9 +293,10 @@ class TeacherDialog(QDialog):
         if t == getattr(self, "_asked", ""):
             self.state.setText("That is still the question — copy the assistant's ANSWER, then press 📋 Paste answer")
             return
-        if self._target_view is None:
-            self.state.setText("Ask first (the tab's button), then paste the answer")
-            return
+        i = self.stack.currentIndex()                 # the answer belongs to the tab that is open
+        self._target_view, self._mode = {0: (self.view, "word"), 1: (self.view2, "text"), 2: (self.view3, "check"),
+                                         3: (self.view4, "text"), 4: (self.view5, "exam")}[i]
+        self._run_gen = self._gen
         if self._mode == "text":
             self._target_view.setPlainText(t)
         self._done(t)
@@ -279,6 +323,20 @@ class TeacherDialog(QDialog):
         self.manual_b.setVisible(i in (0, 4))
         self.manual_b.setText("✎ Write a question…" if i == 4 else "✎ Add my own…")
         self.again_b.setVisible(i in (0, 1, 4))
+        if self.source() != "ollama":                  # online: nothing is asked by itself — ➜ Ask does it
+            if i == 0 and not self.result:
+                hit = self.cache.get(self._ckey())
+                self.show_word(hit) if hit else self.view.setHtml(self._ask_hint())
+            elif i == 4 and not self.qs:
+                hit = self.cache.get(self._ckey() + "|exam")
+                self.show_questions(hit) if hit else self.view5.setHtml(self._ask_hint())
+            elif i == 1 and not self.view2.toPlainText():
+                self.view2.setHtml(self._ask_hint())
+            elif i == 2:
+                self.attempt.setFocus()
+            elif i == 3:
+                self.question.setFocus()
+            return
         if i == 0 and not self.result:
             self.coach()
         elif i == 1 and not self.view2.toPlainText():
@@ -316,6 +374,7 @@ class TeacherDialog(QDialog):
         if self.runner.busy:
             self.state.setText("The teacher is still answering — press Stop first")
             return
+        self._run_gen = self._gen
         self._target_view, self._buf, self._mode = view, "", mode
         view.setHtml(f"<p style='color:{theme.DIM}'>{waiting}</p>")
         self.state.setText("The teacher is thinking… (the first answer after starting the PC can take a minute while the model loads)")
