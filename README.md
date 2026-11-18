@@ -38,6 +38,9 @@
 - **Portable:** make a folder named **SubPlayer data** next to SubPlayer.exe and SubPlayer keeps everything there (words,
   settings, subtitles, lessons, dictionaries, speech models) instead of in %APPDATA%\SubPlayer — copy your old
   %APPDATA%\SubPlayer into it once, and the whole SubPlayer folder can go on a flash drive or to another PC.
+- **windows/pack/SubPlayer-Pack.bat** (put it next to SubPlayer.exe): packs SubPlayer onto a flash drive — for yourself
+  (with all your data) or for someone else (program, dictionaries, Whisper and Ollama models only) — and installs it on the
+  new PC from there.
 
 **New in Windows 2.5 — a private AI teacher on your own PC (Ollama)**
 - **Word card ▸ Teacher** (and *Learn more ▸ Teacher on this PC*) asks a language model that runs on your PC — free, no API
