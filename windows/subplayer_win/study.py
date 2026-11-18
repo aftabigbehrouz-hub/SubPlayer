@@ -174,6 +174,8 @@ class StudyPage(QWidget):
         self.ai_state = QLabel("", objectName="small")
         r3.addWidget(self.ai_state, 1)
         for ic, label, tip, fn in (("paste", " Paste", "Put the copied answer here (replaces what is here if it is empty, otherwise adds it below)", self._ai_paste),
+                                   ("cards", " To Review", "Put this lesson's exam questions into Review (they come back like "
+                                    "your words). A TestDaF / IELTS answer pasted here goes there by itself.", self._ai_cards),
                                    ("eye", " Hide answers", "Hide / show everything after ---LÖSUNGEN--- so you can test yourself", self._ai_toggle_answers),
                                    ("copy", " Copy", "Copy this lesson", lambda: (QApplication.clipboard().setText(self._ai_full()), main.msg("Lesson copied"))),
                                    ("download", " Save as file…", "Save this lesson as a text file (to print or keep elsewhere)", self._ai_export),
@@ -356,6 +358,7 @@ class StudyPage(QWidget):
             self.ai_local.setText(" Ollama (this PC)")
             self._ai_save()
             self._ai_note(saved=True)
+            self._ai_cards(quiet=True)
 
         def fail(m):
             self.ai_local.setText(" Ollama (this PC)")
@@ -386,6 +389,48 @@ class StudyPage(QWidget):
             for k, b in self.ai_lv.items():
                 b.setText(k + (" ●" if k in have else ""))
             self._ai_note(saved=True)
+            from .questions import MARK
+            if MARK in body and not (getattr(self, "_ai_runner", None) and self._ai_runner.busy):
+                self._ai_cards(quiet=True)
+
+    def _ai_cards(self, quiet: bool = False):
+        """The lesson's ---REVIEW--- cards into Review; without them Ollama (if set up) makes cards from the lesson."""
+        from . import questions
+        body = self._ai_full()
+        if not body.strip():
+            if not quiet:
+                self.main.msg("Paste a lesson first")
+            return
+        src = f"lesson:{self._ai_level_name}"
+        qs = questions.parse(body, self.lang, self.name, src)
+        if qs:
+            n = self.main.store.add_questions(qs)
+            self.main.after_change()
+            self.ai_state.setText(f"{self._ai_level_name} lesson · {len(qs)} review card(s) found · "
+                                  + (f"{n} new in Review ✓" if n else "all already in Review ✓"))
+            return
+        if quiet:
+            return
+        if not self.main.settings.get("ollama_model"):
+            self.main.msg("This lesson has no review cards (a part starting with ---REVIEW---). Ask the assistant again with the "
+                          "new question — it asks for them now — or set up Ollama, which can make them from this lesson.", 14000)
+            return
+        from . import ollama
+        from .teacher import Runner, client
+        c = client(self.main)
+        q = questions.lesson_to_cards_prompt(body, self.lang)
+        r = self._cards_runner = Runner(self)
+        self.ai_state.setText(f"Ollama ({c.model}) is turning the lesson's questions into review cards… (a minute or two)")
+
+        def done(res):
+            qs = questions.parse(res, self.lang, self.name, src)
+            n = self.main.store.add_questions(qs)
+            self.main.after_change()
+            self.ai_state.setText(f"{n} review card(s) made from the lesson and put into Review ✓" if qs else
+                                  "Ollama gave no usable cards — try again, or ask ChatGPT/Gemini with the new question")
+        r.done.connect(done)
+        r.failed.connect(lambda m: self.ai_state.setText("⚠ " + m))
+        r.run(lambda on, stop: c.chat(q, "", on_text=on, cancelled=stop, ctx=ollama.lesson_ctx(q), temperature=0.2))
 
     def _ai_paste(self):
         t = QApplication.clipboard().text().strip()

@@ -56,7 +56,41 @@ class Example:
     updated: int = field(default_factory=now_ms)
 
 
-def review(w: SavedWord, got_it: bool, now: int) -> SavedWord:
+@dataclass
+class Question:
+    """An exam-style question (TestDaF / IELTS) that comes back in Review like a word."""
+    question: str
+    answer: str
+    options: list = field(default_factory=list)
+    explanation: str = ""
+    kind: str = ""                 # mc · tf (richtig/falsch) · yn (ja/nein/text sagt nichts) · gap · open
+    lang: str = "de"
+    lemma: str = ""
+    video_name: str = ""
+    source: str = ""               # "teacher" or "lesson:TestDaF" …
+    created: int = field(default_factory=now_ms)
+    reviews: int = 0
+    correct: int = 0
+    box: int = 0
+    due: int = field(default_factory=now_ms)
+    last_review: int = 0
+    uid: str = ""
+    id: int = 0
+
+    @staticmethod
+    def of(r) -> "Question":
+        try:
+            opts = json.loads(r["options"] or "[]")
+        except Exception:
+            opts = []
+        return Question(r["question"] or "", r["answer"] or "", opts if isinstance(opts, list) else [], r["explanation"] or "",
+                        r["kind"] or "", r["lang"] or "de", r["lemma"] or "", r["video_name"] or "", r["source"] or "",
+                        r["created"] or 0, r["reviews"] or 0, r["correct"] or 0, r["box"] or 0, r["due"] or 0,
+                        r["last_review"] or 0, r["uid"] or "", r["id"])
+
+
+def review(w, got_it: bool, now: int):
+    """The next review step of a word (or a question)."""
     box = min(w.box + 1, len(INTERVAL_DAYS) - 1) if got_it else 0
     due = now + INTERVAL_DAYS[box] * DAY if got_it else now + AGAIN_MS
     return replace(w, reviews=w.reviews + 1, correct=w.correct + (1 if got_it else 0), box=box, due=due, last_review=now)
@@ -92,6 +126,14 @@ class WordStore:
                 fa TEXT, created INTEGER, uid TEXT, updated INTEGER);
             CREATE INDEX IF NOT EXISTS examples_word ON examples(word_id);
             CREATE TABLE IF NOT EXISTS deleted(uid TEXT PRIMARY KEY, at INTEGER);
+            CREATE TABLE IF NOT EXISTS collocations(id INTEGER PRIMARY KEY AUTOINCREMENT, lang TEXT, lemma TEXT, phrase TEXT,
+                meaning TEXT, example TEXT, created INTEGER);
+            CREATE INDEX IF NOT EXISTS collocations_word ON collocations(lang, lemma);
+            CREATE TABLE IF NOT EXISTS questions(id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT, lang TEXT, lemma TEXT,
+                video_name TEXT, source TEXT, kind TEXT, question TEXT, options TEXT, answer TEXT, explanation TEXT,
+                created INTEGER, reviews INTEGER DEFAULT 0, correct INTEGER DEFAULT 0, box INTEGER DEFAULT 0, due INTEGER,
+                last_review INTEGER DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS questions_due ON questions(due);
         """)
         self.db.commit()
 
@@ -102,10 +144,63 @@ class WordStore:
                          "correct", "box", "due", "last_review", "updated") else 0) for k in WORD_COLS}, id=r["id"])
 
     def all(self) -> list[SavedWord]:
-        return [self._word(r) for r in self.db.execute("SELECT * FROM words ORDER BY due ASC, id DESC")]
+        """Newest first (the day the word was saved)."""
+        return [self._word(r) for r in self.db.execute("SELECT * FROM words ORDER BY created DESC, id DESC")]
 
     def due(self, now: int) -> list[SavedWord]:
-        return [self._word(r) for r in self.db.execute("SELECT * FROM words WHERE due <= ? ORDER BY box ASC, due ASC", (now,))]
+        """Due words, the least reviewed first (then the lowest box, then the longest waiting)."""
+        return [self._word(r) for r in self.db.execute(
+            "SELECT * FROM words WHERE due <= ? ORDER BY reviews ASC, box ASC, due ASC", (now,))]
+
+    @staticmethod
+    def word_key(text: str, lemma: str, lang: str) -> tuple[str, str]:
+        """What makes two saved entries the same word: the language and the base form (a phrase: its text)."""
+        t = (text or "").strip()
+        base = t if " " in t else ((lemma or "").strip() or t)
+        return (lang or "de", " ".join(base.lower().split()))
+
+    def find_same(self, text: str, lemma: str, lang: str) -> SavedWord | None:
+        """The word already in My Words with the same base form (from any video), or None."""
+        k = self.word_key(text, lemma, lang)
+        for w in self.all():
+            if self.word_key(w.text, w.lemma, w.lang) == k:
+                return w
+        return None
+
+    def merge_duplicates(self) -> int:
+        """Joins entries of the same word into one (the most reviewed, then the oldest, is kept): their example sentences
+        and their video lines move to it. Returns how many entries were joined into others."""
+        groups: dict[tuple, list[SavedWord]] = {}
+        for w in self.all():
+            groups.setdefault(self.word_key(w.text, w.lemma, w.lang), []).append(w)
+        n = 0
+        for ws in groups.values():
+            if len(ws) < 2:
+                continue
+            ws.sort(key=lambda w: (-w.reviews, w.created, w.id))
+            keep, rest = ws[0], ws[1:]
+            items = []
+            for o in rest:
+                if o.sentence and o.sentence.strip().lower() != (keep.sentence or "").strip().lower():
+                    items.append(Example(de=o.sentence.strip(), en=f"from “{o.video_name}”" if o.video_name else ""))
+                items += self.examples(o.id)
+            self.add_examples(keep.id, items)
+            changed = False
+            for f in ("english", "persian", "ipa", "article", "sentence"):
+                if not getattr(keep, f) and any(getattr(o, f) for o in rest):
+                    setattr(keep, f, next(getattr(o, f) for o in rest if getattr(o, f)))
+                    changed = True
+            if not keep.video_name:
+                o = next((o for o in rest if o.video_name), None)
+                if o:
+                    keep.video_uri, keep.video_name, keep.start_ms, keep.end_ms = o.video_uri, o.video_name, o.start_ms, o.end_ms
+                    changed = True
+            if changed:
+                self.update(keep)
+            for o in rest:
+                self.delete(o.id)
+                n += 1
+        return n
 
     def find(self, text: str, video_uri: str, start_ms: int) -> SavedWord | None:
         r = self.db.execute("SELECT * FROM words WHERE lower(text)=lower(?) AND video_uri=? AND start_ms=?",
@@ -155,6 +250,73 @@ class WordStore:
             n += 1
         self.db.commit()
         return n
+
+    # ------------------------------------------------------------- collocations (from the teacher; kept per base word)
+    def collocations(self, lang: str, lemma: str) -> list[dict]:
+        return [dict(id=r["id"], phrase=r["phrase"] or "", meaning=r["meaning"] or "", example=r["example"] or "")
+                for r in self.db.execute("SELECT * FROM collocations WHERE lang=? AND lemma=? ORDER BY id",
+                                         (lang or "de", (lemma or "").lower()))]
+
+    def add_collocations(self, lang: str, lemma: str, items: list[dict]) -> int:
+        have = {c["phrase"].lower() for c in self.collocations(lang, lemma)}
+        n = 0
+        for c in items:
+            ph = str(c.get("phrase", "")).strip()
+            if not ph or ph.lower() in have:
+                continue
+            have.add(ph.lower())
+            self.db.execute("INSERT INTO collocations(lang,lemma,phrase,meaning,example,created) VALUES(?,?,?,?,?,?)",
+                            (lang or "de", (lemma or "").lower(), ph, str(c.get("meaning", "")).strip(),
+                             str(c.get("example", "")).strip(), now_ms()))
+            n += 1
+        self.db.commit()
+        return n
+
+    def delete_collocation(self, cid: int):
+        self.db.execute("DELETE FROM collocations WHERE id=?", (cid,))
+        self.db.commit()
+
+    # ------------------------------------------------------------- exam-style questions (TestDaF / IELTS), reviewed like words
+    def questions(self, lang: str = "", lemma: str = "", video_name: str = "") -> list["Question"]:
+        q, a = "SELECT * FROM questions WHERE 1=1", []
+        if lang:
+            q, a = q + " AND lang=?", a + [lang]
+        if lemma:
+            q, a = q + " AND lemma=?", a + [lemma.lower()]
+        if video_name:
+            q, a = q + " AND video_name=?", a + [video_name]
+        return [Question.of(r) for r in self.db.execute(q + " ORDER BY id", a)]
+
+    def due_questions(self, now: int) -> list["Question"]:
+        return [Question.of(r) for r in self.db.execute(
+            "SELECT * FROM questions WHERE due <= ? ORDER BY reviews ASC, box ASC, due ASC", (now,))]
+
+    def add_questions(self, items: list["Question"]) -> int:
+        """Adds new questions (the same question text is not added twice); returns how many were new."""
+        have = {r["question"].strip().lower() for r in self.db.execute("SELECT question FROM questions")}
+        n = 0
+        for x in items:
+            k = x.question.strip().lower()
+            if not k or k in have:
+                continue
+            have.add(k)
+            t = now_ms()
+            self.db.execute("INSERT INTO questions(uid,lang,lemma,video_name,source,kind,question,options,answer,explanation,"
+                            "created,reviews,correct,box,due,last_review) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,0)",
+                            (str(uuid.uuid4()), x.lang, (x.lemma or "").lower(), x.video_name, x.source, x.kind, x.question.strip(),
+                             json.dumps(x.options, ensure_ascii=False), x.answer, x.explanation, t, t))
+            n += 1
+        self.db.commit()
+        return n
+
+    def update_question(self, x: "Question"):
+        self.db.execute("UPDATE questions SET reviews=?, correct=?, box=?, due=?, last_review=? WHERE id=?",
+                        (x.reviews, x.correct, x.box, x.due, x.last_review, x.id))
+        self.db.commit()
+
+    def delete_question(self, qid: int):
+        self.db.execute("DELETE FROM questions WHERE id=?", (qid,))
+        self.db.commit()
 
     def delete_example(self, ex_id: int):
         r = self.db.execute("SELECT uid FROM examples WHERE id=?", (ex_id,)).fetchone()

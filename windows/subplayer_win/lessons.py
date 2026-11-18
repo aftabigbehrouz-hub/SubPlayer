@@ -129,6 +129,8 @@ def exam_prompt(exam: str, lang: str, name: str, cues: list, my_words: list[str]
         ]
         tail = f"Schreibe alles auf Deutsch, nur die Bedeutungen und kurzen Erklärungen auf {ex}. Klarer Text mit Überschriften, keine Tabellen."
         target = "German"
+    from .questions import instructions
+    tasks.append(instructions("en" if exam == "IELTS" else "de"))      # cards that come back in Review
     out = [head, ""] + [f"{i}. {t}" for i, t in enumerate(tasks, 1)] + ["", tail, ""]
     if found:
         out += [f"B2–C2 words in this video (from the CEFR word lists): {found}", ""]

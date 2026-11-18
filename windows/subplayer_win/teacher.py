@@ -50,10 +50,16 @@ def explain(main) -> str:
 
 
 class TeacherDialog(QDialog):
-    TABS = ("Word && collocations", "Explain the line", "Check my sentence", "Ask the teacher")
+    TABS = ("Word && collocations", "Explain the line", "Check my sentence", "Ask the teacher", "{exam} questions")
 
     def __init__(self, main, word: str, lemma: str, sentence: str, lang: str, saved=None, tab: int = 0):
         super().__init__(main)
+        # an ordinary window: it can be minimised or put beside the video, and the video keeps playing
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowMinimizeButtonHint |
+                            Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.exam = "IELTS" if lang == "en" else "TestDaF"
+        self.qs: list = []
         self.main, self.word, self.lemma, self.sentence, self.lang = main, word, lemma or word, sentence, lang
         self.saved = saved                                # SavedWord getter (to add sentences)
         self.result: dict = {}
@@ -86,7 +92,7 @@ class TeacherDialog(QDialog):
         tabs = QHBoxLayout()
         self.tab_btns = []
         for i, name in enumerate(self.TABS):
-            b = QPushButton(name, checkable=True)
+            b = QPushButton(name.format(exam=self.exam), checkable=True)
             b.setProperty("kind", "chip")
             b.clicked.connect(lambda _=False, k=i: self.tab(k))
             self.tab_btns.append(b)
@@ -136,14 +142,23 @@ class TeacherDialog(QDialog):
         self.view4 = QTextBrowser()
         qv.addWidget(self.view4, 1)
         self.stack.addWidget(q)
+        # 4 exam-style questions on the word, which can go into Review
+        self.view5 = QTextBrowser(openLinks=False)
+        self.view5.anchorClicked.connect(self._q_link)
+        self.stack.addWidget(self.view5)
         v.addWidget(self.stack, 1)
 
         foot = QHBoxLayout()
         self.state = QLabel("", objectName="small")
         foot.addWidget(self.state, 1)
-        self.add_b = QPushButton("＋ Add the example sentences to my word")
-        self.add_b.setToolTip("They appear in review and practice, like sentences from the video")
+        self.add_b = QPushButton("＋ Add sentences && collocations to my word")
+        self.add_b.setToolTip("The sentences appear in review and practice; the collocations in My Words ▸ Collocations")
         self.add_b.clicked.connect(self.add_examples)
+        self.addq_b = QPushButton("＋ Add the questions to Review")
+        self.addq_b.setToolTip("They come back in Review like your words — answer, then Got it / Again")
+        self.addq_b.clicked.connect(self.add_questions)
+        self.addq_b.setEnabled(False)
+        foot.addWidget(self.addq_b)
         self.add_b.setEnabled(False)
         foot.addWidget(self.add_b)
         self.again_b = QPushButton("New answer")
@@ -184,11 +199,14 @@ class TeacherDialog(QDialog):
             b.setChecked(k == i)
         self.stack.setCurrentIndex(i)
         self.add_b.setVisible(i == 0)
-        self.again_b.setVisible(i in (0, 1))
+        self.addq_b.setVisible(i == 4)
+        self.again_b.setVisible(i in (0, 1, 4))
         if i == 0 and not self.result:
             self.coach()
         elif i == 1 and not self.view2.toPlainText():
             self.explain_line()
+        elif i == 4 and not self.qs:
+            self.exam_questions()
         elif i == 2:
             self.attempt.setFocus()
         elif i == 3:
@@ -228,6 +246,13 @@ class TeacherDialog(QDialog):
                 return
             self.cache.put(self._ckey(), d)
             self.show_word(d)
+        elif self._mode == "exam":
+            d = ollama.parse_json(res)
+            if not d:
+                self._target_view.setPlainText(res or "The model gave no answer.")
+                return
+            self.cache.put(self._ckey() + "|exam", d)
+            self.show_questions(d)
         elif self._mode == "check":
             self.show_check(ollama.parse_json(res), res)
 
@@ -290,7 +315,7 @@ class TeacherDialog(QDialog):
             h.append(f"<p style='margin-top:12px;padding:8px;border-left:3px solid {theme.GOLD}'>💡 {expl(str(d['tip']))}</p>")
         h.append("</div>")
         self.view.setHtml("".join(h))
-        self.add_b.setEnabled(bool(exs) and self.saved is not None)
+        self.add_b.setEnabled(bool(exs or cols) and self.saved is not None)
 
     def add_examples(self):
         w = self.saved() if self.saved else None
@@ -302,13 +327,61 @@ class TeacherDialog(QDialog):
             if isinstance(x, dict) and x.get("sentence"):
                 tr = str(x.get("translation", ""))
                 items.append(Example(de=str(x["sentence"]).strip(), en="" if fa else tr, fa=tr if fa else ""))
-        for c in ollama.as_list(self.result.get("collocations")):
-            if isinstance(c, dict) and c.get("example") and len(str(c["example"]).split()) >= 3:
-                items.append(Example(de=str(c["example"]).strip(), en="" if fa else str(c.get("phrase", "")), fa=str(c.get("meaning", "")) if fa else ""))
         n = self.main.store.add_examples(w.id, items)
+        k = self.main.store.add_collocations(w.lang, w.lemma or w.text, collocations_of(self.result))
         self.main.after_change()
-        self.state.setText(f"{n} sentence(s) added to „{w.text}“ — they appear in review and practice" if n else "These sentences are already saved")
+        self.state.setText(f"Added to „{w.text}“: {n} sentence(s) for review and practice, {k} collocation(s) — see My Words"
+                           if n or k else "These sentences and collocations are already saved")
         self.add_b.setEnabled(False)
+
+    # ------------------------------------------------------------------ 4 exam questions on the word
+    def exam_questions(self, fresh: bool = False):
+        from . import questions
+        self.addq_b.setEnabled(False)
+        hit = None if fresh else self.cache.get(self._ckey() + "|exam")
+        if hit:
+            self.show_questions(hit)
+            self.state.setText("From your earlier question · New answer asks again")
+            return
+        c = client(self.main)
+        sys_ = ollama._teacher(self.lang, self.ex.currentData())
+        q = questions.teacher_prompt(self.word, self.lemma, self.sentence, self.lang, self.lv.currentText(), self.ex.currentData())
+        self._start(self.view5, "exam", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop,
+                                                                 temperature=0.8 if fresh else 0.5),
+                    f"Your teacher is writing {self.exam}-style questions on „{html.escape(self.lemma)}“…")
+
+    def show_questions(self, d: dict, reveal: bool = False):
+        from . import questions
+        from pathlib import Path
+        video = Path(self.main.video).name if getattr(self.main, "video", "") else ""
+        self.qs = questions.from_json(d, self.lang, self.lemma, video)
+        self._qd, e = d, html.escape
+        if not self.qs:
+            self.view5.setPlainText("The model gave no questions — press New answer.")
+            return
+        h = [f"<div style='font-size:11pt;line-height:150%'>"]
+        for n, x in enumerate(self.qs, 1):
+            h.append(f"<p style='margin:12px 0 4px 0'><b style='color:{theme.CYAN}'>{n}.</b> {e(x.question)}</p>")
+            for o in x.options:
+                h.append(f"<p style='margin:0 0 0 22px'>○ {e(o)}</p>")
+            if reveal:
+                h.append(f"<p style='margin:4px 0 0 22px;color:{theme.MINT}'>✓ {e(x.answer)}</p>")
+                if x.explanation:
+                    h.append(f"<p style='margin:0 0 0 22px;color:{theme.DIM}'>{e(x.explanation)}</p>")
+        h.append(f"<p style='margin-top:14px'><a href='{'hide' if reveal else 'show'}' style='color:{theme.GOLD}'>"
+                 f"{'Hide the answers' if reveal else 'Show the answers'}</a></p></div>")
+        self.view5.setHtml("".join(h))
+        self.addq_b.setEnabled(True)
+
+    def _q_link(self, url):
+        if getattr(self, "_qd", None):
+            self.show_questions(self._qd, reveal=url.toString() == "show")
+
+    def add_questions(self):
+        n = self.main.store.add_questions(self.qs)
+        self.main.after_change()
+        self.state.setText(f"{n} question(s) added to Review ✓" if n else "These questions are already in Review")
+        self.addq_b.setEnabled(False)
 
     # ------------------------------------------------------------------ 1 explain the line
     def explain_line(self):
@@ -323,6 +396,8 @@ class TeacherDialog(QDialog):
     def again(self):
         if self.stack.currentIndex() == 1:
             self.explain_line()
+        elif self.stack.currentIndex() == 4:
+            self.exam_questions(fresh=True)
         else:
             self.coach(fresh=True)
 
@@ -380,6 +455,22 @@ class TeacherDialog(QDialog):
     def reject(self):
         self.runner.stop = True
         super().reject()
+
+    def closeEvent(self, e):
+        self.runner.stop = True
+        super().closeEvent(e)
+
+
+def collocations_of(d: dict) -> list[dict]:
+    """The collocations of a word-coach answer as [{phrase, meaning, example}]."""
+    out = []
+    for c in ollama.as_list((d or {}).get("collocations")):
+        if isinstance(c, dict) and c.get("phrase"):
+            out.append({"phrase": str(c["phrase"]), "meaning": str(c.get("meaning", "")), "example": str(c.get("example", ""))})
+        elif isinstance(c, str) and c.strip():
+            ph, _, mean = c.partition(" — ") if " — " in c else c.partition(" - ")
+            out.append({"phrase": ph.strip(), "meaning": mean.strip(), "example": ""})
+    return out
 
 
 class SetupPanel(QWidget):

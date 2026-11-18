@@ -95,6 +95,30 @@ def sentence_range(cues: list[Cue], i: int, max_lines: int = 4, max_gap: int = 1
     return a, b
 
 
+def sentence_ranges(cues: list[Cue], max_lines: int = 6, max_gap: int = 1500) -> list[tuple[int, int]]:
+    """For every line, the sentence it belongs to as (first line, last line). The sentences don't overlap: a new one starts
+    after a line that ends with . ! ? … : or after a pause longer than max_gap; a sentence of more than max_lines lines is
+    cut into equal parts. Without punctuation in the subtitles every line is its own unit."""
+    n = len(cues)
+    if not has_punctuation(cues):
+        return [(i, i) for i in range(n)]
+    out: list[tuple[int, int]] = [(0, 0)] * n
+    a = 0
+    for i in range(n):
+        last = i == n - 1 or ends_sentence(cues[i].text) or cues[i + 1].start_ms - cues[i].end_ms > max_gap
+        if not last:
+            continue
+        size = i - a + 1
+        parts = -(-size // max_lines)
+        step = -(-size // parts)
+        for p0 in range(a, i + 1, step):
+            p1 = min(i, p0 + step - 1)
+            for k in range(p0, p1 + 1):
+                out[k] = (p0, p1)
+        a = i + 1
+    return out
+
+
 def sentence_text(cues: list[Cue], a: int, b: int) -> str:
     return " ".join(cues[k].text.replace("\n", " ").strip() for k in range(a, b + 1))
 

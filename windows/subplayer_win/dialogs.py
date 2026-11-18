@@ -608,7 +608,7 @@ HELP = [
                        "translation language; 👁 = listening mode (the text hides while playing and shows when you pause); "
                        "translate = a translation line under each subtitle, in English or Persian (online)."),
     ("Shadowing", "Shadowing (S): the line plays, then SubPlayer pauses about as long as the line so you can say it aloud, then "
-                  "plays it again. ↓ goes to the next line. Pause each line stops after every line so you can read and click."),
+                  "plays it again. ↓ goes to the next line. Pause each line stops after each sentence so you can read and click, then goes on by itself (right-click it: how long)."),
     ("Save a clip", "Set A and B, then Save clip: the part between them is saved as a new MP4 in Videos\\SubPlayer — "
                     "with the subtitles drawn into the picture, or clean."),
     ("Daily reminder", "Settings ▸ Daily reminder: a Windows notification at your hour when words are due, even when SubPlayer is "
