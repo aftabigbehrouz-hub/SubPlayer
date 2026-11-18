@@ -342,6 +342,53 @@ if tap("My words"):
     if tap("Calendar", contains=True, required=False):
         shot("16_calendar")
 
+# ---- 2.9: the four panels of a word, Pause each line going on by itself, the small video window, Review
+print("2.9: word panels")
+if tap("Wetter", required=False):
+    time.sleep(1.5)
+    shot("17_word_panels")
+    if tap("DICTIONARY", required=False):
+        time.sleep(2.5)
+        shot("18_panel_dictionary")
+        back()
+    if tap("SENTENCES", contains=True, required=False):
+        time.sleep(1.5)
+        shot("18b_panel_sentences")
+        back()
+back()                                      # to the player
+time.sleep(2)
+print("2.9: pause each line")
+if tap("Pause each line", required=False):
+    shot("19_pause_wait_choice")
+    press_space(len(toggles()))             # play
+    held = find("Next sentence in", contains=True, timeout=25)
+    print("  stops at the end of a sentence:", "yes" if held else "NO")
+    if held:
+        shot("20_paused_after_sentence")
+    else:
+        problems.append("Pause each line: no pause at the end of a sentence")
+    gone = False
+    for _ in range(25):                     # it goes on by itself
+        if not find("Next sentence in", contains=True, timeout=1):
+            gone = True
+            break
+        time.sleep(1)
+    print("  goes on by itself:", "yes" if gone else "NO")
+    if not gone:
+        problems.append("Pause each line: did not go on by itself")
+    tap("Pause each line", required=False)  # off again
+print("2.9: the video on another screen")
+if tap("My words", required=False):
+    time.sleep(2.5)
+    mini = find("Back to the player", timeout=6)
+    print("  small video window on My Words:", "yes" if mini else "no (the video was not playing)")
+    shot("21_mini_player")
+    print("2.9: review")
+    if tap("Review", contains=True, required=False):
+        time.sleep(2)
+        shot("22_review")
+        back()
+
 if crashed():
     print(adb("logcat", "-d", "-s", "AndroidRuntime:E", check=False)[-6000:])
     sys.exit("The app crashed")
