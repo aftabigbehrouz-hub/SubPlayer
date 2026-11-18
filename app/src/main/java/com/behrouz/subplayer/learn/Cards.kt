@@ -87,16 +87,57 @@ object Cards {
 
     private val COLL = Regex("""^\s*(?:[-*•]\s*)?(?:\*\*)?(KOLL|COLL|Kollokation|Collocation)(?:\*\*)?\s*[:：]\s*(.*)$""", RegexOption.IGNORE_CASE)
 
-    /** Collocation lines (KOLL: phrase | meaning | example) in a pasted answer, and the rest of the text without them. */
+    private val HEADER_WORDS = setOf("german", "deutsch", "english", "englisch", "persian", "persisch", "farsi", "فارسی", "collocation",
+        "collocations", "kollokation", "kollokationen", "meaning", "bedeutung", "example", "examples", "beispiel", "beispielsatz",
+        "translation", "übersetzung", "phrase", "ausdruck", "word", "wort", "sentence", "satz", "#", "nr", "no")
+    private val PERSIAN = Regex("[؀-ۿ]")
+    private val LABEL = Regex("""^\s*(DE|EN|FA|Deutsch|German|English|Englisch|Persian|Persisch|Farsi|فارسی)\s*[:：]\s*""", RegexOption.IGNORE_CASE)
+
+    private fun clean(s: String) = s.replace("**", "").replace("__", "").trim().trim('"', '„', '“', '”', '»', '«', '\'').trim()
+
+    /** A table header cell such as "German collocation" or "English". */
+    fun isHeader(cell: String): Boolean {
+        val ws = cell.split(Regex("\\s+")).map { it.trim('*', ':', '(', ')').lowercase() }.filter { it.isNotEmpty() }
+        return ws.isNotEmpty() && ws.all { it in HEADER_WORDS }
+    }
+
+    /** A collocation, not a sentence: at most 5 words and no full stop / ! / ? at the end. */
+    fun isPhrase(t: String): Boolean {
+        val s = t.trim()
+        return s.isNotEmpty() && s.split(Regex("\\s+")).size <= 5 && s.last() !in ".!?…" && !PERSIAN.containsMatchIn(s)
+    }
+
+    /**
+     * Collocations in a pasted answer — "KOLL: phrase | meaning | example" lines, and table rows whose first cell is a short
+     * phrase (ChatGPT often answers with a table) — and the rest of the text (the sentences). Headers and separators are dropped.
+     * Same rules as the Windows app (practice.split_collocations).
+     */
     fun collocations(raw: String, lang: String, lemma: String): Pair<List<Collocation>, String> {
         val out = ArrayList<Collocation>()
         val rest = StringBuilder()
         for (line in raw.replace("\r", "").split('\n')) {
             val m = COLL.find(line)
-            if (m == null) { rest.append(line).append('\n'); continue }
-            val parts = m.groupValues[2].split('|').map { it.trim().trim('*').trim() }
-            if (parts.firstOrNull().isNullOrBlank()) continue
-            out.add(Collocation(lang = lang, lemma = lemma, phrase = parts[0], meaning = parts.getOrElse(1) { "" }, example = parts.getOrElse(2) { "" }))
+            if (m != null) {
+                val parts = m.groupValues[2].split('|').map { clean(it) }
+                if (parts.firstOrNull().isNullOrBlank()) continue
+                out.add(Collocation(lang = lang, lemma = lemma, phrase = parts[0], meaning = parts.getOrElse(1) { "" }, example = parts.getOrElse(2) { "" }))
+                continue
+            }
+            val st = line.trim().replace(Regex("""^(?:[-*•>]+|\d+[.)])\s*"""), "")
+            if ('|' in st) {
+                val cells = st.trim().trim('|').split('|').map { clean(clean(it).replace(LABEL, "")) }.filter { it.isNotEmpty() }
+                if (cells.isEmpty() || cells.all { c -> c.all { it in "-:= " } }) continue          // |---|---|
+                if (cells.filter { !PERSIAN.containsMatchIn(it) }.all { isHeader(it) }) continue    // the header row
+                if (isPhrase(cells[0])) {
+                    val others = cells.drop(1)
+                    val fa = others.firstOrNull { PERSIAN.containsMatchIn(it) } ?: ""
+                    val ex = others.firstOrNull { !PERSIAN.containsMatchIn(it) && it.split(' ').size >= 3 && it.last() in ".!?" } ?: ""
+                    val mean = others.firstOrNull { !PERSIAN.containsMatchIn(it) && it != ex } ?: ""
+                    out.add(Collocation(lang = lang, lemma = lemma, phrase = cells[0], meaning = listOf(mean, fa).filter { it.isNotEmpty() }.joinToString(" · "), example = ex))
+                    continue
+                }
+            }
+            rest.append(line).append('\n')
         }
         return out to rest.toString()
     }

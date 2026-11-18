@@ -59,7 +59,18 @@ class Features29Test {
         assertTrue("Touristen" in rest)
     }
 
-    @Test fun sameWordKey() {
+    @Test fun collocationTablesAreSeparated() {
+        val raw = "| German collocation | English | Persian |\n|---|---|---|\n| weitestgehend wiederhergestellt | largely restored | تا حد زیادی بازسازی شده |\n" +
+            "| **weitestgehend abgeschlossen** | largely completed | تا حد زیادی تکمیل شده |\n" +
+            "DE: Die Systeme laufen weitestgehend wieder. | EN: The systems are largely running again. | FA: سیستم‌ها دوباره کار می‌کنند."
+        val (cols, rest) = Cards.collocations(raw, "de", "weitestgehend")
+        assertEquals(listOf("weitestgehend wiederhergestellt", "weitestgehend abgeschlossen"), cols.map { it.phrase })
+        assertFalse("German collocation" in rest)
+        assertTrue("Die Systeme laufen" in rest)
+        assertTrue(Cards.isHeader("German collocation")); assertFalse(Cards.isPhrase("Die Systeme laufen weitestgehend wieder."))
+    }
+
+        @Test fun sameWordKey() {
         assertEquals(WordStore.wordKey("zuzuspitzen", "zuspitzen", "de"), WordStore.wordKey("spitzt", "zuspitzen", "de"))
         assertFalse(WordStore.wordKey("zuzuspitzen", "zuspitzen", "de") == WordStore.wordKey("zuzuspitzen", "zuspitzen", "en"))
         assertEquals(WordStore.wordKey("auf jeden Fall", "auf jeden Fall", "de"), WordStore.wordKey("Auf  jeden fall", "", "de"))
