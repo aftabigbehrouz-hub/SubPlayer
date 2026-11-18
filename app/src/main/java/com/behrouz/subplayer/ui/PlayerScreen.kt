@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -99,6 +100,7 @@ fun PlayerScreen(
     Box(Modifier.fillMaxSize()) {
         Aurora(Modifier.fillMaxSize())
         when {
+            vm.inPip -> PipVideo(vm)                       // picture-in-picture over other apps: only the video
             vm.screen == Screen.WORDS -> WordsScreen(vm)
             vm.screen == Screen.REVIEW -> ReviewScreen(vm)
             vm.screen == Screen.PRACTICE -> PracticeScreen(vm)
@@ -124,6 +126,8 @@ fun PlayerScreen(
                 if (vm.videoUri != null) ControlPanel(vm, onToggleFullscreen, onLoadSrt)
             }
         }
+        if (!vm.inPip && vm.videoUri != null && vm.miniPinned && vm.screen != Screen.PLAYER && vm.screen != Screen.REVIEW)
+            MiniPlayer(vm, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 12.dp, bottom = 12.dp))
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 8.dp))
     }
 
@@ -361,11 +365,14 @@ private fun BoxScope.VideoSurface(vm: AppViewModel, fullscreen: Boolean, onToggl
                         .padding(horizontal = 14.dp, vertical = 6.dp))
             }
             if (idx >= 0 && idx < vm.cues.size) {
-                SubtitleLine(vm, idx, big = fullscreen)
+                // Pause each line stopped at the end of a sentence: the whole sentence, every word tappable
+                val held = vm.heldSentence(idx)
+                if (held != null) for (k in held) SubtitleLine(vm, k, big = fullscreen) else SubtitleLine(vm, idx, big = fullscreen)
                 if (vm.showTranslation) TranslationLine(vm, idx, big = fullscreen)
                 if (!vm.playing) {
                     Text(
                         if (vm.phraseMode) "Now tap the last word of the phrase"
+                        else if (vm.resumeIn > 0) "Next sentence in ${vm.resumeIn} s — tap a word to stay, ▶ to go on now"
                         else "Tap a word · long-press = phrase · double-tap = whole line",
                         color = White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
                     )
@@ -624,6 +631,15 @@ private fun ControlPanel(vm: AppViewModel, onToggleFullscreen: () -> Unit, onLoa
             Pill("A1–C2", active = vm.showLevels) { vm.toggleLevels() }
             Pill("Translation", active = vm.showTranslation) { vm.toggleTranslation() }
         }
+        if (vm.autoPause) {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Wait", color = White.copy(alpha = 0.6f), fontSize = 12.sp)
+                listOf("auto" to "as long as the sentence", "2" to "2 s", "4" to "4 s", "6" to "6 s", "10" to "10 s", "tap" to "until ▶").forEach { (k, label) ->
+                    Pill(label, active = vm.pauseWait == k) { vm.choosePauseWait(k) }
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             ActionButton(Icons.Edit, "Edit line") { vm.editCurrentLine() }
             ActionButton(Icons.Notes, "Transcript") { if (vm.cues.isEmpty()) vm.message = "No subtitles yet — tap Subtitles first" else vm.sheet = Sheet.Transcript }
@@ -660,4 +676,62 @@ fun fmt(ms: Long): String {
     val s = (ms.coerceAtLeast(0) / 1000)
     return if (s >= 3600) String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
     else String.format(Locale.US, "%d:%02d", s / 60, s % 60)
+}
+
+
+// ============================================================ the video on other screens (2.9)
+
+/** The video in a small window while My Words, Discover, Study or Practice is open: it keeps playing. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun MiniPlayer(vm: AppViewModel, modifier: Modifier) {
+    Column(modifier.width(220.dp).shadow(18.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
+        .background(Color(0xFF110E26)).border(1.dp, Brush.linearGradient(listOf(Neon.Violet, Neon.Cyan)), RoundedCornerShape(18.dp))) {
+        if (!vm.audioOnly) {
+            AndroidView(
+                factory = { c -> PlayerView(c).apply {
+                    useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; player = vm.player
+                    subtitleView?.visibility = android.view.View.GONE
+                } },
+                onRelease = { it.player = null },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).clickable { vm.screen = Screen.PLAYER }
+            )
+        }
+        val line = vm.currentCue.takeIf { it in vm.cues.indices }?.let { vm.cues[it].text.replace('\n', ' ') }
+            ?: vm.videoName.substringBeforeLast('.')
+        Text(line, color = White, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            IconButton(onClick = { vm.togglePlay() }, modifier = Modifier.size(38.dp)) {
+                Icon(if (vm.playing) Icons.Pause else Icons.Play, "Play / pause", tint = White, modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = { vm.skip(-5000) }, modifier = Modifier.size(38.dp)) { Icon(Icons.Rewind, "Back 5 s", tint = White, modifier = Modifier.size(18.dp)) }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { vm.screen = Screen.PLAYER }, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Fullscreen, "Back to the player", tint = Neon.Cyan, modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = { vm.closeMini() }, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Close, "Close (pauses the video)", tint = White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/** Picture-in-picture: only the video and the current line. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun PipVideo(vm: AppViewModel) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { c -> PlayerView(c).apply {
+                useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; player = vm.player
+                subtitleView?.visibility = android.view.View.GONE
+            } },
+            onRelease = { it.player = null },
+            modifier = Modifier.fillMaxSize()
+        )
+        val line = vm.currentCue.takeIf { it in vm.cues.indices }?.let { vm.cues[it].text.replace('\n', ' ') }
+        if (line != null && vm.showSubs) Text(line, color = White, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2,
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(2.dp))
+    }
 }

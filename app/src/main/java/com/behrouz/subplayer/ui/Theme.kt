@@ -107,6 +107,7 @@ object Neon {
     val Cyan = Color(0xFF22E4FF)
     val Pink = Color(0xFFFF4FD8)
     val Gold = Color(0xFFFFD54F)
+    val Mint = Color(0xFF5BE38F)
     val Deep = Color(0xFF06050C)
     val brush get() = androidx.compose.ui.graphics.Brush.linearGradient(listOf(Violet, Cyan))
     val hot get() = androidx.compose.ui.graphics.Brush.linearGradient(listOf(Pink, Violet, Cyan))

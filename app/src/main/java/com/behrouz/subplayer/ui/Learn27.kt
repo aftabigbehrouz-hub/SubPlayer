@@ -352,6 +352,7 @@ fun DiscoverScreen(vm: AppViewModel) {
                 Spacer(Modifier.width(6.dp))
                 Pill("English", active = vm.discoverLang == "en") { vm.setDiscoverLanguage("en") }
             }
+            DownloadQueue(vm)
             Explain(if (vm.discoverLang == "de")
                 "Programmes of ARD, ZDF, 3sat, Arte, DW, KiKA, phoenix and the regional stations that they offer as files. CC = with the broadcaster's own subtitles. Downloads go to Movies/SubPlayer."
                 else "VOA Learning English (public domain, an archive since 2025), NASA videos (public domain, mostly with subtitles) and podcasts: BBC Learning English, BBC World Service, PBS, TED, NPR — 🎧 = audio, saved to Music/SubPlayer.",
@@ -462,7 +463,8 @@ fun FilmInfoSheet(vm: AppViewModel, s: Sheet.FilmInfo) {
                 else -> "No subtitles from the broadcaster: after the download, tap Subtitles to transcribe it."
             }, Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(14.dp))
-            GlowButton(if (f.audio) "Download & listen" else "Download & watch", Modifier.fillMaxWidth(), icon = Icons.Download, enabled = vm.task == null) { vm.importFilm(f) }
+            GlowButton(if (vm.task != null) "Add to the download queue" else if (f.audio) "Download & listen" else "Download & watch",
+                Modifier.fillMaxWidth(), icon = Icons.Download) { vm.importFilm(f) }
             if (f.urlWebsite.isNotEmpty()) TextButton(onClick = { vm.openUrl(f.urlWebsite) }) { Text("Open the web page", color = Neon.Cyan) }
             Explain("For your own learning. The programmes belong to their broadcasters.", Modifier.padding(top = 4.dp))
         }
@@ -581,6 +583,7 @@ fun StudyScreen(vm: AppViewModel) {
                 Row(Modifier.padding(top = 8.dp, bottom = 20.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     GlowButton("Paste", icon = Icons.Download) { vm.pasteLesson() }
                     Pill("Share / save", icon = Icons.Share) { vm.shareLesson() }
+                    Pill("To Review", icon = Icons.School) { vm.lessonCardsButton() }
                     Pill("Delete", icon = Icons.Delete) { vm.saveLesson("") }
                 }
             }
@@ -638,6 +641,32 @@ fun WordsExportSheet(vm: AppViewModel) {
             GlowButton("Share…", Modifier.fillMaxWidth(), icon = Icons.Share) { vm.sheet = null; vm.shareWords(format, list) }
             Spacer(Modifier.height(8.dp))
             Pill("Save to Download/SubPlayer", icon = Icons.Download) { vm.sheet = null; vm.saveWordsToDownloads(format, list) }
+        }
+    }
+}
+
+
+/** Downloads: the one running, the ones waiting (move first / remove) and the finished ones (open). */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun DownloadQueue(vm: AppViewModel) {
+    val running = vm.task?.takeIf { it.title == "Downloading" || it.title == "Getting the programme" || it.title == "Video link" }
+    if (running == null && vm.dlQueue.isEmpty() && vm.dlDone.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).glass(RoundedCornerShape(20.dp)).padding(12.dp)) {
+        Text("DOWNLOADS", color = Neon.Cyan, fontSize = 11.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+        if (running != null) Text("⬇ ${running.message}", color = L, fontSize = 13.sp, maxLines = 2, modifier = Modifier.padding(top = 4.dp))
+        vm.dlQueue.forEachIndexed { i, p ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${i + 1}. ${p.title}", color = L.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                if (i > 0) TextButton(onClick = { vm.moveQueuedFirst(p) }) { Text("Next", color = Neon.Cyan, fontSize = 12.sp) }
+                IconButton(onClick = { vm.removeQueued(p) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Close, "Remove", tint = L.copy(alpha = 0.6f), modifier = Modifier.size(16.dp)) }
+            }
+        }
+        vm.dlDone.reversed().take(8).forEach { (title, uri) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✓ $title", color = Neon.Gold, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                TextButton(onClick = { vm.openVideo(uri, resume = false); vm.screen = Screen.PLAYER }) { Text("Open", color = Neon.Cyan, fontSize = 12.sp) }
+            }
         }
     }
 }

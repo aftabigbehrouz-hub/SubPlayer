@@ -144,6 +144,22 @@ class MainActivity : ComponentActivity() {
         vm.syncOnResume()
     }
 
+    /** Home pressed while a video plays: it goes on in a small window over other apps (picture-in-picture). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (android.os.Build.VERSION.SDK_INT >= 26 && vm.wantsPip() &&
+            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            runCatching {
+                enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build())
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        vm.inPip = isInPictureInPictureMode
+    }
+
     override fun onStop() {
         super.onStop()
         vm.rememberPosition()
