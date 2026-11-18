@@ -433,7 +433,8 @@ class StudyPage(QWidget):
         r.run(lambda on, stop: c.chat(q, "", on_text=on, cancelled=stop, ctx=ollama.lesson_ctx(q), temperature=0.2))
 
     def _ai_paste(self):
-        t = QApplication.clipboard().text().strip()
+        from . import practice
+        t = practice.clean_ai(QApplication.clipboard().text())
         if not t:
             self.main.msg("Nothing copied yet — copy the assistant's answer first")
             return

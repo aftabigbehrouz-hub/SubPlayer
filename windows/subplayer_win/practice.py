@@ -21,6 +21,23 @@ def _persian(s: str) -> bool:
     return bool(ARABIC.search(s))
 
 
+def clean_ai(text: str) -> str:
+    """An answer copied from ChatGPT & co. as it should be: HTML entities (&#x20; for a space) decoded, the backslash that
+    some copy buttons put at the end of every line removed, markdown escapes (\\* \\_ \\#) undone, ``` fences dropped."""
+    import html as _html
+    t = _html.unescape(text or "").replace("\u00a0", " ").replace("\r", "")
+    t = re.sub(r"\\[ \t]*$", "", t, flags=re.M)                      # "{\\" → "{"
+    t = re.sub(r"\\([*_#>\[\]()`~|-])", r"\1", t)                    # \\* → *
+    t = re.sub(r"^\s*```[\w-]*\s*$", "", t, flags=re.M)
+    return t.strip()
+
+
+def looks_like_ai_answer(text: str) -> bool:
+    """A whole pasted AI answer (JSON, a table, KOLL / Q: lines) rather than lines typed by hand."""
+    t = clean_ai(text)
+    return ('{' in t and '":' in t) or bool(re.search(r"^\s*(?:[-*•]\s*)?(KOLL|COLL|Q)\s*:", t, re.M | re.I)) or t.count("|") >= 4
+
+
 COLL = re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*)?(KOLL|COLL|Kollokation|Collocation)(?:\*\*)?\s*[:：]\s*(.*)$", re.I)
 HEADER_WORDS = {"german", "deutsch", "english", "englisch", "persian", "persisch", "farsi", "فارسی", "collocation", "collocations",
                 "kollokation", "kollokationen", "meaning", "bedeutung", "example", "examples", "beispiel", "beispielsatz",

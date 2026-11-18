@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -119,6 +120,7 @@ class Main(QMainWindow):
         self.store = WordStore()
         self._merged = self._upgrade_words()
         self._colfixed = self._fix_pasted_collocations()
+        self._broken = self._remove_broken_collocations()
         self.progress = Progress()
         self.lic = licence.LicenceState()
         self.bus = Bus()
@@ -218,6 +220,24 @@ class Main(QMainWindow):
         except Exception as ex:
             print("collocation fix:", ex)
         self.settings["colfix_261"] = True
+        self.save_settings()
+        return n
+
+    def _remove_broken_collocations(self) -> int:
+        """Once (2.6.2): "collocations" that were really lines of a JSON answer pasted with escapes ({\\, &#x20; "meaning": …)
+        are removed — paste the answer again, it is read properly now."""
+        if self.settings.get("colfix_262"):
+            return 0
+        n = 0
+        try:
+            rows = self.store.db.execute("SELECT id, phrase FROM collocations").fetchall()
+            bad = [r["id"] for r in rows if re.search(r'(&#x?[0-9a-f]+;|^[{}\[\],\\]+$|"\s*:|\\$|^\s*"[\w ]+"\s*:)', r["phrase"] or "", re.I)]
+            for cid in bad:
+                self.store.delete_collocation(cid)
+            n = len(bad)
+        except Exception as e:
+            log_error("collocation clean-up", e)
+        self.settings["colfix_262"] = True
         self.save_settings()
         return n
 
@@ -627,6 +647,9 @@ class Main(QMainWindow):
         self.pause_btn.setContextMenuPolicy(Qt.CustomContextMenu)
         self.pause_btn.customContextMenuRequested.connect(lambda *_: self.pause_menu())
         self.shadow_btn = chip(" Shadowing", "Listen, then repeat aloud in the pause — the line plays again (S)", self.toggle_shadowing, True, "mic")
+        self.part_btn = chip("", "How long a part is for Pause each line, Loop line and Shadowing: the whole sentence, or 1, 2 or 3 "
+                                 "subtitle lines", self.part_menu)
+        self._part_label()
         ctl.addSpacing(8)
         self.ab_lbl = QLabel("", objectName="ab")
         self.ab_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -647,6 +670,9 @@ class Main(QMainWindow):
             self.lvl_btn.setChecked(True)
         QApplication.instance().installEventFilter(self)
         self._apply_sub_height()
+        if self._broken:
+            QTimer.singleShot(7000, lambda: self.msg(f"My Words: {self._broken} unreadable collocation line(s) from an escaped paste removed — "
+                                                     "paste that answer again, it is read properly now", 14000))
         if self._colfixed:
             QTimer.singleShot(5000, lambda: self.msg(f"My Words: {self._colfixed} collocation line(s) pasted among the sentences moved to "
                                                      "Collocations", 12000))
@@ -716,19 +742,32 @@ class Main(QMainWindow):
         self._update_motion()
 
     # ------------------------------------------------------------------ mini player
+    def set_output(self, widget):
+        """Moves the picture to another video widget. The video is paused for the switch and goes on afterwards: switching
+        while it plays can hang the Windows video driver."""
+        was = self.player.playbackState() == QMediaPlayer.PlayingState
+        if was:
+            self.player.pause()
+        try:
+            self.player.setVideoOutput(widget)
+        except Exception as e:
+            log_error("set_output", e)
+        if was:
+            QTimer.singleShot(250, self.player.play)
+
     def show_mini(self):
         if self.mini is None:
             self.mini = MiniPlayer(self)
         if not self.mini.isVisible():
             self.mini.place()
-        self.player.setVideoOutput(self.mini.vw)
         self.mini.show()
         self.mini.raise_()
+        self.set_output(self.mini.vw)
 
     def hide_mini(self):
         if self.mini is not None and self.mini.isVisible():
             self.mini.hide()
-            self.player.setVideoOutput(self.vw)
+            self.set_output(self.vw)
 
     def mini_visible(self) -> bool:
         return self.mini is not None and self.mini.isVisible()
@@ -867,8 +906,17 @@ class Main(QMainWindow):
         self.held_cue = -1
         self.pe_last, self.pe_resume = -1, 0
         self.repeat_done = 0
-        if self.loop_line or self.shadowing:
-            self.a, self.b = self.cues[j].start_ms + self.sub_offset, self.cues[j].end_ms + self.sub_offset + 150
+        if self.loop_line or self.shadowing:          # ↑ / ↓ move a whole part
+            cur = self.parts()[max(i, 0)]
+            if step > 0:
+                j = min(len(self.cues) - 1, cur[1] + 1)
+            elif step < 0 and i >= 0 and pos - self.cues[cur[0]].start_ms <= 1200:
+                j = max(0, cur[0] - 1)
+            else:
+                j = cur[0]
+            ja, jb = self.parts()[j]
+            j = ja
+            self.a, self.b = self.cues[ja].start_ms + self.sub_offset, self.cues[jb].end_ms + self.sub_offset + 150
             self._ab_label()
         self.player.setPosition(self.cues[j].start_ms + self.sub_offset)
         self.player.play()
@@ -1001,6 +1049,53 @@ class Main(QMainWindow):
             return "de"
         return t
 
+    PARTS = (("sentence", "Whole sentence"), ("1", "1 subtitle line"), ("2", "2 subtitle lines"), ("3", "3 subtitle lines"))
+
+    def part_menu(self):
+        m = QMenu(self)
+        m.addSection("A part (Pause each line · Loop line · Shadowing)")
+        cur = self.settings.get("part", "sentence")
+        for k, label in self.PARTS:
+            a = m.addAction(label, lambda k=k: self.set_part(k))
+            a.setCheckable(True)
+            a.setChecked(k == cur)
+        m.exec(QCursor.pos())
+
+    def set_part(self, k: str):
+        self.settings["part"] = k
+        self.save_settings()
+        self._part_label()
+        self._parts_key = None
+        if (self.loop_line or self.shadowing) and self.a >= 0:       # the running loop takes the new length at once
+            self._loop_current_line()
+            self._ab_label()
+        self.msg("A part is now: " + dict(self.PARTS)[k].lower() + " (the translation stays by whole sentence)")
+
+    def _part_label(self):
+        k = self.settings.get("part", "sentence")
+        self.part_btn.setText("⟷ " + ("Sentence" if k == "sentence" else f"{k} line" + ("s" if k != "1" else "")))
+        self.part_btn.setMinimumWidth(self.part_btn.sizeHint().width())
+
+    def parts(self) -> list[tuple[int, int]]:
+        """For every line, the part it belongs to — the whole sentence or the chosen number of lines (Pause each line, Loop line,
+        Shadowing)."""
+        k = self.settings.get("part", "sentence")
+        key = (id(self.cues), len(self.cues), getattr(self, "_cue_rev", 0), k)
+        if getattr(self, "_parts_key", None) != key:
+            self._parts_key = key
+            if k == "sentence":
+                self._parts = self.units()
+            else:
+                n = int(k)                               # n lines at a time, never across the end of a sentence
+                out = [(0, 0)] * len(self.cues)
+                for a, b in sorted(set(self.units())):
+                    for p0 in range(a, b + 1, n):
+                        p1 = min(b, p0 + n - 1)
+                        for x in range(p0, p1 + 1):
+                            out[x] = (p0, p1)
+                self._parts = out
+        return self._parts
+
     def units(self) -> list[tuple[int, int]]:
         """For every subtitle line, the whole sentence it belongs to (first and last line) — translations and Pause each
         line work on sentences, not on the pieces the subtitle cut them into."""
@@ -1050,9 +1145,10 @@ class Main(QMainWindow):
         self.repeat_done = 0
         if (self.loop_line or self.shadowing) and self.cues:
             i = subtitles.index_before(self.cues, self.a - self.sub_offset + 50)
-            if i + 1 < len(self.cues):
-                c = self.cues[i + 1]
-                self.a, self.b = c.start_ms + self.sub_offset, c.end_ms + self.sub_offset + 150
+            nxt = self.parts()[i][1] + 1 if i >= 0 else 0
+            if nxt < len(self.cues):
+                a, b = self.parts()[nxt]
+                self.a, self.b = self.cues[a].start_ms + self.sub_offset, self.cues[b].end_ms + self.sub_offset + 150
                 self.player.setPosition(self.a)
                 self._ab_label()
                 return True
@@ -1193,7 +1289,8 @@ class Main(QMainWindow):
         i = subtitles.index_before(self.cues, self.cpos())
         if i < 0:
             i = 0
-        self.a, self.b = self.cues[i].start_ms + self.sub_offset, self.cues[i].end_ms + self.sub_offset + 150
+        a, b = self.parts()[i]                          # the whole sentence, or the chosen number of lines
+        self.a, self.b = self.cues[a].start_ms + self.sub_offset, self.cues[b].end_ms + self.sub_offset + 150
         self.repeat_done = 0
         return True
 
@@ -1324,7 +1421,7 @@ class Main(QMainWindow):
                 self.pe_inside = j                          # the line being played
             if j >= 0 and j != self.pe_last and cp >= self.cues[j].end_ms - 60:
                 self.pe_last = j                            # each line is looked at once
-                a, b = self.units()[j]
+                a, b = self.parts()[j]
                 # the end of a sentence (or of a part of a long one) that was played through — not a seek past it
                 if j == b and getattr(self, "pe_inside", -1) == j:
                     self.held_cue = j
@@ -1362,7 +1459,7 @@ class Main(QMainWindow):
             return False
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             return False
-        a, b = self.units()[i]
+        a, b = self.parts()[i]
         return b > a
 
     def _tr_key(self, i: int):
@@ -1402,8 +1499,8 @@ class Main(QMainWindow):
         d = self.dictionary(self.cue_lang) if show_lv else None
         out = []
         lines = [i]
-        if self._held_sentence(i):                       # Pause each line stopped here: the whole sentence, every word clickable
-            a, b = self.units()[i]
+        if self._held_sentence(i):                       # Pause each line stopped here: the whole part, every word clickable
+            a, b = self.parts()[i]
             lines = list(range(a, b + 1))
         for ci in lines:
             text, last = self.cues[ci].text, 0
@@ -2721,7 +2818,7 @@ class MiniPlayer(QFrame):
 
     def closeEvent(self, e):
         self.main.player.pause()
-        self.main.player.setVideoOutput(self.main.vw)
+        self.main.set_output(self.main.vw)
         super().closeEvent(e)
 
 
@@ -2802,6 +2899,37 @@ def selftest(out: str) -> int:
     return 0 if ok else 1
 
 
+def log_error(where: str, e: BaseException | None = None, tb: str = ""):
+    """Errors go to errors.log in the data folder (the program has no console window to show them)."""
+    try:
+        import traceback
+        txt = tb or "".join(traceback.format_exception(type(e), e, e.__traceback__)) if e else tb
+        with open(paths.data_dir() / "errors.log", "a", encoding="utf-8") as f:
+            f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} SubPlayer {VERSION} · {where}\n{txt}\n")
+    except Exception:
+        pass
+
+
+def _install_error_log():
+    """An unexpected error in a button never closes SubPlayer: it is written to errors.log and shown in the status bar.
+    A hard crash (in Qt or the video driver) leaves its traceback in crash.log."""
+    def hook(t, v, tb):
+        import traceback
+        log_error("unexpected error", tb="".join(traceback.format_exception(t, v, tb)))
+        try:
+            w = QApplication.instance()._main_window
+            w.msg(f"Something went wrong ({t.__name__}: {v}) — written to errors.log in the data folder", 12000)
+        except Exception:
+            pass
+    sys.excepthook = hook
+    try:
+        import faulthandler
+        _install_error_log.crash = open(paths.data_dir() / "crash.log", "a", encoding="utf-8")
+        faulthandler.enable(_install_error_log.crash)
+    except Exception:
+        pass
+
+
 def main():
     if "--selftest" in sys.argv:
         sys.exit(selftest(sys.argv[sys.argv.index("--selftest") + 1]))
@@ -2812,6 +2940,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("SubPlayer")
     app.setWindowIcon(icons.app_icon())
+    _install_error_log()
     theme.load_fonts()
     f = QFont()
     f.setFamilies(["Segoe UI Variable Text", "Segoe UI", "Inter", "Vazirmatn"])
