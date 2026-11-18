@@ -342,21 +342,12 @@ if tap("My words"):
     if tap("Calendar", contains=True, required=False):
         shot("16_calendar")
 
-# ---- 2.9: the four panels of a word, Pause each line going on by itself, the small video window, Review
-print("2.9: word panels")
-if tap("Wetter", required=False):
-    time.sleep(1.5)
-    shot("17_word_panels")
-    if tap("DICTIONARY", required=False):
-        time.sleep(2.5)
-        shot("18_panel_dictionary")
-        back()
-    if tap("SENTENCES", contains=True, required=False):
-        time.sleep(1.5)
-        shot("18b_panel_sentences")
-        back()
-back()                                      # to the player
-time.sleep(2)
+# ---- 2.9: Pause each line going on by itself, the small video window, the four panels of a word, Review
+back()                                      # close whatever is open, back to the player
+time.sleep(1)
+if not find("Pause each line", timeout=4):
+    back()
+    time.sleep(1)
 print("2.9: pause each line")
 if tap("Pause each line", required=False):
     shot("19_pause_wait_choice")
@@ -376,13 +367,27 @@ if tap("Pause each line", required=False):
     print("  goes on by itself:", "yes" if gone else "NO")
     if not gone:
         problems.append("Pause each line: did not go on by itself")
-    tap("Pause each line", required=False)  # off again
+    tap("Pause each line", required=False)  # off again — the video keeps playing
 print("2.9: the video on another screen")
 if tap("My words", required=False):
     time.sleep(2.5)
-    mini = find("Back to the player", timeout=6)
-    print("  small video window on My Words:", "yes" if mini else "no (the video was not playing)")
+    mini = find("Back to the player", timeout=8)
+    print("  small video window on My Words:", "yes" if mini else "NO")
+    if not mini:
+        problems.append("no small video window on My Words")
     shot("21_mini_player")
+    print("2.9: word panels")
+    if tap("Wetter", required=False):
+        time.sleep(1.5)
+        shot("17_word_panels")
+        if tap("DICTIONARY", required=False):
+            time.sleep(2.5)
+            shot("18_panel_dictionary")
+            back()
+        if tap("SENTENCES", contains=True, required=False):
+            time.sleep(1.5)
+            shot("18b_panel_sentences")
+            back()
     print("2.9: review")
     if tap("Review", contains=True, required=False):
         time.sleep(2)
