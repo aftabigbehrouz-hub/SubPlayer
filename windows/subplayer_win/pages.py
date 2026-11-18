@@ -227,6 +227,7 @@ class WordsPage(QWidget):
         frow.addWidget(self.cal_btn)
         self.exp_btn = ibtn("export", "Export these words (CSV for Excel, text, Anki)", self.export_menu, kind="chip", size=15)
         frow.addWidget(self.exp_btn)
+        frow.addWidget(ibtn("plus", "A new word by hand (without a video)", self.new_word, kind="chip", size=15, text=" New word"))
         left.addLayout(frow)
         self.cal = QCalendarWidget()
         self.cal.setGridVisible(False)
@@ -312,7 +313,8 @@ class WordsPage(QWidget):
         self.v_coll = QTextBrowser(openLinks=False)
         self.v_coll.anchorClicked.connect(self._link)
         self.p_coll.body.addWidget(self.v_coll, 1)
-        self.p_coll.add_button(ibtn("study", "Ask the teacher (Ollama) for collocations, sentences and TestDaF questions",
+        self.p_coll.add_button(ibtn("plus", "Add collocations, meanings or sentences yourself", self.edit_word, kind="chip", size=13))
+        self.p_coll.add_button(ibtn("study", "Ask the teacher (Ollama, ChatGPT, Gemini, DeepSeek, Grok) for collocations, sentences and TestDaF questions",
                                     self.teacher, kind="chip", size=13, text=" Teacher"))
         self.panes = [(self.p_video, 0, 0), (self.p_dict, 0, 1), (self.p_sent, 1, 0), (self.p_coll, 1, 1)]
         for p, r, c in self.panes:
@@ -327,8 +329,9 @@ class WordsPage(QWidget):
         self.b_play = ibtn("play", "Play this moment in the video", self.play, kind="", text=" Play in video")
         self.b_speak = ibtn("volume", "Speak", self.speak, kind="", text=" Speak")
         self.b_learn = ibtn("sparkles", "Teacher, ChatGPT / Gemini / DeepSeek / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
+        self.b_edit = ibtn("edit", "Edit the meaning, Persian, IPA — add collocations and sentences yourself", self.edit_word, kind="", text=" Edit")
         self.b_del = ibtn("trash", "Delete this word", self.delete, kind="", text=" Delete", color=theme.MAGENTA)
-        for b in (self.b_play, self.b_speak, self.b_learn, self.b_del):
+        for b in (self.b_play, self.b_speak, self.b_learn, self.b_edit, self.b_del):
             btns.addWidget(b)
         right.addLayout(btns)
         root.addWidget(rcard, 3)
@@ -627,7 +630,8 @@ class WordsPage(QWidget):
         h.append("</table>")
         if not cols:
             h.append(f"<p style='color:{theme.DIM}'>No collocations yet. <a href='teach:' style='color:{theme.CYAN}'>Ask the "
-                     "teacher</a> (Ollama on this PC), then press ＋ Add sentences &amp; collocations.</p>")
+                     "teacher</a> (Ollama, ChatGPT, Gemini, DeepSeek or Grok), or <a href='edit:' style='color:{theme.CYAN}'>write "
+                     "them yourself</a>.</p>")
         if qs:
             h.append(f"<p style='color:{theme.DIM};margin-top:10px'>📝 {len(qs)} exam question(s) on this word are in Review.</p>")
         h.append("</div>")
@@ -643,6 +647,8 @@ class WordsPage(QWidget):
             return self.play_here()
         if kind == "teach":
             return self.teacher()
+        if kind == "edit":
+            return self.edit_word()
         if kind == "sayt":
             import urllib.parse
             return self.main.speak(urllib.parse.unquote(val), lang=w.lang)
@@ -697,6 +703,19 @@ class WordsPage(QWidget):
             from .dialogs import AddSentencesDialog
             AddSentencesDialog(self.main, w).exec()
             self.show_word()
+
+    def edit_word(self):
+        w = self.current()
+        if w:
+            from .dialogs import WordEditDialog
+            if WordEditDialog(self.main, self.main, w).exec():
+                self.refresh()
+
+    def new_word(self):
+        from .dialogs import WordEditDialog
+        if WordEditDialog(self.main, self.main, None).exec():
+            self.refresh()
+            self.list.setCurrentRow(0)
 
     def teacher(self):
         w = self.current()
