@@ -66,6 +66,8 @@ def _options(raw: str) -> list[str]:
 def parse(text: str, lang: str = "de", video_name: str = "", source: str = "") -> list[Question]:
     """The review cards in a lesson: everything after ---REVIEW--- (or the whole text when the mark is missing but it is
     written as Q:/O:/A:/E: cards)."""
+    from . import practice
+    text = practice.clean_ai(text)
     i = text.rfind(MARK)
     body = text[i + len(MARK):] if i >= 0 else text
     out, cur = [], {}

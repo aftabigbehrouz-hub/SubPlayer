@@ -156,8 +156,17 @@ class AddSentencesDialog(QDialog):
         v.addWidget(b)
 
     def add(self):
-        cols, rest = practice.split_collocations(self.text.toPlainText())      # collocation lines / table rows go to Collocations
-        items = practice.parse_sentences(rest, primary=self.word.lang)
+        from . import ollama
+        from .teacher import collocations_of, word_from_text
+        raw = practice.clean_ai(self.text.toPlainText())                       # &#x20;, line-end backslashes, ``` fences
+        d = ollama.parse_json(raw)
+        if d:                                                                  # a JSON answer (the teacher's format)
+            cols = collocations_of(d)
+            items = [Example(de=str(x.get("sentence", "")).strip(), en=str(x.get("translation", "")))
+                     for x in ollama.as_list(d.get("examples")) if isinstance(x, dict) and x.get("sentence")]
+        else:
+            cols, rest = practice.split_collocations(raw)                     # collocation lines / table rows go to Collocations
+            items = practice.parse_sentences(rest, primary=self.word.lang)
         if not items and not cols:
             self.info.setText("No sentences found. Each line should look like the format above.")
             return
@@ -239,21 +248,33 @@ class WordEditDialog(QDialog):
         for attr, fld in (("ipa", self.f_ipa), ("english", self.f_en), ("persian", self.f_fa)):
             if fld.text().strip():
                 setattr(w, attr, fld.text().strip())
+        cols, sents = [], []
+        for box in (self.f_cols, self.f_sents):                 # a whole AI answer pasted into a box: sorted into its parts
+            raw = box.toPlainText()
+            if raw.strip() and practice.looks_like_ai_answer(raw):
+                from . import ollama
+                from .teacher import collocations_of, word_from_text
+                t = practice.clean_ai(raw)
+                d = ollama.parse_json(t) or word_from_text(t, w.lang)
+                cols += collocations_of(d)
+                sents += [Example(de=str(x.get("sentence", "")).strip(), en=str(x.get("translation", "")))
+                          for x in ollama.as_list(d.get("examples")) if isinstance(x, dict) and x.get("sentence")]
+                if not w.english and isinstance(d.get("meaning"), str):
+                    w.english = d["meaning"][:200]
+                box.setPlainText("")
         st.update(w)
-        cols = []
-        for line in self.f_cols.toPlainText().splitlines():
+        for line in practice.clean_ai(self.f_cols.toPlainText()).splitlines():
             p = [x.strip() for x in line.split("|")]
             if p and p[0]:
                 cols.append({"phrase": p[0], "meaning": p[1] if len(p) > 1 else "", "example": p[2] if len(p) > 2 else ""})
         k = st.add_collocations(w.lang, w.text if " " in w.text.strip() else (w.lemma or w.text), cols) if cols else 0
-        sents = []
-        for line in self.f_sents.toPlainText().splitlines():
+        for line in practice.clean_ai(self.f_sents.toPlainText()).splitlines():
             p = [x.strip() for x in line.split("|")]
             if p and p[0]:
                 fa = next((x for x in p[1:] if practice._persian(x)), "")
                 en = next((x for x in p[1:] if x and not practice._persian(x)), "")
                 sents.append(Example(de=p[0], en=en, fa=fa))
-        n = st.add_examples(w.id, sents) if sents else 0
+        n = st.add_examples(w.id, [e for e in sents if e.de]) if sents else 0
         self.main.after_change()
         self.main.msg(f"„{w.text}“ saved" + (f" · {k} collocation(s)" if k else "") + (f" · {n} sentence(s)" if n else ""))
         self.accept()

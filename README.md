@@ -2,6 +2,9 @@
 
 **New in Windows 2.6.2**
 - **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,
+- Answers copied from ChatGPT, Gemini & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences) — in the Teacher's Paste, Add sentences, Study and the Edit window. A whole AI answer pasted into Edit's Collocations or Sentences box is sorted into meaning, collocations and sentences.
+- Once: unreadable collocation lines left by such pastes (`{\`, `&#x20; "meaning": …`) are removed from My Words — paste that answer again.
+
   DeepSeek, Grok or another AI nothing is asked by itself: **➜ Ask** copies the tab's question (and opens the site), then
   **📋 Paste answer** — it always fills the tab that is open.
 - **The length of a part** (button **⟷** next to Shadowing): the whole sentence, or 1, 2 or 3 subtitle lines — used by Pause

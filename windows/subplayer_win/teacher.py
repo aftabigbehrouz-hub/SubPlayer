@@ -286,7 +286,8 @@ class TeacherDialog(QDialog):
 
     def paste_answer(self):
         from PySide6.QtWidgets import QApplication
-        t = QApplication.clipboard().text().strip()
+        from . import practice
+        t = practice.clean_ai(QApplication.clipboard().text())     # &#x20; and line-end backslashes of some copy buttons
         if not t:
             self.state.setText("Nothing copied yet — copy the assistant's whole answer first")
             return

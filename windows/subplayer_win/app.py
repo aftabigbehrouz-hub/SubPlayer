@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -119,6 +120,7 @@ class Main(QMainWindow):
         self.store = WordStore()
         self._merged = self._upgrade_words()
         self._colfixed = self._fix_pasted_collocations()
+        self._broken = self._remove_broken_collocations()
         self.progress = Progress()
         self.lic = licence.LicenceState()
         self.bus = Bus()
@@ -218,6 +220,24 @@ class Main(QMainWindow):
         except Exception as ex:
             print("collocation fix:", ex)
         self.settings["colfix_261"] = True
+        self.save_settings()
+        return n
+
+    def _remove_broken_collocations(self) -> int:
+        """Once (2.6.2): "collocations" that were really lines of a JSON answer pasted with escapes ({\\, &#x20; "meaning": …)
+        are removed — paste the answer again, it is read properly now."""
+        if self.settings.get("colfix_262"):
+            return 0
+        n = 0
+        try:
+            rows = self.store.db.execute("SELECT id, phrase FROM collocations").fetchall()
+            bad = [r["id"] for r in rows if re.search(r'(&#x?[0-9a-f]+;|^[{}\[\],\\]+$|"\s*:|\\$|^\s*"[\w ]+"\s*:)', r["phrase"] or "", re.I)]
+            for cid in bad:
+                self.store.delete_collocation(cid)
+            n = len(bad)
+        except Exception as e:
+            log_error("collocation clean-up", e)
+        self.settings["colfix_262"] = True
         self.save_settings()
         return n
 
@@ -650,6 +670,9 @@ class Main(QMainWindow):
             self.lvl_btn.setChecked(True)
         QApplication.instance().installEventFilter(self)
         self._apply_sub_height()
+        if self._broken:
+            QTimer.singleShot(7000, lambda: self.msg(f"My Words: {self._broken} unreadable collocation line(s) from an escaped paste removed — "
+                                                     "paste that answer again, it is read properly now", 14000))
         if self._colfixed:
             QTimer.singleShot(5000, lambda: self.msg(f"My Words: {self._colfixed} collocation line(s) pasted among the sentences moved to "
                                                      "Collocations", 12000))

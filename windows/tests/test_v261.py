@@ -53,3 +53,20 @@ class PastedAnswers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EscapedPaste(unittest.TestCase):
+    RAW = ('{\\\n&#x20; "meaning": "Ich bin nicht bereit, etwas zu tun.",\\\n&#x20; "collocations": [\\\n'
+           '&#x20;   {"phrase": "sich weigern, etwas zu tun", "meaning": "to refuse to do sth", "example": "Er weigert sich, zu zahlen."}\\\n'
+           '&#x20; ],\\\n&#x20; "examples": [{"sentence": "Ich weigere mich, das zu glauben.", "translation": "I refuse to believe it."}]\\\n}')
+
+    def test_a_copy_button_answer_is_read(self):
+        from subplayer_win import ollama
+        self.assertTrue(practice.looks_like_ai_answer(self.RAW))
+        d = ollama.parse_json(practice.clean_ai(self.RAW))
+        self.assertEqual(d["collocations"][0]["phrase"], "sich weigern, etwas zu tun")
+        self.assertEqual(d["examples"][0]["sentence"], "Ich weigere mich, das zu glauben.")
+
+    def test_markdown_escapes_and_fences(self):
+        self.assertEqual(practice.clean_ai("```json\n\\*\\*KOLL:\\*\\* a \\| b\n```"), "**KOLL:** a | b")
+        self.assertFalse(practice.looks_like_ai_answer("etliche Male | several times"))
