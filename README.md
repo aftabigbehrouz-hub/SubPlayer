@@ -1,5 +1,16 @@
 # SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.6
 
+**New in Windows 2.6.1**
+- **The teacher works with online assistants too:** *Answer from* — Ollama (this PC), ChatGPT, Gemini, DeepSeek, Grok, or
+  any other AI (the question is only copied). Every tab works with each: the question is copied and the site opens; copy the
+  whole answer and press **📋 Paste answer** — collocations, sentences, corrections and TestDaF / IELTS questions appear just
+  like Ollama's and can be added to the word and to Review. Ollama is no longer required to open the teacher.
+- **By hand:** *Edit* (My Words) or *✎ Add my own…* (teacher) — meaning, Persian, IPA, article, collocations and sentences;
+  **＋ New word** (My Words) for a word without a video; **✎ Write a question…** (teacher ▸ TestDaF) for your own exam question.
+- **Pasted collocations go to Collocations:** "KOLL: … | … | …" lines and ChatGPT's tables (short phrases) are no longer
+  stored as sentences; table headers are dropped. Collocations pasted among the sentences before are moved once.
+- The ChatGPT / Gemini / DeepSeek / Grok word question asks for collocations in that format.
+
 **New in Windows 2.6**
 - **My Words, newest first:** the list is in the order you saved the words (today's at the top) — with every filter.
 - **One entry per word:** saving a word that is already in My Words (from another line or video) no longer makes a second

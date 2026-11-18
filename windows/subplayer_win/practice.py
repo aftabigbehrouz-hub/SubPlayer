@@ -21,6 +21,55 @@ def _persian(s: str) -> bool:
     return bool(ARABIC.search(s))
 
 
+COLL = re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*)?(KOLL|COLL|Kollokation|Collocation)(?:\*\*)?\s*[:：]\s*(.*)$", re.I)
+HEADER_WORDS = {"german", "deutsch", "english", "englisch", "persian", "persisch", "farsi", "فارسی", "collocation", "collocations",
+                "kollokation", "kollokationen", "meaning", "bedeutung", "example", "examples", "beispiel", "beispielsatz",
+                "translation", "übersetzung", "phrase", "ausdruck", "word", "wort", "sentence", "satz", "#", "nr", "no"}
+
+
+def is_header(cell: str) -> bool:
+    """A table header cell such as "German collocation" or "English"."""
+    ws = [w.strip("*:()").lower() for w in cell.split()]
+    return bool(ws) and all(w in HEADER_WORDS for w in ws)
+
+
+def is_phrase(t: str) -> bool:
+    """A collocation, not a sentence: at most 5 words and no full stop / ! / ? at the end."""
+    t = t.strip()
+    return 1 <= len(t.split()) <= 5 and t[-1:] not in ".!?…" and not _persian(t)
+
+
+def split_collocations(raw: str) -> tuple[list[dict], str]:
+    """Collocations in a pasted AI answer — "KOLL: phrase | meaning | example" lines, and table rows whose first cell is a
+    short phrase (ChatGPT often answers with a table) — and the rest of the text (the sentences) without them. Table headers
+    and separator rows are dropped."""
+    cols, rest = [], []
+    for line in raw.replace("\r", "").split("\n"):
+        m = COLL.match(line)
+        if m:
+            parts = [_clean(p) for p in m.group(2).split("|")]
+            if parts and parts[0]:
+                cols.append({"phrase": parts[0], "meaning": parts[1] if len(parts) > 1 else "", "example": parts[2] if len(parts) > 2 else ""})
+            continue
+        st = BULLET.sub("", line.strip())
+        if "|" in st:
+            cells = [_clean(LABEL.sub("", _clean(c))) for c in st.strip().strip("|").split("|")]
+            cells = [c for c in cells if c]
+            if not cells or all(set(c) <= set("-:= ") for c in cells):
+                continue                                          # a markdown separator row |---|---|
+            if all(is_header(c) for c in cells if not _persian(c)):
+                continue                                          # the header row
+            if is_phrase(cells[0]):
+                others = cells[1:]
+                fa = next((c for c in others if _persian(c)), "")
+                ex = next((c for c in others if not _persian(c) and len(c.split()) >= 3 and c[-1:] in ".!?"), "")
+                mean = next((c for c in others if not _persian(c) and c != ex), "")
+                cols.append({"phrase": cells[0], "meaning": " · ".join(x for x in (mean, fa) if x), "example": ex})
+                continue
+        rest.append(line)
+    return cols, "\n".join(rest)
+
+
 def parse_sentences(raw: str, max_n: int = 12, primary: str = "de") -> list[Example]:
     """
     Accepts "DE: … | EN: … | FA: …", any "a | b | c" rows, blocks of labelled lines, or plain sentences.

@@ -37,6 +37,12 @@ class Runner(QObject):
         threading.Thread(target=work, daemon=True).start()
 
 
+# Where the teacher's answers come from: Ollama on this PC, or an online assistant (the question is copied and the site opens;
+# its answer is pasted back with "Paste answer" and shown exactly like Ollama's).
+SOURCES = (("ollama", "Ollama (this PC)"), ("chatgpt", "ChatGPT"), ("gemini", "Gemini"), ("deepseek", "DeepSeek"), ("grok", "Grok"),
+           ("copy", "Other AI — copy the question"))
+
+
 def client(main) -> ollama.Client:
     return ollama.Client(main.settings.get("ollama_url", ollama.DEFAULT_URL), main.settings.get("ollama_model", ""))
 
@@ -69,7 +75,7 @@ class TeacherDialog(QDialog):
         v.setContentsMargins(22, 16, 22, 16)
         head = QHBoxLayout()
         t = QLabel(f"<span style='font-size:19pt;font-weight:700;color:{theme.CYAN}'>{html.escape(self.lemma)}</span>"
-                   f"<span style='color:{theme.DIM}'> &nbsp;· your teacher on this PC ({html.escape(main.settings.get('ollama_model', '') or '—')})</span>")
+                   f"<span style='color:{theme.DIM}'> &nbsp;· your teacher — Ollama on this PC or an online assistant</span>")
         head.addWidget(t, 1)
         head.addWidget(QLabel("Level", objectName="small"))
         self.lv = QComboBox()
@@ -85,6 +91,18 @@ class TeacherDialog(QDialog):
         self.ex.currentIndexChanged.connect(self._explain_changed)
         head.addWidget(self.ex)
         v.addLayout(head)
+        srow = QHBoxLayout()
+        srow.addWidget(QLabel("Answer from", objectName="small"))
+        self.src = QComboBox()
+        for k, label in SOURCES:
+            self.src.addItem(label, k)
+        default = main.settings.get("teacher_source") or ("ollama" if main.settings.get("ollama_model") else "chatgpt")
+        self.src.setCurrentIndex(max(0, self.src.findData(default)))
+        self.src.currentIndexChanged.connect(self._source_changed)
+        srow.addWidget(self.src)
+        self.src_hint = QLabel("", objectName="small")
+        srow.addWidget(self.src_hint, 1)
+        v.addLayout(srow)
         if sentence:
             s = QLabel(f"<span style='color:{theme.DIM}'>„{html.escape(sentence)}“</span>")
             s.setWordWrap(True)
@@ -159,6 +177,15 @@ class TeacherDialog(QDialog):
         self.addq_b.clicked.connect(self.add_questions)
         self.addq_b.setEnabled(False)
         foot.addWidget(self.addq_b)
+        self.manual_b = QPushButton("✎ Add my own…")
+        self.manual_b.setToolTip("Write meanings, collocations and sentences yourself (Word tab), or your own exam question (TestDaF tab)")
+        self.manual_b.clicked.connect(self.manual)
+        foot.addWidget(self.manual_b)
+        self.paste_b = QPushButton("📋 Paste answer")
+        self.paste_b.setProperty("accent", True)
+        self.paste_b.setToolTip("Copy the assistant's whole answer, then press this — it is shown here like Ollama's")
+        self.paste_b.clicked.connect(self.paste_answer)
+        foot.addWidget(self.paste_b)
         self.add_b.setEnabled(False)
         foot.addWidget(self.add_b)
         self.again_b = QPushButton("New answer")
@@ -179,7 +206,56 @@ class TeacherDialog(QDialog):
         self.runner.failed.connect(self._failed)
         self._target_view, self._buf, self._mode = None, "", ""
         self.cache = ollama.Cache()
+        self._source_changed()
         self.tab(tab)
+
+    # ------------------------------------------------------------------ source: Ollama or an online assistant
+    def source(self) -> str:
+        return self.src.currentData() or "ollama"
+
+    def _source_changed(self, *_):
+        k = self.source()
+        self.main.settings["teacher_source"] = k
+        self.main.save_settings()
+        online = k != "ollama"
+        self.paste_b.setVisible(online)
+        self.stop_b.setVisible(not online)
+        self.src_hint.setText("" if not online else
+                              "The question is copied and the site opens — paste it there (Ctrl+V) if it isn't filled in, "
+                              "then copy the whole answer and press 📋 Paste answer.")
+
+    def _model_tag(self) -> str:
+        return self.main.settings.get("ollama_model", "") if self.source() == "ollama" else self.source()
+
+    def manual(self):
+        from .dialogs import QuestionDialog, WordEditDialog
+        if self.stack.currentIndex() == 4:
+            from pathlib import Path
+            video = Path(self.main.video).name if getattr(self.main, "video", "") else ""
+            if QuestionDialog(self, self.main, self.lang, self.lemma, video).exec():
+                self.state.setText("Your question was added to Review ✓")
+            return
+        w = self.saved() if self.saved else None
+        if not w:
+            self.state.setText("Save the word first (☆ Save on the word card)")
+            return
+        WordEditDialog(self, self.main, w).exec()
+
+    def paste_answer(self):
+        from PySide6.QtWidgets import QApplication
+        t = QApplication.clipboard().text().strip()
+        if not t:
+            self.state.setText("Nothing copied yet — copy the assistant's whole answer first")
+            return
+        if t == getattr(self, "_asked", ""):
+            self.state.setText("That is still the question — copy the assistant's ANSWER, then press 📋 Paste answer")
+            return
+        if self._target_view is None:
+            self.state.setText("Ask first (the tab's button), then paste the answer")
+            return
+        if self._mode == "text":
+            self._target_view.setPlainText(t)
+        self._done(t)
 
     # ------------------------------------------------------------------ helpers
     def _level_changed(self, lv):
@@ -200,6 +276,8 @@ class TeacherDialog(QDialog):
         self.stack.setCurrentIndex(i)
         self.add_b.setVisible(i == 0)
         self.addq_b.setVisible(i == 4)
+        self.manual_b.setVisible(i in (0, 4))
+        self.manual_b.setText("✎ Write a question…" if i == 4 else "✎ Add my own…")
         self.again_b.setVisible(i in (0, 1, 4))
         if i == 0 and not self.result:
             self.coach()
@@ -212,7 +290,29 @@ class TeacherDialog(QDialog):
         elif i == 3:
             self.question.setFocus()
 
-    def _start(self, view, mode: str, fn, waiting: str):
+    def _start(self, view, mode: str, fn, waiting: str, q: str = "", sys_: str = ""):
+        if self.source() != "ollama":                      # an online assistant: the question goes there, the answer is pasted
+            from . import lessons
+            from PySide6.QtWidgets import QApplication
+            self._target_view, self._buf, self._mode = view, "", mode
+            full = (sys_ + "\n\n" + q).strip()
+            self._asked = full
+            src = self.source()
+            name = dict(SOURCES)[src].split(" —")[0]
+            if src == "copy":
+                QApplication.clipboard().setText(full)
+            else:
+                self.main.ask_ai(src, full, "Copy its whole answer, then press 📋 Paste answer in the teacher.")
+            view.setHtml(f"<p style='color:{theme.DIM}'>The question is copied" + ("" if src == "copy" else f" and {html.escape(name)} opens")
+                         + ". Paste it there (Ctrl+V) if it isn't filled in. When the answer is complete, copy all of it and press "
+                         f"<b style='color:{theme.CYAN}'>📋 Paste answer</b>.</p>")
+            self.state.setText(f"Waiting for {name}'s answer…")
+            return
+        if not self.main.settings.get("ollama_model"):
+            ok = self.main.ensure_teacher()
+            self.state.setText("Ollama is ready — press the button again" if ok else
+                               "No Ollama model — choose ChatGPT, Gemini, DeepSeek or Grok under “Answer from”")
+            return
         if self.runner.busy:
             self.state.setText("The teacher is still answering — press Stop first")
             return
@@ -240,14 +340,14 @@ class TeacherDialog(QDialog):
         self.stop_b.setEnabled(False)
         self.state.setText("Done · answers from a local model can contain mistakes — trust the dictionary for the meaning")
         if self._mode == "word":
-            d = ollama.parse_json(res)
+            d = ollama.parse_json(res) or word_from_text(res, self.lang)
             if not d:
                 self._target_view.setPlainText(res or "The model gave no answer.")
                 return
             self.cache.put(self._ckey(), d)
             self.show_word(d)
         elif self._mode == "exam":
-            d = ollama.parse_json(res)
+            d = ollama.parse_json(res) or exam_from_text(res, self.lang)
             if not d:
                 self._target_view.setPlainText(res or "The model gave no answer.")
                 return
@@ -255,10 +355,12 @@ class TeacherDialog(QDialog):
             self.show_questions(d)
         elif self._mode == "check":
             self.show_check(ollama.parse_json(res), res)
+        if self.source() != "ollama":
+            self.state.setText("Answer pasted · answers from AI can contain mistakes — trust the dictionary for the meaning")
 
     # ------------------------------------------------------------------ 0 word coach
     def _ckey(self):
-        return ollama.Cache.key(self.main.settings.get("ollama_model", ""), self.lang, self.lemma, self.lv.currentText(), self.ex.currentData())
+        return ollama.Cache.key(self._model_tag(), self.lang, self.lemma, self.lv.currentText(), self.ex.currentData())
 
     def coach(self, fresh: bool = False):
         self.add_b.setEnabled(False)
@@ -272,7 +374,7 @@ class TeacherDialog(QDialog):
         q = ollama.word_prompt(self.word, self.lemma, self.sentence, self.lang, self.lv.currentText(), self.ex.currentData())
         self._start(self.view, "word", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop,
                                                                 temperature=0.8 if fresh else 0.5),
-                    "Your teacher is preparing the meaning, collocations and example sentences…")
+                    "Your teacher is preparing the meaning, collocations and example sentences…", q, sys_)
 
     def show_word(self, d: dict):
         self.result = d
@@ -348,7 +450,7 @@ class TeacherDialog(QDialog):
         q = questions.teacher_prompt(self.word, self.lemma, self.sentence, self.lang, self.lv.currentText(), self.ex.currentData())
         self._start(self.view5, "exam", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop,
                                                                  temperature=0.8 if fresh else 0.5),
-                    f"Your teacher is writing {self.exam}-style questions on „{html.escape(self.lemma)}“…")
+                    f"Your teacher is writing {self.exam}-style questions on „{html.escape(self.lemma)}“…", q, sys_)
 
     def show_questions(self, d: dict, reveal: bool = False):
         from . import questions
@@ -391,7 +493,7 @@ class TeacherDialog(QDialog):
         c = client(self.main)
         sys_ = ollama._teacher(self.lang, self.ex.currentData())
         q = ollama.sentence_prompt(self.sentence, self.lang, self.ex.currentData(), self.lv.currentText())
-        self._start(self.view2, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…")
+        self._start(self.view2, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…", q, sys_)
 
     def again(self):
         if self.stack.currentIndex() == 1:
@@ -411,7 +513,7 @@ class TeacherDialog(QDialog):
         sys_ = ollama._teacher(self.lang, self.ex.currentData())
         q = ollama.check_prompt(self.lemma, a, self.lang, self.ex.currentData(), self.lv.currentText())
         self._start(self.view3, "check", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop, temperature=0.2),
-                    "Checking…")
+                    "Checking…", q, sys_)
 
     def show_check(self, d: dict, raw: str):
         if not d:
@@ -450,7 +552,7 @@ class TeacherDialog(QDialog):
         from pathlib import Path
         video = Path(self.main.video).stem if getattr(self.main, "video", "") else ""
         q = ollama.ask_prompt(qn, self.lemma, self.sentence, video, self.lang, self.ex.currentData(), self.lv.currentText())
-        self._start(self.view4, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…")
+        self._start(self.view4, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…", q, sys_)
 
     def reject(self):
         self.runner.stop = True
@@ -459,6 +561,25 @@ class TeacherDialog(QDialog):
     def closeEvent(self, e):
         self.runner.stop = True
         super().closeEvent(e)
+
+
+def word_from_text(text: str, lang: str) -> dict:
+    """A word-coach answer written as text (not JSON): its collocations and example sentences."""
+    from . import practice
+    cols, rest = practice.split_collocations(text)
+    exs = practice.parse_sentences(rest, primary=lang)
+    if not cols and not exs:
+        return {}
+    first = next((ln.strip(" *#-") for ln in text.splitlines() if ln.strip() and "|" not in ln), "")
+    return {"meaning": first[:300], "collocations": cols,
+            "examples": [{"sentence": e.de, "translation": e.en or e.fa} for e in exs]}
+
+
+def exam_from_text(text: str, lang: str) -> dict:
+    """Exam questions written as Q: / O: / A: / E: cards (not JSON)."""
+    from . import questions
+    qs = questions.parse(text, lang)
+    return {"questions": [{"question": q.question, "options": q.options, "answer": q.answer, "explanation": q.explanation} for q in qs]} if qs else {}
 
 
 def collocations_of(d: dict) -> list[dict]:

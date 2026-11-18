@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayou
 
 from . import asr, downloads, icons, licence, practice, sync, theme
 from .cosmos import GradientLabel, Orb
+from .store import Example
 
 GITHUB = "https://github.com/aftabigbehrouz-hub/SubPlayer"
 PRIVACY = GITHUB + "/blob/main/PRIVACY.md"
@@ -155,13 +156,150 @@ class AddSentencesDialog(QDialog):
         v.addWidget(b)
 
     def add(self):
-        items = practice.parse_sentences(self.text.toPlainText(), primary=self.word.lang)
-        if not items:
+        cols, rest = practice.split_collocations(self.text.toPlainText())      # collocation lines / table rows go to Collocations
+        items = practice.parse_sentences(rest, primary=self.word.lang)
+        if not items and not cols:
             self.info.setText("No sentences found. Each line should look like the format above.")
             return
-        n = self.main.store.add_examples(self.word.id, items)
+        w = self.word
+        n = self.main.store.add_examples(w.id, items) if items else 0
+        k = self.main.store.add_collocations(w.lang, w.text if " " in w.text.strip() else (w.lemma or w.text), cols) if cols else 0
         self.main.after_change()
-        self.main.msg("Those sentences are already saved" if n == 0 else f"{n} sentence(s) added — they appear in review and practice")
+        self.main.msg("Those sentences are already saved" if n == 0 and k == 0 else
+                      " · ".join(x for x in (f"{n} sentence(s) added (review and practice)" if n else "",
+                                             f"{k} collocation(s) added" if k else "") if x))
+        self.accept()
+
+
+class WordEditDialog(QDialog):
+    """A word by hand: its meaning, Persian, IPA, article, collocations and sentences — or a new word without a video."""
+
+    def __init__(self, parent, main, word=None):
+        from PySide6.QtWidgets import QComboBox, QFormLayout, QLineEdit
+        super().__init__(parent)
+        self.main, self.word = main, word
+        self.setWindowTitle("Edit word" if word else "New word")
+        self.setMinimumSize(640, 640)
+        v = QVBoxLayout(self)
+        v.addWidget(title(f"„{word.text}“ — edit / add" if word else "A new word for My Words", 17))
+        v.addWidget(hint("Everything here is optional except the word. Collocations: one per line — phrase | meaning | example. "
+                         "Sentences: one per line — sentence | translation | Persian (or just the sentence)."))
+        f = QFormLayout()
+        self.f_text = QLineEdit(word.text if word else "")
+        self.f_lemma = QLineEdit(word.lemma if word else "", placeholderText="base form (gehen for ging) — empty = the word")
+        self.f_lang = QComboBox()
+        self.f_lang.addItem("German", "de")
+        self.f_lang.addItem("English", "en")
+        self.f_lang.setCurrentIndex(max(0, self.f_lang.findData(word.lang if word else "de")))
+        self.f_art = QComboBox()
+        self.f_art.addItems(["", "der", "die", "das"])
+        self.f_art.setCurrentText(word.article if word else "")
+        self.f_ipa = QLineEdit(word.ipa if word else "")
+        self.f_en = QLineEdit(word.english if word else "", placeholderText="meaning (English — or German for an English word)")
+        self.f_fa = QLineEdit(word.persian if word else "", placeholderText="معنی فارسی")
+        self.f_fa.setLayoutDirection(Qt.RightToLeft)
+        for label, wdg in (("Word", self.f_text), ("Base form", self.f_lemma), ("Language", self.f_lang), ("Article", self.f_art),
+                           ("IPA", self.f_ipa), ("Meaning", self.f_en), ("Persian", self.f_fa)):
+            f.addRow(label, wdg)
+        if word:
+            self.f_text.setReadOnly(True)
+            self.f_lang.setEnabled(False)
+        v.addLayout(f)
+        v.addWidget(QLabel("Collocations to add", objectName="small"))
+        self.f_cols = QPlainTextEdit(placeholderText="etliche Male | several times | Ich war etliche Male dort.")
+        v.addWidget(self.f_cols, 1)
+        v.addWidget(QLabel("Sentences to add", objectName="small"))
+        self.f_sents = QPlainTextEdit(placeholderText="Es gab etliche Touristen in der Stadt. | There were quite a few tourists in the city.")
+        v.addWidget(self.f_sents, 1)
+        self.info = hint("")
+        v.addWidget(self.info)
+        b = QPushButton("Save")
+        b.setProperty("accent", True)
+        b.clicked.connect(self.save)
+        v.addWidget(b)
+
+    def save(self):
+        from .store import SavedWord, now_ms
+        st = self.main.store
+        text = self.f_text.text().strip()
+        if not text:
+            self.info.setText("Write the word first")
+            return
+        lang = self.f_lang.currentData()
+        w = self.word
+        if w is None:
+            same = st.find_same(text, self.f_lemma.text().strip() or text, lang)
+            if same:
+                w = same
+            else:
+                w = SavedWord(text=text, lemma=self.f_lemma.text().strip() or text, sentence="", lang=lang, created=now_ms(), due=now_ms())
+                w.id = st.insert(w)
+        w.lemma = self.f_lemma.text().strip() or w.lemma or text
+        w.article = self.f_art.currentText()
+        for attr, fld in (("ipa", self.f_ipa), ("english", self.f_en), ("persian", self.f_fa)):
+            if fld.text().strip():
+                setattr(w, attr, fld.text().strip())
+        st.update(w)
+        cols = []
+        for line in self.f_cols.toPlainText().splitlines():
+            p = [x.strip() for x in line.split("|")]
+            if p and p[0]:
+                cols.append({"phrase": p[0], "meaning": p[1] if len(p) > 1 else "", "example": p[2] if len(p) > 2 else ""})
+        k = st.add_collocations(w.lang, w.text if " " in w.text.strip() else (w.lemma or w.text), cols) if cols else 0
+        sents = []
+        for line in self.f_sents.toPlainText().splitlines():
+            p = [x.strip() for x in line.split("|")]
+            if p and p[0]:
+                fa = next((x for x in p[1:] if practice._persian(x)), "")
+                en = next((x for x in p[1:] if x and not practice._persian(x)), "")
+                sents.append(Example(de=p[0], en=en, fa=fa))
+        n = st.add_examples(w.id, sents) if sents else 0
+        self.main.after_change()
+        self.main.msg(f"„{w.text}“ saved" + (f" · {k} collocation(s)" if k else "") + (f" · {n} sentence(s)" if n else ""))
+        self.accept()
+
+
+class QuestionDialog(QDialog):
+    """Your own exam question (TestDaF / IELTS style) — it comes back in Review like the others."""
+
+    def __init__(self, parent, main, lang: str = "de", lemma: str = "", video: str = ""):
+        from PySide6.QtWidgets import QLineEdit
+        super().__init__(parent)
+        self.main, self.lang, self.lemma, self.video = main, lang, lemma, video
+        self.setWindowTitle("Write a question")
+        self.setMinimumSize(600, 520)
+        v = QVBoxLayout(self)
+        v.addWidget(title(("IELTS" if lang == "en" else "TestDaF") + " question" + (f" on „{lemma}“" if lemma else ""), 17))
+        v.addWidget(QLabel("Question (a short text can go in it too)", objectName="small"))
+        self.q = QPlainTextEdit()
+        v.addWidget(self.q, 1)
+        v.addWidget(QLabel("Choices — one per line (empty for an open question). E.g. richtig / falsch, or A) … B) … C) …", objectName="small"))
+        self.o = QPlainTextEdit()
+        v.addWidget(self.o, 1)
+        self.a = QLineEdit(placeholderText="The right answer (as written in the choices, or the letter)")
+        v.addWidget(self.a)
+        self.e = QLineEdit(placeholderText="Why (optional)")
+        v.addWidget(self.e)
+        self.info = hint("")
+        v.addWidget(self.info)
+        b = QPushButton("Add to Review")
+        b.setProperty("accent", True)
+        b.clicked.connect(self.save)
+        v.addWidget(b)
+
+    def save(self):
+        from . import questions
+        from .store import Question
+        q, a = self.q.toPlainText().strip(), self.a.text().strip()
+        if not q or not a:
+            self.info.setText("Write the question and its answer")
+            return
+        opts = [x.strip() for x in self.o.toPlainText().splitlines() if x.strip()]
+        n = self.main.store.add_questions([Question(question=q, answer=a, options=opts, explanation=self.e.text().strip(),
+                                                    kind=questions._kind(opts), lang=self.lang, lemma=self.lemma,
+                                                    video_name=self.video, source="mine")])
+        self.main.after_change()
+        self.main.msg("Question added to Review ✓" if n else "That question is already in Review")
         self.accept()
 
 

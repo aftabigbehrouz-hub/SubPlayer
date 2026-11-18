@@ -118,6 +118,7 @@ class Main(QMainWindow):
         netcfg.apply(self.settings)
         self.store = WordStore()
         self._merged = self._upgrade_words()
+        self._colfixed = self._fix_pasted_collocations()
         self.progress = Progress()
         self.lic = licence.LicenceState()
         self.bus = Bus()
@@ -192,6 +193,31 @@ class Main(QMainWindow):
         except Exception as e:
             print("word upgrade:", e)
         self.settings["upgraded_26"] = True
+        self.save_settings()
+        return n
+
+    def _fix_pasted_collocations(self) -> int:
+        """Once (2.6.1): collocations that a pasted AI table put among the sentences (short phrases with the word, no full stop)
+        move to the word's collocations; table headers such as "German collocation | English" are removed."""
+        if self.settings.get("colfix_261"):
+            return 0
+        from . import practice
+        n = 0
+        try:
+            for w in self.store.all():
+                base = (w.lemma or w.text).lower()
+                for e in self.store.examples(w.id):
+                    if practice.is_header(e.de):
+                        self.store.delete_example(e.id)
+                        n += 1
+                    elif practice.is_phrase(e.de) and (base in e.de.lower() or w.text.lower() in e.de.lower()):
+                        self.store.add_collocations(w.lang, w.lemma or w.text,
+                                                    [{"phrase": e.de, "meaning": " · ".join(x for x in (e.en, e.fa) if x), "example": ""}])
+                        self.store.delete_example(e.id)
+                        n += 1
+        except Exception as ex:
+            print("collocation fix:", ex)
+        self.settings["colfix_261"] = True
         self.save_settings()
         return n
 
@@ -621,6 +647,9 @@ class Main(QMainWindow):
             self.lvl_btn.setChecked(True)
         QApplication.instance().installEventFilter(self)
         self._apply_sub_height()
+        if self._colfixed:
+            QTimer.singleShot(5000, lambda: self.msg(f"My Words: {self._colfixed} collocation line(s) pasted among the sentences moved to "
+                                                     "Collocations", 12000))
         if self._merged:
             QTimer.singleShot(2500, lambda: self.msg(f"My Words: {self._merged} word(s) saved twice were joined into one entry "
                                                      "(their sentences kept)", 12000))
@@ -1791,12 +1820,14 @@ class Main(QMainWindow):
             return (f"Explain the English word “{word}”" + (f" as used in: “{s}”" if s else "") + ".\n"
                     "1) Meaning in simple English, plus the German and the Persian translation.\n"
                     "2) IPA (UK and US) and word forms.\n"
-                    "2b) 6 typical collocations (verb + noun, adjective + noun, with prepositions) with their meaning.\n"
+                    "2b) 6 typical collocations (verb + noun, adjective + noun, with prepositions), one per line, in this format:\n"
+                    "COLL: collocation | meaning | short example sentence\n"
                     "3) Exactly 3 natural example sentences of everyday English, one per line, in this format:\nEN: … | DE: … | FA: …")
         return (f"Explain the German word „{word}“" + (f" as used in: „{s}“" if s else "") + ".\n"
                 "1) Meaning in English and in Persian.\n"
                 "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt; the preposition or case it goes with.\n"
-                "2b) 6 typical collocations (Kollokationen: Nomen-Verb-Verbindungen, Adjektiv + Nomen, feste Wendungen) with their meaning.\n"
+                "2b) 6 typical collocations (Kollokationen: Nomen-Verb-Verbindungen, Adjektiv + Nomen, feste Wendungen), one per line, in this format:\n"
+                "KOLL: Kollokation | meaning in English | kurzer Beispielsatz\n"
                 "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\nDE: … | EN: … | FA: …")
 
     def ask_ai(self, source: str, question: str, after: str = ""):
@@ -1853,9 +1884,7 @@ class Main(QMainWindow):
         return bool(self.settings.get("ollama_model"))
 
     def teacher_for(self, word, lemma, sentence, lang, saved_getter=None, tab: int = 0):
-        if not self.ensure_teacher():
-            return
-        from .teacher import TeacherDialog
+        from .teacher import TeacherDialog                 # Ollama or an online assistant — chosen in the window
         d = TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab)      # not modal: the video keeps playing
         self._teachers = [t for t in getattr(self, "_teachers", []) if t.isVisible()] + [d]
         d.destroyed.connect(lambda *_: setattr(self, "_teachers", [t for t in self._teachers if t is not d]))
@@ -1863,12 +1892,14 @@ class Main(QMainWindow):
         d.raise_()
 
     def fill_learn_menu(self, m: QMenu, word, sentence, lang, saved_getter):
-        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC (Ollama) — collocations + sentences at your level",
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher (Ollama, ChatGPT, Gemini, DeepSeek, Grok) — collocations + sentences",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 0))
-        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC — explain the line",
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — explain the line",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 1))
-        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC — check my own sentence",
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — check my own sentence",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 2))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — TestDaF / IELTS questions on the word",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 4))
         m.addSeparator()
         m.addAction(icons.icon("sparkles", theme.CYAN, 16), "ChatGPT — meaning, collocations + 3 sentences", lambda: self.learn_more("chatgpt", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.GOLD, 16), "Gemini — meaning + 3 sentences", lambda: self.learn_more("gemini", word, sentence, lang))
