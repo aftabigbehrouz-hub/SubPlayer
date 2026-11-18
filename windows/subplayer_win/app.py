@@ -11,7 +11,7 @@ import urllib.parse
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, Q
 from . import VERSION, downloads, icons, licence, paths, subtitles, syncer, theme, translate
 from .cosmos import Cosmos, GradientLabel, Orb
 from .dictionary import Dictionary, clean_example, normalize
-from .store import Progress, SavedWord, WordStore, now_ms
+from .store import Example, Progress, SavedWord, WordStore, now_ms
 
 SETTINGS = paths.data_dir() / "settings.json"
 VIDEO_EXT = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mp3", ".m4a", ".wav"}
@@ -117,6 +117,7 @@ class Main(QMainWindow):
         from . import netcfg
         netcfg.apply(self.settings)
         self.store = WordStore()
+        self._merged = self._upgrade_words()
         self.progress = Progress()
         self.lic = licence.LicenceState()
         self.bus = Bus()
@@ -134,6 +135,13 @@ class Main(QMainWindow):
         self.shadowing = False
         self.shadow_resume = 0.0
         self.held_cue = -1
+        self.pe_last = -1                                    # Pause each line: the line it last stopped after
+        self.pe_resume = 0.0                                 # … and when it goes on by itself (time.monotonic)
+        self.dl_queue: list = []                             # downloads waiting their turn: (kind, fn, cancellable, label)
+        self.dl_done: list = []                              # finished downloads from the queue: (title, path)
+        self._dl_queued = False                              # the running download came from the queue
+        self._units_key, self._units = None, []
+        self.mini = None                                     # the small video window while another page is open
         self.sub_offset = 0                                  # ms; + = subtitles appear later (G / H)
         from .levels import Levels
         self.levels = Levels()
@@ -159,6 +167,33 @@ class Main(QMainWindow):
         self._build()
         self.tts = None
         QTimer.singleShot(300, self._startup)
+
+    def _upgrade_words(self) -> int:
+        """Once (2.6): the same word saved twice becomes one entry, and the collocations the teacher wrote before are kept
+        with the words. A copy of the word database is kept first (words-before-2.6.db)."""
+        if self.settings.get("upgraded_26"):
+            return 0
+        n = 0
+        try:
+            import shutil
+            db = paths.data_dir() / "words.db"
+            bak = paths.data_dir() / "words-before-2.6.db"
+            if db.exists() and not bak.exists():
+                self.store.db.commit()
+                shutil.copy2(db, bak)
+            n = self.store.merge_duplicates()
+            from . import ollama
+            from .teacher import collocations_of
+            saved = {WordStore.word_key(w.text, w.lemma, w.lang) for w in self.store.all()}
+            for k, d in ollama.Cache().d.items():
+                parts = k.split("|")
+                if len(parts) >= 5 and isinstance(d, dict) and (parts[1], parts[2]) in saved:
+                    self.store.add_collocations(parts[1], parts[2], collocations_of(d))
+        except Exception as e:
+            print("word upgrade:", e)
+        self.settings["upgraded_26"] = True
+        self.save_settings()
+        return n
 
     # ================================================================== layout
     def _build(self):
@@ -192,6 +227,10 @@ class Main(QMainWindow):
         root.addWidget(body, 1)
 
         self.prog = QProgressBar(maximumWidth=260, visible=False)
+        self.queue_btn = QPushButton("", visible=False, toolTip="Downloads: the one running, the ones waiting, the finished ones")
+        self.queue_btn.setProperty("kind", "chip")
+        self.queue_btn.clicked.connect(self.queue_menu)
+        self.statusBar().addPermanentWidget(self.queue_btn)
         self.cancel_btn = QPushButton("Cancel", visible=False)
         self.cancel_btn.setProperty("kind", "chip")
         self.cancel_btn.clicked.connect(self._cancel_task)
@@ -556,7 +595,11 @@ class Main(QMainWindow):
         self.rep_btn = chip("∞", "How often a loop repeats: until you stop it, or 2× / 3× / 5× — then it goes on "
                                  "(Loop line then moves to the next line: every line N times) (R)", self.cycle_repeat)
         self.rep_btn.setFixedWidth(46)
-        self.pause_btn = chip(" Pause each line", "Stop after every line so you can read and click words", self.toggle_pause_each, True, "pause")
+        self.pause_btn = chip(" Pause each line", "Stops after each sentence (a long one: after each part), waits so you can read, "
+                                                  "then goes on by itself. Click a word to stay; Space goes on at once. "
+                                                  "Right-click: how long it waits", self.toggle_pause_each, True, "pause")
+        self.pause_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.pause_btn.customContextMenuRequested.connect(lambda *_: self.pause_menu())
         self.shadow_btn = chip(" Shadowing", "Listen, then repeat aloud in the pause — the line plays again (S)", self.toggle_shadowing, True, "mic")
         ctl.addSpacing(8)
         self.ab_lbl = QLabel("", objectName="ab")
@@ -578,6 +621,9 @@ class Main(QMainWindow):
             self.lvl_btn.setChecked(True)
         QApplication.instance().installEventFilter(self)
         self._apply_sub_height()
+        if self._merged:
+            QTimer.singleShot(2500, lambda: self.msg(f"My Words: {self._merged} word(s) saved twice were joined into one entry "
+                                                     "(their sentences kept)", 12000))
         left = self.lic.check_trial()
         if self.lic.holder is None and left <= 0:
             from .dialogs import ActivationDialog
@@ -624,13 +670,39 @@ class Main(QMainWindow):
             self.discover_page.activate()
         if key != "review" and hasattr(self, "review_page"):
             self.review_page.stop_video()
+        if key != "words" and hasattr(self, "words_page"):
+            self.words_page.stop_video()
         if key != "player":
-            self.player.pause()
+            # the video keeps playing in a small window while another page is open (✕ there pauses it)
+            if self.video and self.player.playbackState() == QMediaPlayer.PlayingState and key not in ("review",):
+                self.show_mini()
+            elif key == "review":
+                self.hide_mini()
+                self.player.pause()
         else:
+            self.hide_mini()
             self._fill_recents()
         self.stack.setCurrentIndex(idx)
         self.panel.setVisible(key == "player" and self.panel_open and not self.isFullScreen())
         self._update_motion()
+
+    # ------------------------------------------------------------------ mini player
+    def show_mini(self):
+        if self.mini is None:
+            self.mini = MiniPlayer(self)
+        if not self.mini.isVisible():
+            self.mini.place()
+        self.player.setVideoOutput(self.mini.vw)
+        self.mini.show()
+        self.mini.raise_()
+
+    def hide_mini(self):
+        if self.mini is not None and self.mini.isVisible():
+            self.mini.hide()
+            self.player.setVideoOutput(self.vw)
+
+    def mini_visible(self) -> bool:
+        return self.mini is not None and self.mini.isVisible()
 
     def toggle_panel(self):
         self.panel_open = not self.panel.isVisible()
@@ -646,7 +718,7 @@ class Main(QMainWindow):
 
     def _update_motion(self):
         playing = self.player.playbackState() == QMediaPlayer.PlayingState
-        busy_video = playing and self.page == "player"
+        busy_video = playing
         self.cosmos.set_running(self.isActiveWindow() and not self.isMinimized() and not busy_video and not self.isFullScreen())
 
     # ================================================================== video
@@ -727,6 +799,7 @@ class Main(QMainWindow):
     def set_cues(self, cues, lang, info=""):
         self.cues, self.cue_lang = cues, lang
         self.held_cue = -1
+        self.pe_last, self.pe_resume = -1, 0
         self._shown = None
         self._fill_transcript()
         if self._load_translations() and not self.show_tr:
@@ -738,6 +811,7 @@ class Main(QMainWindow):
         if not self.video:
             self.open_dialog()
             return
+        self.pe_resume = 0
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
             self.shadow_resume = 0
@@ -748,6 +822,7 @@ class Main(QMainWindow):
             self.player.play()
 
     def seek_rel(self, d):
+        self.pe_last, self.pe_resume = -1, 0
         self.player.setPosition(max(0, self.player.position() + d))
 
     def jump_line(self, step):
@@ -761,6 +836,7 @@ class Main(QMainWindow):
         else:
             j = max(0, min(len(self.cues) - 1, i + step))
         self.held_cue = -1
+        self.pe_last, self.pe_resume = -1, 0
         self.repeat_done = 0
         if self.loop_line or self.shadowing:
             self.a, self.b = self.cues[j].start_ms + self.sub_offset, self.cues[j].end_ms + self.sub_offset + 150
@@ -896,11 +972,23 @@ class Main(QMainWindow):
             return "de"
         return t
 
+    def units(self) -> list[tuple[int, int]]:
+        """For every subtitle line, the whole sentence it belongs to (first and last line) — translations and Pause each
+        line work on sentences, not on the pieces the subtitle cut them into."""
+        k = (id(self.cues), len(self.cues), getattr(self, "_cue_rev", 0))
+        if self._units_key != k:
+            self._units_key, self._units = k, subtitles.sentence_ranges(self.cues)
+        return self._units
+
+    def unit_text(self, i: int) -> str:
+        a, b = self.units()[i]
+        return " ".join(subtitles.sentence_text(self.cues, a, b).split())
+
     def _want_translation(self, i: int):
         if i < 0 or i >= len(self.cues):
             return
         tgt = self._tr_target()
-        text = " ".join(self.cues[i].text.split())
+        text = self.unit_text(i)                          # the whole sentence, so the translation makes sense
         key = (text, self.cue_lang, tgt)
         if key in self.tr_cache or key in self.tr_pending:
             return
@@ -989,6 +1077,7 @@ class Main(QMainWindow):
         if k is None or not (0 <= k < len(self.cues)):
             return
         self.held_cue = -1
+        self.pe_last, self.pe_resume = -1, 0
         self.repeat_done = 0
         if self.loop_line or self.shadowing:
             self.a, self.b = self.cues[k].start_ms + self.sub_offset, self.cues[k].end_ms + self.sub_offset + 150
@@ -1090,14 +1179,43 @@ class Main(QMainWindow):
             self.a = self.b = -1
         self._ab_label()
 
+    PAUSE_WAITS = (("auto", "As long as the sentence took (1.5–8 s)"), ("2", "2 seconds"), ("4", "4 seconds"), ("6", "6 seconds"),
+                   ("10", "10 seconds"), ("space", "Until I press Space"))
+
     def toggle_pause_each(self):
         self.pause_each = self.pause_btn.isChecked()
+        self.pe_last, self.pe_resume = -1, 0
         if self.pause_each:
             self.shadowing = False
             self.shadow_btn.setChecked(False)
             self.shadow_resume = 0
-            self.msg("Pauses after every line — click words, then Space to go on")
+            w = self.settings.get("pause_wait", "auto")
+            self.msg("Pauses after each sentence, then goes on by itself (right-click the button: how long)" if w != "space" else
+                     "Pauses after each sentence — Space goes on", 8000)
         self._ab_label()
+
+    def pause_menu(self):
+        m = QMenu(self)
+        cur = self.settings.get("pause_wait", "auto")
+        m.addSection("Pause each line: wait")
+        for k, label in self.PAUSE_WAITS:
+            a = m.addAction(label, lambda k=k: (self.settings.__setitem__("pause_wait", k), self.save_settings()))
+            a.setCheckable(True)
+            a.setChecked(k == cur)
+        m.exec(QCursor.pos())
+
+    def _pause_wait(self, a: int, b: int):
+        """Seconds to wait after a sentence (cues a..b) before going on; None = wait for Space."""
+        w = self.settings.get("pause_wait", "auto")
+        if w == "space":
+            return None
+        if w == "auto":
+            took = (self.cues[b].end_ms - self.cues[a].start_ms) / 1000 / max(0.25, self.player.playbackRate())
+            return max(1.5, min(8.0, took * 0.8))
+        try:
+            return float(w)
+        except ValueError:
+            return 3.0
 
     def toggle_shadowing(self):
         self.shadowing = self.shadow_btn.isChecked()
@@ -1165,12 +1283,29 @@ class Main(QMainWindow):
             return
         cp = pos - self.sub_offset
         i = subtitles.index_at(self.cues, cp) if self.cues else -1
+        if self.pe_resume and time.monotonic() >= self.pe_resume:
+            self.pe_resume = 0
+            if self.pause_each and not playing:
+                self.held_cue = -1
+                self.player.play()
+                playing = True
         if playing and self.pause_each and self.cues:
             j = subtitles.index_before(self.cues, cp)
-            if j >= 0 and j != self.held_cue and cp >= self.cues[j].end_ms - 60:
-                self.held_cue = j
-                self.player.pause()
-                i = j
+            if j >= 0 and cp < self.cues[j].end_ms - 60:
+                self.pe_inside = j                          # the line being played
+            if j >= 0 and j != self.pe_last and cp >= self.cues[j].end_ms - 60:
+                self.pe_last = j                            # each line is looked at once
+                a, b = self.units()[j]
+                # the end of a sentence (or of a part of a long one) that was played through — not a seek past it
+                if j == b and getattr(self, "pe_inside", -1) == j:
+                    self.held_cue = j
+                    self.player.pause()
+                    playing = False
+                    i = j
+                    wait = self._pause_wait(a, b)
+                    self.pe_resume = time.monotonic() + wait if wait else 0
+                    if wait:
+                        self.msg(f"Next sentence in {wait:.0f} s — click a word to stay here, Space to go on now", int(wait * 1000))
         if i < 0 and not playing and self.held_cue >= 0:
             i = self.held_cue
         if i < 0 and self.shadowing and self.cues and self.a >= 0:
@@ -1181,17 +1316,28 @@ class Main(QMainWindow):
             self._transcript_follow(i if i >= 0 else subtitles.index_before(self.cues, cp))
         if self.show_tr and i >= 0:
             self._want_translation(i)
-            self._want_translation(i + 1)                  # ready before it is needed
+            self._want_translation(self.units()[i][1] + 1)     # the next sentence, ready before it is needed
         masked = self.hide_text and playing
         key = (i, len(self.cues), self._saved_version(), masked, self.show_tr, self.settings.get("sub_size", 21),
                self.lvl_btn.isChecked(), self.settings.get("level_min", 1), getattr(self, "_cue_rev", 0),
-               self._tr_key(i) in self.tr_cache if self.show_tr and i >= 0 else None)
+               self._tr_key(i) in self.tr_cache if self.show_tr and i >= 0 else None, self._held_sentence(i))
         if getattr(self, "_shown", None) != key:
             self._shown = key
             self._render_sub(i)
+        if self.mini is not None and self.mini.isVisible():
+            self.mini.update_state(playing, self.cues[i].text if 0 <= i < len(self.cues) and not masked else "")
+
+    def _held_sentence(self, i: int) -> bool:
+        """True while Pause each line holds at the end of a sentence of more than one line."""
+        if not (self.pause_each and i >= 0 and i == self.held_cue and i < len(self.cues)):
+            return False
+        if self.player.playbackState() == QMediaPlayer.PlayingState:
+            return False
+        a, b = self.units()[i]
+        return b > a
 
     def _tr_key(self, i: int):
-        return (" ".join(self.cues[i].text.split()), self.cue_lang, self._tr_target())
+        return (self.unit_text(i), self.cue_lang, self._tr_target())
 
     _saved_cache: tuple = (0, set())
 
@@ -1225,22 +1371,32 @@ class Main(QMainWindow):
         show_lv = self.lvl_btn.isChecked()
         lv_min = self.settings.get("level_min", 1)
         d = self.dictionary(self.cue_lang) if show_lv else None
-        out, last = [], 0
-        for k, (s, e, tok) in enumerate(subtitles.tokens(text)):
-            out.append(html.escape(text[last:s]).replace("\n", "<br>"))
-            deco = "none"
-            if show_lv:
-                lv = self.levels.level(tok, self.cue_lang, d)
-                col = LV_COLORS[lv] if lv >= lv_min else "#FFFFFF"
-                if tok.lower() in saved:
-                    deco = "underline"
-            else:
-                col = theme.GOLD if tok.lower() in saved else "#FFFFFF"
-            if self.phrase_start and self.phrase_start[0] == i and self.phrase_start[1] == k:
-                col = theme.MAGENTA
-            out.append(f"<a href='w:{i}:{k}' style='color:{col};text-decoration:{deco}'>{html.escape(tok)}</a>")
-            last = e
-        out.append(html.escape(text[last:]).replace("\n", "<br>"))
+        out = []
+        lines = [i]
+        if self._held_sentence(i):                       # Pause each line stopped here: the whole sentence, every word clickable
+            a, b = self.units()[i]
+            lines = list(range(a, b + 1))
+        for ci in lines:
+            text, last = self.cues[ci].text, 0
+            if len(lines) > 1:
+                text = " ".join(text.split())
+                if ci != lines[0]:
+                    out.append(" ")
+            for k, (s, e, tok) in enumerate(subtitles.tokens(text)):
+                out.append(html.escape(text[last:s]).replace("\n", "<br>"))
+                deco = "none"
+                if show_lv:
+                    lv = self.levels.level(tok, self.cue_lang, d)
+                    col = LV_COLORS[lv] if lv >= lv_min else "#FFFFFF"
+                    if tok.lower() in saved:
+                        deco = "underline"
+                else:
+                    col = theme.GOLD if tok.lower() in saved else "#FFFFFF"
+                if self.phrase_start and self.phrase_start[0] == ci and self.phrase_start[1] == k:
+                    col = theme.MAGENTA
+                out.append(f"<a href='w:{ci}:{k}' style='color:{col};text-decoration:{deco}'>{html.escape(tok)}</a>")
+                last = e
+            out.append(html.escape(text[last:]).replace("\n", "<br>"))
         body = f"<div style='text-align:center;font-size:{pt}pt;font-weight:600;line-height:145%'>{''.join(out)}</div>"
         if show_lv and not self.show_tr:
             body += ("<div style='text-align:center;font-size:8pt'>" + " ".join(
@@ -1285,6 +1441,7 @@ class Main(QMainWindow):
         mods = QApplication.keyboardModifiers()
         self.player.pause()
         self.shadow_resume = 0
+        self.pe_resume = 0
         a, b = subtitles.sentence_range(self.cues, ci)
         sentence = subtitles.sentence_text(self.cues, a, b)
         start, end = self.cues[a].start_ms + self.sub_offset, self.cues[b].end_ms + self.sub_offset
@@ -1315,9 +1472,11 @@ class Main(QMainWindow):
             return
         self.player.pause()
         self.shadow_resume = 0
+        self.pe_resume = 0
         self.phrase_start = None
         lang = self._tr_target()
-        start, end = self.cues[ci].start_ms + self.sub_offset, self.cues[ci].end_ms + self.sub_offset
+        a, b = self.units()[ci]
+        start, end = self.cues[a].start_ms + self.sub_offset, self.cues[b].end_ms + self.sub_offset
         self.open_word(toks[ti][2], tr, start, end, lang=lang, cue=ci)
         self._shown = None
 
@@ -1537,7 +1696,7 @@ class Main(QMainWindow):
     # ------------------------------------------------------------------ save / speak / learn more
     def _update_save_btn(self):
         c = self.card
-        saved = bool(c) and self.store.find(c["word"], self.video or "", c["start"]) is not None
+        saved = bool(c) and (self.store.find(c["word"], self.video or "", c["start"]) is not None or self._same_as_card() is not None)
         self.save_btn.setText(" Saved" if saved else " Save")
         self.save_btn.setIcon(icons.icon("star_fill" if saved else "star", "#FFFFFF" if saved else theme.LIGHT, 20))
         self.save_btn.setProperty("accent", saved)
@@ -1551,6 +1710,17 @@ class Main(QMainWindow):
             self.msg("Already in My Words")
             return
         e = c.get("entries", [None])[0] if c.get("entries") else None
+        same = self.store.find_same(c["word"], (e.lemma if e and c["kind"] != "phrase" else c["word"]), e.lang if e else c["lang"])
+        if same:                                   # the same word from another line or video: one entry, this line as a sentence
+            n = 0
+            if c["sentence"] and c["sentence"].strip().lower() != (same.sentence or "").strip().lower():
+                n = self.store.add_examples(same.id, [Example(de=c["sentence"].strip(),
+                                                             en=f"from “{self.video_name}”" if self.video_name else "")])
+            self.card["same_id"] = same.id
+            self.after_change()
+            self._update_save_btn()
+            self.msg(f"„{same.text}“ is already in My Words" + (" — this line was added to its sentences" if n else ""))
+            return
         if c["kind"] == "phrase":
             english = c.get("tr") or ""
             persian = c.get("fa") or ""
@@ -1575,6 +1745,8 @@ class Main(QMainWindow):
 
     def after_change(self):
         self.refresh_words()
+        if getattr(self, "page", "") == "words" and hasattr(self, "words_page"):
+            self.words_page.refresh_panels()
         if self.settings.get("sync_token"):
             self.sync_timer.start()
 
@@ -1684,8 +1856,11 @@ class Main(QMainWindow):
         if not self.ensure_teacher():
             return
         from .teacher import TeacherDialog
-        self.player.pause()
-        TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab).exec()
+        d = TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab)      # not modal: the video keeps playing
+        self._teachers = [t for t in getattr(self, "_teachers", []) if t.isVisible()] + [d]
+        d.destroyed.connect(lambda *_: setattr(self, "_teachers", [t for t in self._teachers if t is not d]))
+        d.show()
+        d.raise_()
 
     def fill_learn_menu(self, m: QMenu, word, sentence, lang, saved_getter):
         m.addAction(icons.icon("study", theme.MINT, 16), "Teacher on this PC (Ollama) — collocations + sentences at your level",
@@ -1717,9 +1892,18 @@ class Main(QMainWindow):
         c = self.card
         if not c:
             return None
-        if not self.store.find(c["word"], self.video or "", c["start"]):
+        w = self.store.find(c["word"], self.video or "", c["start"]) or self._same_as_card()
+        if not w:
             self.save_from_card()
-        return self.store.find(c["word"], self.video or "", c["start"])
+            w = self.store.find(c["word"], self.video or "", c["start"]) or self._same_as_card()
+        return w
+
+    def _same_as_card(self) -> SavedWord | None:
+        c = self.card
+        if not c:
+            return None
+        e = (c.get("entries") or [None])[0]
+        return self.store.find_same(c["word"], e.lemma if e and c["kind"] != "phrase" else c["word"], e.lang if e else c["lang"])
 
     # ================================================================== subtitles
     def subtitle_menu(self):
@@ -1882,10 +2066,16 @@ class Main(QMainWindow):
     def run_bg(self, kind, fn, cancellable=False, label=None):
         heavy = kind in ("subs", "download", "link", "clip")
         if heavy and self.busy:
-            self.msg("Please wait — " + self.busy)
+            if kind == "link":                              # downloads wait their turn in the queue
+                self.dl_queue.append((kind, fn, cancellable, label or "Download"))
+                self._update_queue()
+                self.msg(f"Added to the download queue — {len(self.dl_queue)} waiting (status bar ▸ Downloads)", 8000)
+            else:
+                self.msg("Please wait — " + self.busy)
             return
         if heavy:
             self.busy = label or kind
+            QTimer.singleShot(0, self._update_queue)
             self.cancel = False
             self.prog.setVisible(True)
             self.prog.setValue(0)
@@ -1912,6 +2102,58 @@ class Main(QMainWindow):
         self.busy = None
         self.prog.setVisible(False)
         self.cancel_btn.setVisible(False)
+        if self.dl_queue:
+            QTimer.singleShot(400, self._next_download)
+        self._update_queue()
+
+    # ------------------------------------------------------------------ download queue
+    def _next_download(self):
+        if self.busy or not self.dl_queue:
+            return
+        kind, fn, cancellable, label = self.dl_queue.pop(0)
+        self._dl_queued = True
+        self.run_bg(kind, fn, cancellable, label)
+        self._update_queue()
+
+    def _update_queue(self):
+        running = bool(self.busy) and str(self.busy).startswith(("Downloading", "Opening the link"))
+        n = len(self.dl_queue)
+        parts = []
+        if running:
+            parts.append("1 downloading")
+        if n:
+            parts.append(f"{n} waiting")
+        if self.dl_done and not parts:
+            parts.append(f"{len(self.dl_done)} downloaded")
+        self.queue_btn.setText("⬇ Downloads: " + " · ".join(parts) if parts else "")
+        self.queue_btn.setVisible(bool(parts))
+
+    def queue_menu(self):
+        m = QMenu(self)
+        if self.busy:
+            m.addSection("Now")
+            m.addAction(icons.icon("x", theme.MAGENTA, 16), f"Cancel: {str(self.busy)[:70]}", self._cancel_task)
+        if self.dl_queue:
+            m.addSection(f"Waiting ({len(self.dl_queue)})")
+            for k, item in enumerate(self.dl_queue):
+                sub = m.addMenu(f"{k + 1}. {item[3][:70]}")
+                if k:
+                    sub.addAction("Move up", lambda k=k: self._queue_move(k, -1))
+                sub.addAction("Download next", lambda k=k: self._queue_move(k, -k))
+                sub.addAction("Remove from the queue", lambda k=k: (self.dl_queue.pop(k), self._update_queue()))
+        if self.dl_done:
+            m.addSection("Downloaded")
+            for title, path in self.dl_done[-12:][::-1]:
+                m.addAction(icons.icon("play", theme.MINT, 16), f"Open: {title[:70]}", lambda p=path: self.open_video(str(p), at_ms=0))
+            m.addAction("Clear this list", lambda: (self.dl_done.clear(), self._update_queue()))
+        if m.isEmpty():
+            m.addAction("No downloads").setEnabled(False)
+        m.exec(QCursor.pos())
+
+    def _queue_move(self, k: int, d: int):
+        it = self.dl_queue.pop(k)
+        self.dl_queue.insert(max(0, k + d), it)
+        self._update_queue()
 
     def _on_done(self, kind, res):
         if kind == "subs":
@@ -1931,12 +2173,21 @@ class Main(QMainWindow):
             if callable(then):
                 then()
         elif kind == "link":
-            self._end_task()
+            queued, self._dl_queued = self._dl_queued, False
             path, srt = res
             if srt:
                 cues = subtitles.parse(srt)
                 lang = subtitles.guess_lang(cues)
                 (syncer.subs_dir() / f"{subtitles.video_key(path.name)}.{lang}.srt").write_text(srt, encoding="utf-8")
+            watching = self.video and self.player.playbackState() == QMediaPlayer.PlayingState
+            if queued or self.dl_queue or watching:          # don't take the screen away: it waits in Downloads
+                self.dl_done.append((path.stem, path))
+                self._end_task()
+                if srt:
+                    self.after_change()
+                self.msg(f"Downloaded: {path.stem} — open it from ⬇ Downloads in the status bar" + (" (with subtitles)" if srt else ""), 12000)
+                return
+            self._end_task()
             self.open_video(str(path), at_ms=0)
             if srt:
                 self.msg(f"Saved to {path.parent} — with the broadcaster's own subtitles ({len(cues)} lines)", 12000)
@@ -1964,11 +2215,10 @@ class Main(QMainWindow):
             self._end_task()
             tgt, done = res
             lang = self.cue_lang
-            for c in self.cues:
-                t = " ".join(c.text.split())
-                if t in done:
-                    self.tr_cache[(t, lang, tgt)] = done[t]
-            tr = [subtitles.Cue(c.start_ms, c.end_ms, self.tr_cache.get((" ".join(c.text.split()), lang, tgt), "")) for c in self.cues]
+            for t, o in done.items():
+                self.tr_cache[(t, lang, tgt)] = o
+            tr = [subtitles.Cue(self.cues[a].start_ms, self.cues[b].end_ms, self.tr_cache.get((self.unit_text(a), lang, tgt), ""))
+                  for a, b in sorted(set(self.units()))]                    # one entry per sentence
             tr = [c for c in tr if c.text]
             if tr:
                 self._tr_file(tgt).write_text(subtitles.write(tr), encoding="utf-8")
@@ -1976,7 +2226,7 @@ class Main(QMainWindow):
                 self.trl_btn.setChecked(True)
                 self.toggle_translation_line()
             self._shown = None
-            self.msg(f"{len(tr)} of {len(self.cues)} lines translated and saved — the translation line now works offline "
+            self.msg(f"{len(tr)} sentences ({len(self.cues)} lines) translated and saved — the translation line now works offline "
                      "(button beside the subtitle turns it on/off)", 12000)
         elif kind == "trline":
             key, out = res
@@ -2010,7 +2260,12 @@ class Main(QMainWindow):
 
     def _on_failed(self, kind, err):
         if kind in ("subs", "download", "link", "clip"):
+            queued, self._dl_queued = self._dl_queued, False
             self._end_task()
+            if kind == "link" and (queued or self.dl_queue):     # a failed download in the queue: note it, go on with the rest
+                self.msg(("Cancelled" if "cancel" in err.lower() else "A download failed: " + err) +
+                         (f" — {len(self.dl_queue)} still waiting" if self.dl_queue else ""), 12000)
+                return
             cancelled = "cancel" in err.lower()
             self.msg("Cancelled" if cancelled else err, 12000)
             if not cancelled:
@@ -2157,7 +2412,11 @@ class Main(QMainWindow):
     def eventFilter(self, obj, ev):
         from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QPlainTextEdit, QTextEdit
-        if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space and not ev.modifiers() and self.isActiveWindow():
+        try:
+            key_press = ev.type() == QEvent.KeyPress
+        except (AttributeError, RuntimeError):                 # an object being deleted (Qt hands over a layout item)
+            return False
+        if key_press and ev.key() == Qt.Key_Space and not ev.modifiers() and self.isActiveWindow():
             fw = QApplication.focusWidget()
             typing = isinstance(fw, (QLineEdit, QPlainTextEdit, QAbstractSpinBox)) or \
                 (isinstance(fw, QTextEdit) and not fw.isReadOnly()) or (isinstance(fw, QComboBox) and fw.isEditable())
@@ -2235,16 +2494,23 @@ class Main(QMainWindow):
         if not self.cues or not self.video_name:
             return 0
         n = 0
+        units = sorted(set(self.units()))
         for tgt in ("en", "fa", "de"):
             f = self._tr_file(tgt)
             if f.exists():
                 tr = subtitles.parse(f.read_text(encoding="utf-8", errors="replace"))
-                by_start = {c.start_ms: c.text for c in tr}
-                for c in self.cues:
-                    t = by_start.get(c.start_ms)
-                    if t:
-                        self.tr_cache[(" ".join(c.text.split()), self.cue_lang, tgt)] = " ".join(t.split())
-                        n += 1
+                by_start = {c.start_ms: c for c in tr}
+                for a, b in units:
+                    t = by_start.get(self.cues[a].start_ms)
+                    if t and t.end_ms >= self.cues[b].end_ms - 20:          # saved per sentence (2.6)
+                        out = t.text
+                    else:                                                  # saved per line (before 2.6): join the lines
+                        parts = [by_start.get(self.cues[k].start_ms) for k in range(a, b + 1)]
+                        if not all(parts):
+                            continue
+                        out = " ".join(p.text for p in parts)
+                    self.tr_cache[(self.unit_text(a), self.cue_lang, tgt)] = " ".join(out.split())
+                    n += 1
         return n
 
     def translate_all(self):
@@ -2254,14 +2520,14 @@ class Main(QMainWindow):
         tgt = self._tr_target()
         name = {"en": "English", "fa": "Persian", "de": "German"}[tgt]
         cues, lang = list(self.cues), self.cue_lang
-        todo = [c for c in cues if (" ".join(c.text.split()), lang, tgt) not in self.tr_cache]
+        todo = list(dict.fromkeys(t for t in (self.unit_text(a) for a, _ in sorted(set(self.units())))
+                                  if (t, lang, tgt) not in self.tr_cache))      # whole sentences, each once
 
         def job():
             done = {}
             batch, size = [], 0
             groups = []
-            for c in todo:
-                t = " ".join(c.text.split())
+            for t in todo:
                 if size + len(t) > 1800 and batch:
                     groups.append(batch)
                     batch, size = [], 0
@@ -2272,7 +2538,7 @@ class Main(QMainWindow):
             for gi, g in enumerate(groups):
                 if self.cancel:
                     raise RuntimeError("Cancelled")
-                self._bg_progress(gi / max(1, len(groups)), f"Translating into {name}… {sum(len(x) for x in groups[:gi])} of {len(todo)} lines")
+                self._bg_progress(gi / max(1, len(groups)), f"Translating into {name}… {sum(len(x) for x in groups[:gi])} of {len(todo)} sentences")
                 out = None
                 try:
                     res, _ = translate.translate("\n".join(g), lang, tgt)
@@ -2375,6 +2641,57 @@ class Main(QMainWindow):
         self.player.setPosition(self.a)
         self.player.play()
         return True
+
+
+class MiniPlayer(QFrame):
+    """A small video window that floats over SubPlayer while My Words, Discover, Study … are open, so the video goes on."""
+
+    def __init__(self, main):
+        super().__init__(main, Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.main = main
+        self.setWindowTitle("SubPlayer — video")
+        self.setObjectName("card")
+        self.setStyleSheet(f"QFrame#card{{background:{theme.CARD}}}")
+        self.resize(420, 290)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(6, 6, 6, 6)
+        v.setSpacing(4)
+        self.vw = QVideoWidget()
+        self.vw.setStyleSheet("background:#000")
+        v.addWidget(self.vw, 1)
+        self.line = QLabel("", alignment=Qt.AlignCenter, wordWrap=True)
+        self.line.setStyleSheet("color:#FFFFFF;font-size:11pt;font-weight:600")
+        v.addWidget(self.line)
+        row = QHBoxLayout()
+        self.pp = ibtn("pause", "Play / pause", main.toggle_play, size=18)
+        row.addWidget(self.pp)
+        row.addWidget(ibtn("back5", "Back 5 seconds", lambda: main.seek_rel(-5000), size=18))
+        row.addWidget(ibtn("fwd5", "Forward 5 seconds", lambda: main.seek_rel(5000), size=18))
+        row.addStretch(1)
+        row.addWidget(ibtn("fullscreen", "Back to the player", lambda: main.show_page("player"), kind="chip", size=15, text=" Player"))
+        row.addWidget(ibtn("x", "Close (pauses the video)", self.close_and_pause, size=16))
+        v.addLayout(row)
+        self._playing = None
+
+    def place(self):
+        g = self.main.geometry()
+        self.move(g.right() - self.width() - 28, g.bottom() - self.height() - 70)
+
+    def update_state(self, playing: bool, text: str):
+        if playing != self._playing:
+            self._playing = playing
+            self.pp.setIcon(icons.icon("pause" if playing else "play", theme.LIGHT, 18))
+        if text != self.line.text():
+            self.line.setText(" ".join(text.split()))
+
+    def close_and_pause(self):
+        self.main.player.pause()
+        self.main.hide_mini()
+
+    def closeEvent(self, e):
+        self.main.player.pause()
+        self.main.player.setVideoOutput(self.main.vw)
+        super().closeEvent(e)
 
 
 def selftest(out: str) -> int:

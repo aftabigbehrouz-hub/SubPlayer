@@ -1,4 +1,43 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.5
+# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.6
+
+**New in Windows 2.6**
+- **My Words, newest first:** the list is in the order you saved the words (today's at the top) — with every filter.
+- **One entry per word:** saving a word that is already in My Words (from another line or video) no longer makes a second
+  entry — the new line is added to its sentences. Words you had saved twice are joined once, on the first start of 2.6
+  (the most reviewed copy stays with its progress; the others' sentences move to it; a copy of the word database is kept as
+  *words-before-2.6.db* in the data folder).
+- **Four panels for a word** (right side of My Words): **Video** (the picture of the moment — click it to play the moment right
+  there), **Dictionary** (forms, IPA, English, Persian, meanings with examples), **Sentences** (the video line and every
+  added sentence, 🔊 and ✕), **Collocations** (from the teacher, with their examples). Click a panel's title or ⤢ to make
+  it big; ✕ brings the four back.
+- **The teacher's collocations are kept:** *＋ Add sentences & collocations to my word* saves the example sentences for
+  review and practice and the collocations (phrase, meaning, example) in the Collocations panel. Collocations the teacher
+  wrote before 2.6 are taken over from its memory for words you have saved.
+- **TestDaF / IELTS questions in Review:** the teacher has a fifth tab, *TestDaF questions* (*IELTS* for English): Ollama writes
+  exam-style questions on the word (multiple choice, Ja / Nein / Text sagt dazu nichts, gaps, the right collocation) —
+  *＋ Add the questions to Review*. Study this video ▸ AI lesson ▸ TestDaF / IELTS now asks the assistant to end with review
+  cards (after a line ---REVIEW---); when the answer is pasted, its cards go into Review by themselves. *To Review* does it
+  by hand, and for a lesson pasted earlier Ollama turns its questions into cards. In Review, click the answer (or press
+  1–4); the right one turns green, then Got it / Again as with words.
+- **Review starts with the least reviewed:** words (and questions) you have reviewed least come first; a word you have seen
+  many times waits until the end.
+- **Pause each line goes on by itself:** it stops at the end of each sentence (a very long one: after each part), shows the whole
+  sentence with every word clickable, waits, then plays on. Right-click the button for how long it waits: as long as the
+  sentence took (1.5–8 s, the default), 2 / 4 / 6 / 10 s, or until Space. Click a word to stay; Space goes on at once.
+  (Before, it could stop again at the same line after Space.)
+- **Translations of whole sentences:** the translation line (and *Translate all*) translates the sentence a line belongs to,
+  not the piece the subtitle cut it into — the same sentence translation stands under each of its lines. Translations saved
+  before are joined per sentence.
+- **Download queue:** Discover and links no longer refuse a second download — it waits its turn. *⬇ Downloads* in the status
+  bar shows the one running, the ones waiting (move up, download next, remove) and the finished ones (open). A download that
+  finishes while you watch doesn't take the screen away.
+- **The video keeps playing:** opening My Words, Discover, Study or Practice no longer pauses it — it goes on in a small window
+  (play/pause, ±5 s, the current subtitle, ⤢ back to the player, ✕ pauses). The teacher is a normal window now: it can be
+  minimised or put beside the video, and the video doesn't stop when it opens.
+- Collocations and exam questions stay on this PC (they are not part of the phone sync yet).
+- **Portable:** make a folder named **SubPlayer data** next to SubPlayer.exe and SubPlayer keeps everything there (words,
+  settings, subtitles, lessons, dictionaries, speech models) instead of in %APPDATA%\SubPlayer — copy your old
+  %APPDATA%\SubPlayer into it once, and the whole SubPlayer folder can go on a flash drive or to another PC.
 
 **New in Windows 2.5 — a private AI teacher on your own PC (Ollama)**
 - **Word card ▸ Teacher** (and *Learn more ▸ Teacher on this PC*) asks a language model that runs on your PC — free, no API

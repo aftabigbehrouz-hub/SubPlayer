@@ -8,12 +8,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+                               QPushButton, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget)
 
 from . import icons, practice, theme
 from .cosmos import GradientLabel
-from .store import SavedWord, due_label, now_ms, review
+from .store import Question, SavedWord, due_label, now_ms, review
 
 
 def card() -> QFrame:
@@ -46,6 +47,134 @@ def sentences_of(main, w):
         out.append((w.sentence, "", ""))
     out += [(e.de, e.en, e.fa) for e in main.store.examples(w.id)]
     return out
+
+
+class Pane(QFrame):
+    """One of the four panels of a word in My Words. Click its title (or ⤢) to make it big; click again to go back."""
+
+    def __init__(self, title: str, on_toggle):
+        super().__init__(objectName="card")
+        self.title, self.on_toggle = title, on_toggle
+        self.setMinimumSize(200, 150)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(12, 8, 8, 10)
+        v.setSpacing(6)
+        head = QHBoxLayout()
+        head.setSpacing(4)
+        self.lbl = QLabel(f"<span style='color:{theme.CYAN};font-weight:700;letter-spacing:2px;font-size:9pt'>{title.upper()}</span>")
+        self.lbl.setCursor(Qt.PointingHandCursor)
+        self.lbl.setToolTip("Click to make this panel big (click again to go back)")
+        self.lbl.mousePressEvent = lambda e: self.on_toggle(self)
+        head.addWidget(self.lbl)
+        self.count = QLabel("", objectName="small")
+        head.addWidget(self.count)
+        head.addStretch(1)
+        self.extra = QHBoxLayout()
+        self.extra.setSpacing(4)
+        head.addLayout(self.extra)
+        self.big_btn = ibtn("fullscreen", "Make this panel big", lambda: self.on_toggle(self), kind="chip", size=13)
+        head.addWidget(self.big_btn)
+        v.addLayout(head)
+        self.body = QVBoxLayout()
+        self.body.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(self.body, 1)
+
+    def add_button(self, b):
+        self.extra.addWidget(b)
+
+    def set_big(self, on: bool):
+        from . import icons as _ic
+        self.big_btn.setIcon(_ic.icon("x" if on else "fullscreen", theme.LIGHT, 13))
+        self.big_btn.setToolTip("Back to the four panels" if on else "Make this panel big")
+
+
+class SnapLabel(QLabel):
+    """The picture of the video moment, scaled to the panel (click = play it here)."""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__(alignment=Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setCursor(Qt.PointingHandCursor)
+        self._pm = None
+
+    def set_file(self, path, text=""):
+        from PySide6.QtGui import QPixmap
+        self._pm = QPixmap(str(path)) if path else None
+        if not self._pm or self._pm.isNull():
+            self._pm = None
+            self.setPixmap(QPixmap())
+            self.setText(text)
+        else:
+            self.setText("")
+            self._fit()
+
+    def _fit(self):
+        if self._pm:
+            self.setPixmap(self._pm.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def mousePressEvent(self, e):
+        self.clicked.emit()
+
+
+def _q(t: str) -> str:
+    import urllib.parse
+    return urllib.parse.quote(t, safe="")
+
+
+def dictionary_html(main, w) -> str:
+    """The offline dictionary for a saved word: forms, IPA, English, Persian, the meanings with examples, synonyms."""
+    e_ = html.escape
+    d = main.dictionary(w.lang)
+    entries = []
+    if d and " " not in w.text.strip():
+        try:
+            entries = [x for x in d.lookup(w.lemma or w.text) if x.pos != "name"][:3] or d.lookup(w.text)[:3]
+        except Exception:
+            entries = []
+    sec = lambda t: (f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:2px;font-size:8.5pt;margin:12px 0 4px 0'>"
+                     f"{t.upper()}</p>")
+    h = ["<div style='font-size:10.5pt;line-height:140%'>"]
+    if not entries:
+        if w.english:
+            h.append(sec("Meaning") + e_(w.english))
+        if w.persian:
+            h.append(sec("فارسی") + theme.fa_span(e_(w.persian), "13pt"))
+        h.append(f"<p style='color:{theme.DIM}'>" + ("Not in the offline dictionary." if d else
+                                                    "The dictionary isn't downloaded yet — click any word in a subtitle once.") + "</p>")
+    for n, e in enumerate(entries):
+        if n:
+            h.append(f"<hr style='background:{theme.VIOLET}'>")
+        art = f"<span style='color:{theme.ARTICLE.get(e.article, theme.LIGHT)}'>{e.article} </span>" if e.article else ""
+        h.append(f"<p style='font-size:15pt;font-weight:800;margin:0'>{art}{e_(e.lemma)}</p>")
+        meta = [f"<span style='color:{theme.MAGENTA}'>{e_(e.pos_de or e.pos)}</span>"]
+        if e.ipa:
+            meta.append(f"<span style='color:{theme.GOLD}'>{e_(e.ipa)}</span>")
+        if e.hyphenation:
+            meta.append(f"<span style='color:{theme.DIM}'>{e_(e.hyphenation)}</span>")
+        h.append(" · ".join(meta))
+        if e.lang == "en" and e.german:
+            h.append(sec("Deutsch") + e_(", ".join(e.german[:6])))
+        if e.lang != "en" and e.english:
+            h.append(sec("English") + "<br>".join(f"<span style='color:{theme.DIM}'>{k}.</span> {e_(g)}" for k, g in enumerate(e.english[:6], 1)))
+        fa = e.persian or e.persian_via_english
+        if fa:
+            h.append(sec("فارسی") + theme.fa_span(e_("، ".join(fa)), "13pt"))
+        if e.senses:
+            h.append(sec("Definitions" if e.lang == "en" else "Bedeutungen"))
+            for k, sn in enumerate(e.senses[:8], 1):
+                h.append(f"<p style='margin:4px 0'><span style='color:{theme.CYAN}'>{k}</span>&nbsp; {e_(sn.de)}</p>")
+                for ex in sn.examples[:2]:
+                    h.append(f"<p style='margin:1px 0 1px 14px;color:{theme.DIM}'><i>{e_(ex)}</i> "
+                             f"<a href='sayt:{_q(ex)}' style='color:{theme.CYAN};text-decoration:none'>🔊</a></p>")
+        if e.synonyms:
+            h.append(sec("Synonyms" if e.lang == "en" else "Synonyme") + e_(" · ".join(e.synonyms[:10])))
+    h.append("</div>")
+    return "".join(h)
 
 
 # ==================================================================== My Words
@@ -145,14 +274,59 @@ class WordsPage(QWidget):
 
         rcard = card()
         right = QVBoxLayout(rcard)
-        right.setContentsMargins(22, 18, 18, 16)
-        self.detail = QTextBrowser(openLinks=False)
-        self.detail.anchorClicked.connect(self._link)
-        right.addWidget(self.detail, 1)
+        right.setContentsMargins(20, 14, 16, 14)
+        right.setSpacing(10)
+        self.head_view = QLabel("", wordWrap=True)
+        self.head_view.setTextFormat(Qt.RichText)
+        self.head_view.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        right.addWidget(self.head_view)
+        # four panels side by side: video · dictionary · sentences · collocations — click one to make it big
+        self.grid = QGridLayout()
+        self.grid.setSpacing(10)
+        self.p_video = Pane("Video", self.toggle_pane)
+        self.snap = SnapLabel()
+        self.snap.clicked.connect(self.play_here)
+        self.p_video.body.addWidget(self.snap, 1)
+        from PySide6.QtMultimediaWidgets import QVideoWidget
+        self.vw = QVideoWidget()
+        self.vw.setStyleSheet("background:#000")
+        self.vw.hide()
+        self.p_video.body.addWidget(self.vw, 1)
+        self.vname = QLabel("", objectName="small", wordWrap=True)
+        self.p_video.body.addWidget(self.vname)
+        self.vmsg = QLabel("", objectName="hint", wordWrap=True)
+        self.vmsg.hide()
+        self.p_video.body.addWidget(self.vmsg)
+        self.p_video.add_button(ibtn("play", "Play the moment here in the panel (click the picture too)", self.play_here, kind="chip", size=13))
+        self.p_video.add_button(ibtn("film", "Open it in the player", self.play, kind="chip", size=13))
+        self.p_dict = Pane("Dictionary", self.toggle_pane)
+        self.v_dict = QTextBrowser(openLinks=False)
+        self.v_dict.anchorClicked.connect(self._link)
+        self.p_dict.body.addWidget(self.v_dict, 1)
+        self.p_sent = Pane("Sentences", self.toggle_pane)
+        self.v_sent = QTextBrowser(openLinks=False)
+        self.v_sent.anchorClicked.connect(self._link)
+        self.p_sent.body.addWidget(self.v_sent, 1)
+        self.p_sent.add_button(ibtn("plus", "Add sentences (paste an AI answer)", self.add_sentences, kind="chip", size=13))
+        self.p_coll = Pane("Collocations", self.toggle_pane)
+        self.v_coll = QTextBrowser(openLinks=False)
+        self.v_coll.anchorClicked.connect(self._link)
+        self.p_coll.body.addWidget(self.v_coll, 1)
+        self.p_coll.add_button(ibtn("study", "Ask the teacher (Ollama) for collocations, sentences and TestDaF questions",
+                                    self.teacher, kind="chip", size=13, text=" Teacher"))
+        self.panes = [(self.p_video, 0, 0), (self.p_dict, 0, 1), (self.p_sent, 1, 0), (self.p_coll, 1, 1)]
+        for p, r, c in self.panes:
+            self.grid.addWidget(p, r, c)
+        self.grid.setRowStretch(0, 1)
+        self.grid.setRowStretch(1, 1)
+        self.grid.setColumnStretch(0, 1)
+        self.grid.setColumnStretch(1, 1)
+        self.big = None
+        right.addLayout(self.grid, 1)
         btns = QHBoxLayout()
         self.b_play = ibtn("play", "Play this moment in the video", self.play, kind="", text=" Play in video")
         self.b_speak = ibtn("volume", "Speak", self.speak, kind="", text=" Speak")
-        self.b_learn = ibtn("sparkles", "ChatGPT / Gemini / DeepSeek / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
+        self.b_learn = ibtn("sparkles", "Teacher, ChatGPT / Gemini / DeepSeek / Grok / dictionaries, add sentences", self.learn, kind="", text=" Learn more ▾")
         self.b_del = ibtn("trash", "Delete this word", self.delete, kind="", text=" Delete", color=theme.MAGENTA)
         for b in (self.b_play, self.b_speak, self.b_learn, self.b_del):
             btns.addWidget(b)
@@ -264,8 +438,7 @@ class WordsPage(QWidget):
             self.cat_btns[key].setText(f"{label} {counts[key]}")
         if self.cat != "all":
             ws = [w for w in ws if self.pos_of(w) == self.cat]
-        if self.day or self.cat != "all" or vid:
-            ws.sort(key=lambda w: -w.created)
+        ws.sort(key=lambda w: (-w.created, -w.id))          # always newest first (the day the word was saved)
         self.words = ws
         now = now_ms()
         due = sum(1 for w in all_words if w.due <= now)
@@ -370,35 +543,60 @@ class WordsPage(QWidget):
         r = self.list.currentRow()
         return self.words[r] if 0 <= r < len(self.words) else None
 
+    # ------------------------------------------------------------------ the four panels
+    def toggle_pane(self, pane):
+        if self.big is pane:
+            self.big = None
+            for p, r, c in self.panes:
+                self.grid.addWidget(p, r, c)
+                p.setVisible(True)
+                p.set_big(False)
+        else:
+            self.big = pane
+            for p, _, _ in self.panes:
+                p.setVisible(p is pane)
+                p.set_big(p is pane)
+            self.grid.addWidget(pane, 0, 0, 2, 2)
+
     def show_word(self, *_):
         w = self.current()
+        self.stop_video()
         if not w:
             return
-        h = []
-        snap = self.main.snap_path(w)
-        if snap.exists():
-            h.append(f"<p><a href='play:'><img src='{snap.as_uri()}' width='340'></a></p>")
-        h.append(f"<p style='font-size:24pt;font-weight:800;margin:0'>{article_html(w)}{html.escape(w.text)}</p>")
         lvn = self._level_name(w)
         cat = dict(CATS)[self.pos_of(w)]
-        h.append(f"<p style='color:{theme.DIM};margin:0'>{cat[:-1] if cat.endswith('s') and cat != 'Others' else cat}"
-                 + (f" · <b>{'≈' if w.lang == 'de' else ''}{lvn}</b>" if lvn else "")
-                 + f" · saved {self._day_of(w.created):%d.%m.%Y}</p>")
-        if w.lemma and w.lemma.lower() != w.text.lower():
-            h.append(f"<p style='color:{theme.DIM}'>→ {html.escape(w.lemma)}</p>")
-        if w.ipa:
-            h.append(f"<p style='color:{theme.GOLD};font-size:12.5pt'>{html.escape(w.ipa)}</p>")
-        if w.english:
-            h.append(f"<p>{html.escape(w.english)}</p>")
-        if w.persian:
-            h.append(f"<p dir='rtl' style='font-family:Vazirmatn;font-size:14pt'>{html.escape(w.persian)}</p>")
         acc = f"{w.correct * 100 // w.reviews}%" if w.reviews else "–"
-        h.append(f"<p style='color:{theme.DIM}'>Reviewed {w.reviews}× · right {acc} · next {due_label(w.due, now_ms())}"
-                 f" · from “{html.escape(w.video_name)}”</p>")
-        h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:2px;font-size:9pt;margin-top:16px'>SENTENCES</p>")
+        h = [f"<span style='font-size:22pt;font-weight:800'>{article_html(w)}{html.escape(w.text)}</span>"]
+        if w.ipa:
+            h.append(f"&nbsp;&nbsp;<span style='color:{theme.GOLD};font-size:12pt'>{html.escape(w.ipa)}</span>")
+        h.append(f"<br><span style='color:{theme.DIM}'>{cat[:-1] if cat.endswith('s') and cat != 'Others' else cat}"
+                 + (f" · <b>{'≈' if w.lang == 'de' else ''}{lvn}</b>" if lvn else "")
+                 + (f" · → {html.escape(w.lemma)}" if w.lemma and w.lemma.lower() != w.text.lower() else "")
+                 + f" · saved {self._day_of(w.created):%d.%m.%Y} · reviewed {w.reviews}× · right {acc} · next "
+                   f"{due_label(w.due, now_ms())}</span>")
+        if w.english:
+            h.append(f"<br>{html.escape(w.english)}")
+        if w.persian:
+            h.append(f"<br><span style='font-family:Vazirmatn;font-size:13pt'>{html.escape(w.persian)}</span>")
+        self.head_view.setText("".join(h))
+        # video
+        snap = self.main.snap_path(w)
+        self.snap.set_file(snap if snap.exists() else None,
+                           f"<span style='color:{theme.DIM}'>" + (f"▶ {html.escape(w.video_name)}" if w.video_name else "No video moment")
+                           + "</span>")
+        when = f" · {max(0, w.start_ms) // 60000}:{max(0, w.start_ms) // 1000 % 60:02d}" if w.start_ms >= 0 and w.video_name else ""
+        self.vname.setText(f"{w.video_name}{when}" if w.video_name else "")
+        self.v_dict.setHtml(dictionary_html(self.main, w))
+        self.fill_sentences(w)
+        self.fill_collocations(w)
+
+    def fill_sentences(self, w):
+        h = ["<div style='font-size:10.5pt;line-height:140%'>"]
+        exs = self.main.store.examples(w.id)
         if w.sentence:
-            h.append(f"<p><span style='color:{theme.MAGENTA}'>▶ video</span>&nbsp; {highlight(w.sentence, w.text)}</p>")
-        for e in self.main.store.examples(w.id):
+            h.append(f"<p><a href='play:' style='color:{theme.MAGENTA};text-decoration:none'>▶ video</a>&nbsp; "
+                     f"{highlight(w.sentence, w.text)}</p>")
+        for e in exs:
             h.append(f"<p style='margin-bottom:0'>{highlight(e.de, w.text)} "
                      f"<a href='say:{e.id}' style='color:{theme.CYAN};text-decoration:none'>🔊</a> "
                      f"<a href='del:{e.id}' style='color:{theme.DIM};text-decoration:none'>✕</a></p>")
@@ -406,7 +604,35 @@ class WordsPage(QWidget):
                 h.append(f"<p style='color:{theme.DIM};margin:0'>{html.escape(e.en)}</p>")
             if e.fa:
                 h.append(f"<p dir='rtl' style='font-family:Vazirmatn;color:{theme.DIM};margin:0 0 6px 0'>{html.escape(e.fa)}</p>")
-        self.detail.setHtml("".join(h))
+        if not exs:
+            h.append(f"<p style='color:{theme.DIM}'>No added sentences yet — Teacher ▸ ＋ Add sentences &amp; collocations, or ＋ "
+                     "to paste an answer from ChatGPT / Gemini.</p>")
+        h.append("</div>")
+        self.v_sent.setHtml("".join(h))
+        self.p_sent.count.setText(f"· {len(exs) + (1 if w.sentence else 0)}")
+
+    def fill_collocations(self, w):
+        cols = self.main.store.collocations(w.lang, w.lemma or w.text)
+        if not cols and (w.lemma or w.text).lower() != w.text.lower():
+            cols = self.main.store.collocations(w.lang, w.text)
+        qs = self.main.store.questions(lang=w.lang, lemma=w.lemma or w.text)
+        e_ = html.escape
+        h = ["<div style='font-size:10.5pt;line-height:140%'><table cellspacing=0 cellpadding=3 width='100%'>"]
+        for c in cols:
+            h.append(f"<tr><td style='color:{theme.GOLD};font-weight:600;padding-right:10px'>{e_(c['phrase'])}</td>"
+                     f"<td>{e_(c['meaning'])} <a href='delc:{c['id']}' style='color:{theme.DIM};text-decoration:none'>✕</a></td></tr>")
+            if c["example"]:
+                h.append(f"<tr><td></td><td style='color:{theme.DIM};font-style:italic'>{e_(c['example'])} "
+                         f"<a href='sayt:{_q(c['example'])}' style='color:{theme.CYAN};text-decoration:none'>🔊</a></td></tr>")
+        h.append("</table>")
+        if not cols:
+            h.append(f"<p style='color:{theme.DIM}'>No collocations yet. <a href='teach:' style='color:{theme.CYAN}'>Ask the "
+                     "teacher</a> (Ollama on this PC), then press ＋ Add sentences &amp; collocations.</p>")
+        if qs:
+            h.append(f"<p style='color:{theme.DIM};margin-top:10px'>📝 {len(qs)} exam question(s) on this word are in Review.</p>")
+        h.append("</div>")
+        self.v_coll.setHtml("".join(h))
+        self.p_coll.count.setText(f"· {len(cols)}" if cols else "")
 
     def _link(self, url):
         kind, _, val = url.toString().partition(":")
@@ -414,14 +640,68 @@ class WordsPage(QWidget):
         if not w:
             return
         if kind == "play":
-            return self.play()
+            return self.play_here()
+        if kind == "teach":
+            return self.teacher()
+        if kind == "sayt":
+            import urllib.parse
+            return self.main.speak(urllib.parse.unquote(val), lang=w.lang)
+        if kind == "delc":
+            self.main.store.delete_collocation(int(val))
+            return self.fill_collocations(w)
         ex = next((e for e in self.main.store.examples(w.id) if str(e.id) == val), None)
         if ex and kind == "say":
             self.main.speak(ex.de, lang=w.lang)
         elif ex and kind == "del":
             self.main.store.delete_example(ex.id)
             self.main.after_change()
+            self.fill_sentences(w)
+
+    def refresh_panels(self):
+        """After a change elsewhere (the teacher added sentences or collocations): the panels of the shown word again."""
+        w = self.current()
+        if w:
+            self.fill_sentences(w)
+            self.fill_collocations(w)
+
+    def play_here(self):
+        """The video moment plays inside the Video panel (the picture comes back to the player afterwards)."""
+        w = self.current()
+        if not w:
+            return
+        if self.vw.isVisible():
+            return self.stop_video()
+        if not self.main.find_video(w):
+            self.vmsg.setText(f"The video “{w.video_name}” isn't on this PC (or was renamed) — put it in Videos, Downloads or a "
+                              "folder you opened before.")
+            self.vmsg.show()
+            return
+        self.main.hide_mini()
+        self.main.player.setVideoOutput(self.vw)
+        self.snap.hide()
+        self.vw.show()
+        self.main.play_clip(w, quiet=True)
+
+    def stop_video(self):
+        self.vmsg.hide()
+        if self.vw.isVisible():
+            self.main.player.pause()
+            self.main.clear_ab()
+            self.vw.hide()
+            self.snap.show()
+            self.main.player.setVideoOutput(self.main.vw)
+
+    def add_sentences(self):
+        w = self.current()
+        if w:
+            from .dialogs import AddSentencesDialog
+            AddSentencesDialog(self.main, w).exec()
             self.show_word()
+
+    def teacher(self):
+        w = self.current()
+        if w:
+            self.main.teacher_for(w.text, w.lemma or w.text, w.sentence, w.lang, lambda: w, 0)
 
     def play(self):
         w = self.current()
@@ -477,10 +757,12 @@ class ReviewPage(QWidget):
         self.vmsg = QLabel("", objectName="hint", alignment=Qt.AlignCenter, wordWrap=True)
         self.vmsg.hide()
         bv.addWidget(self.vmsg)
+        self.opt_row = QVBoxLayout()                 # the choices of an exam question
+        self.opt_row.setSpacing(5)
+        bv.addLayout(self.opt_row)
         row = QHBoxLayout()
         self.b_play = ibtn("play", "Play the video moment (here in the card)", self.play, kind="", text=" Play the moment")
-        self.b_speak = ibtn("volume", "Speak the sentence", lambda: self.cur and self.main.speak(self.sent[0] if self.sent else self.cur.text, lang=self.cur.lang),
-                            kind="", text=" Speak")
+        self.b_speak = ibtn("volume", "Speak the sentence", self._speak, kind="", text=" Speak")
         self.b_reveal = ibtn("sparkles", "Show the meaning (Space)", self.reveal, kind="", text=" Show meaning", color="#FFFFFF")
         self.b_reveal.setProperty("accent", True)
         self.b_again = ibtn("repeat", "Again in 10 minutes (1 / ←)", lambda: self.answer(False), kind="", text=" Again — 10 min")
@@ -499,14 +781,51 @@ class ReviewPage(QWidget):
         self.queue, self.i, self.done, self.got, self.revealed, self.cur, self.sent = [], 0, 0, 0, False, None, None
 
     def start(self):
-        self.queue = self.main.store.due(now_ms())
+        now = now_ms()
+        items = self.main.store.due(now) + self.main.store.due_questions(now)
+        items.sort(key=lambda x: (x.reviews, x.box, x.due))      # the least reviewed first
+        self.queue = items
         self.i = self.done = self.got = 0
         self.show_card()
 
+    def _speak(self):
+        if not self.cur:
+            return
+        if isinstance(self.cur, Question):
+            self.main.speak(self.cur.question, lang=self.cur.lang)
+        else:
+            self.main.speak(self.sent[0] if self.sent else self.cur.text, lang=self.cur.lang)
+
+    def _clear_opts(self):
+        while self.opt_row.count():
+            it = self.opt_row.takeAt(0)
+            if it.widget():
+                it.widget().hide()
+                it.widget().deleteLater()
+
+    @staticmethod
+    def is_answer(opt: str, ans: str) -> bool:
+        """An option is the answer when it is the same text, or the same letter (A / B) / the answer is inside it."""
+        import re as _re
+        o, a = " ".join(opt.lower().split()), " ".join(ans.lower().split())
+        if not a:
+            return False
+        if o == a:
+            return True
+        lo, la = _re.match(r"^\(?([a-f])[).:]", o), _re.match(r"^\(?([a-f])(?:[).:]|$)", a)
+        if lo and la:
+            return lo.group(1) == la.group(1)
+        strip = lambda t: _re.sub(r"^\(?[a-f][).:]\s*", "", t).strip(" .")
+        return strip(o) == strip(a) or (len(strip(a)) > 3 and strip(a) in strip(o))
+
     def show_card(self):
         self.stop_video()
+        self._clear_opts()
         self.revealed = False
+        self.picked = None
         self.cur = self.queue[self.i] if self.i < len(self.queue) else None
+        if isinstance(self.cur, Question):
+            return self.show_question()
         if not self.cur:
             self.head.setText("")
             msg = f"Done ✓ — {self.got} of {self.done} right. 🔥 {self.main.progress.streak} day streak" if self.done else \
@@ -525,9 +844,51 @@ class ReviewPage(QWidget):
             b.setVisible(bool(vis))
         self.render()
 
+    def show_question(self):
+        q = self.cur
+        self.sent = None
+        exam = "IELTS" if q.lang == "en" else "TestDaF"
+        self.head.setText(f"{self.i + 1} of {len(self.queue)} · {exam} question · reviewed {q.reviews}× · box {q.box}/7")
+        for b, vis in ((self.b_play, False), (self.b_speak, True), (self.b_reveal, not q.options), (self.b_again, False), (self.b_got, False)):
+            b.setVisible(vis)
+        for o in q.options:
+            b = QPushButton(o)
+            b.setStyleSheet("text-align:left;padding:8px 14px")
+            b.clicked.connect(lambda _=False, x=o: self.pick(x))
+            self.opt_row.addWidget(b)
+        self.render()
+
+    def pick(self, opt: str):
+        if self.revealed:
+            return
+        self.picked = opt
+        ok = self.is_answer(opt, self.cur.answer)
+        for k in range(self.opt_row.count()):
+            b = self.opt_row.itemAt(k).widget()
+            if b:
+                b.setEnabled(False)
+                right = self.is_answer(b.text(), self.cur.answer)
+                if right or b.text() == opt:
+                    b.setStyleSheet(f"text-align:left;padding:8px 14px;color:#FFFFFF;background:{'#2E8B57' if right else '#8B2E4F'}")
+        self.reveal()
+        (self.b_got if ok else self.b_again).setFocus()
+
     def render(self):
         w = self.cur
         h = []
+        if isinstance(w, Question):
+            src = (f" · from “{html.escape(w.video_name[:50])}”" if w.video_name else "") + (f" · word „{html.escape(w.lemma)}“" if w.lemma else "")
+            h.append(f"<p style='text-align:center;color:{theme.DIM};font-size:9pt'>{src.lstrip(' ·')}</p>")
+            h.append(f"<p style='text-align:center;font-size:15pt'>{html.escape(w.question)}</p>")
+            if self.revealed:
+                ok = self.picked is None or self.is_answer(self.picked, w.answer)
+                mark = "" if self.picked is None else ("✓ Right! " if ok else "✗ ")
+                h.append(f"<p style='text-align:center;font-size:15pt;color:{theme.MINT if ok else theme.MAGENTA}'>{mark}"
+                         f"<b>{html.escape(w.answer)}</b></p>")
+                if w.explanation:
+                    h.append(f"<p style='text-align:center;color:{theme.DIM}'>{html.escape(w.explanation)}</p>")
+            self.view.setHtml("".join(h))
+            return
         if self.sent:
             h.append(f"<p style='text-align:center;font-size:17pt'>{highlight(self.sent[0], w.text)}</p>")
         h.append(f"<p style='text-align:center;font-size:26pt;font-weight:800;color:{theme.GOLD}'>"
@@ -545,6 +906,12 @@ class ReviewPage(QWidget):
         self.view.setHtml("".join(h))
 
     def keyPressEvent(self, e):
+        if isinstance(self.cur, Question) and self.cur.options and not self.revealed and Qt.Key_1 <= e.key() <= Qt.Key_9:
+            k = e.key() - Qt.Key_1
+            if k < len(self.cur.options):
+                return self.pick(self.cur.options[k])
+        if e.key() == Qt.Key_Space and self.cur and isinstance(self.cur, Question) and self.cur.options and not self.revealed:
+            return
         if e.key() == Qt.Key_Space and self.cur:
             self.reveal() if not self.revealed else self.answer(True)
         elif e.key() in (Qt.Key_1, Qt.Key_Left) and self.revealed:
@@ -564,6 +931,7 @@ class ReviewPage(QWidget):
             self.vmsg.show()
             return
         self.vmsg.hide()
+        self.main.hide_mini()
         self.main.player.setVideoOutput(self.vw)
         self.view.setMinimumHeight(120)
         self.view.setMaximumHeight(170)
@@ -593,7 +961,10 @@ class ReviewPage(QWidget):
         if not w:
             return
         upd = review(w, got, now_ms())
-        self.main.store.update(upd)
+        if isinstance(w, Question):
+            self.main.store.update_question(upd)
+        else:
+            self.main.store.update(upd)
         self.main.progress.record()
         self.done += 1
         self.got += 1 if got else 0
