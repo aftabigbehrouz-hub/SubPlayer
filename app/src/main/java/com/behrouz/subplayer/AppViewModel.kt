@@ -38,6 +38,7 @@ import com.behrouz.subplayer.sync.SSub
 import com.behrouz.subplayer.sync.SyncDoc
 import com.behrouz.subplayer.sync.SyncMerge
 import com.behrouz.subplayer.words.Cloze
+import com.behrouz.subplayer.learn.Teacher.Mode as TMode
 import com.behrouz.subplayer.words.Collocation
 import com.behrouz.subplayer.words.Example
 import com.behrouz.subplayer.words.ExamQuestion
@@ -1375,11 +1376,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val T = com.behrouz.subplayer.learn.Teacher
         val lv = teacherLevel(); val ex = lessonExplain
         return when (s.mode) {
-            T.Mode.WORD -> T.wordPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
-            T.Mode.SENTENCE -> extra.ifBlank { s.sentence }.takeIf { it.isNotBlank() }?.let { T.sentencePrompt(it, s.lang, ex, lv) }
-            T.Mode.CHECK -> extra.takeIf { it.isNotBlank() }?.let { T.checkPrompt(s.lemma, it, s.lang, ex, lv) }
-            T.Mode.ASK -> extra.takeIf { it.isNotBlank() }?.let { T.askPrompt(it, s.lemma, s.sentence, s.video, s.lang, ex, lv) }
-            T.Mode.EXAM -> T.examPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
+            TMode.WORD -> T.wordPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
+            TMode.SENTENCE -> extra.ifBlank { s.sentence }.takeIf { it.isNotBlank() }?.let { T.sentencePrompt(it, s.lang, ex, lv) }
+            TMode.CHECK -> extra.takeIf { it.isNotBlank() }?.let { T.checkPrompt(s.lemma, it, s.lang, ex, lv) }
+            TMode.ASK -> extra.takeIf { it.isNotBlank() }?.let { T.askPrompt(it, s.lemma, s.sentence, s.video, s.lang, ex, lv) }
+            TMode.EXAM -> T.examPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
         }
     }
 
@@ -1409,7 +1410,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             message = "That is still the question — copy the assistant's ANSWER, then tap Paste answer"; return
         }
         when (s.mode) {
-            T.Mode.WORD -> {
+            TMode.WORD -> {
                 val a = T.readWord(raw, s.lang, s.lemma)
                 val w = words.firstOrNull { it.id == s.wordId }
                 var n = 0; var k = 0
@@ -1423,8 +1424,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 sheet = s.copy(answer = a.readable, note = if (w == null) "" else "Saved to „${s.word}“: $k collocation(s), $n sentence(s)")
             }
-            T.Mode.CHECK -> sheet = s.copy(answer = T.readCheck(raw))
-            T.Mode.EXAM -> {
+            TMode.CHECK -> sheet = s.copy(answer = T.readCheck(raw))
+            TMode.EXAM -> {
                 val qs = T.readExam(raw, s.lang, s.lemma, s.video)
                 val n = if (qs.isNotEmpty()) store.addQuestions(qs) else 0
                 if (qs.isNotEmpty()) refreshWords()
