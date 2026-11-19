@@ -267,6 +267,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             uiPrefs.edit().putBoolean("joined_29", true).apply()
         }
+        if (!uiPrefs.getBoolean("colfix_29", false)) {       // once: lines of an escaped JSON paste stored as collocations
+            runCatching {
+                val n = store.removeBrokenCollocations { com.behrouz.subplayer.learn.Cards.isBroken(it) }
+                if (n > 0) message = "My Words: $n unreadable collocation line(s) from an escaped paste removed — paste that answer again"
+            }
+            uiPrefs.edit().putBoolean("colfix_29", true).apply()
+        }
         refreshWords()
         recentList = recents.list()
         viewModelScope.launch { delay(1500); if (syncToken.isNotBlank()) syncNow(silent = true) }
@@ -1305,7 +1312,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clipboardText(): String {
         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        return cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+        val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+        return com.behrouz.subplayer.learn.Cards.cleanAi(t)      // &#x20; and line-end backslashes of some copy buttons
     }
 
     /** Makes sure the word in the open card is saved (without toggling) and returns it. */
@@ -1335,8 +1343,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w = words.firstOrNull { it.id == wordId }
         val lang = w?.lang ?: "de"
         val lemma = w?.let { if (it.text.contains(' ')) it.text else it.lemma.ifEmpty { it.text } } ?: ""
-        val (cols, rest) = com.behrouz.subplayer.learn.Cards.collocations(raw, lang, lemma)
-        val list = Sentences.parse(rest, primary = lang)
+        val clean = com.behrouz.subplayer.learn.Cards.cleanAi(raw)
+        val js = com.behrouz.subplayer.learn.Cards.fromJson(clean, lang, lemma)       // a JSON answer: its parts
+        val (cols, rest) = js?.let { it.first to "" } ?: com.behrouz.subplayer.learn.Cards.collocations(clean, lang, lemma)
+        val list = js?.second ?: Sentences.parse(rest, primary = lang)
         if (list.isEmpty() && cols.isEmpty()) { message = "No sentences found. Each line should look like: DE: … | EN: … | FA: …"; return }
         val n = if (list.isNotEmpty()) store.addExamples(wordId, list) else 0
         val k = if (cols.isNotEmpty() && w != null) store.addCollocations(lang, lemma, cols) else 0

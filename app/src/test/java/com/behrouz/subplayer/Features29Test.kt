@@ -87,3 +87,27 @@ class Features29Test {
         assertEquals(listOf(0..0, 1..1, 2..2), CueBuilder.sentenceRanges(plain))
     }
 }
+
+class EscapedPasteTest {
+    private val raw = "{\\\n&#x20; \"meaning\": \"Ich bin nicht bereit, etwas zu tun.\",\\\n&#x20; \"collocations\": [\\\n" +
+        "&#x20;   {\"phrase\": \"sich weigern, etwas zu tun\", \"meaning\": \"to refuse to do sth\", \"example\": \"Er weigert sich, zu zahlen.\"}\\\n" +
+        "&#x20; ],\\\n&#x20; \"examples\": [{\"sentence\": \"Ich weigere mich, das zu glauben.\", \"translation\": \"I refuse to believe it.\"}]\\\n}"
+
+    @org.junit.Test fun aCopyButtonAnswerIsRead() {
+        val (cols, ex) = com.behrouz.subplayer.learn.Cards.fromJson(raw, "de", "weigern")!!
+        org.junit.Assert.assertEquals("sich weigern, etwas zu tun", cols.single().phrase)
+        org.junit.Assert.assertEquals("Ich weigere mich, das zu glauben.", ex.single().de)
+    }
+
+    @org.junit.Test fun markdownEscapesAndFences() {
+        org.junit.Assert.assertEquals("**KOLL:** a | b", com.behrouz.subplayer.learn.Cards.cleanAi("```json\n\\*\\*KOLL:\\*\\* a \\| b\n```"))
+        org.junit.Assert.assertNull(com.behrouz.subplayer.learn.Cards.fromJson("etliche Male | several times", "de", "etliche"))
+    }
+
+    @org.junit.Test fun brokenLinesAreRecognised() {
+        val c = com.behrouz.subplayer.learn.Cards
+        org.junit.Assert.assertTrue(c.isBroken("{\\"))
+        org.junit.Assert.assertTrue(c.isBroken("&#x20; \"meaning\": \"Ich bin nicht bereit\",\\"))
+        org.junit.Assert.assertFalse(c.isBroken("sich weigern, etwas zu tun"))
+    }
+}

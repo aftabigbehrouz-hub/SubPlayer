@@ -216,6 +216,15 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 4) {
         return n
     }
 
+    fun removeBrokenCollocations(isBroken: (String) -> Boolean): Int {
+        val ids = ArrayList<Long>()
+        readableDatabase.rawQuery("SELECT id, phrase FROM collocations", null).use { c ->
+            while (c.moveToNext()) if (isBroken(c.getString(1) ?: "")) ids.add(c.getLong(0))
+        }
+        ids.forEach { deleteCollocation(it) }
+        return ids.size
+    }
+
     fun deleteCollocation(id: Long) { writableDatabase.delete("collocations", "id=?", arrayOf(id.toString())) }
 
     // ------------------------------------------------------------------ exam questions

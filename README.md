@@ -1,5 +1,7 @@
 # SubPlayer — learn German (and English) with your own videos · Android 2.9 + Windows 2.6
 
+- Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
 **New in Android 2.9** (versionCode 14 — the Windows 2.6 changes on the phone)
 - **My Words newest first**, and **one entry per word**: saving a word you already have (from another line or video) adds
   the line to its sentences instead of a second entry; words saved twice are joined once, on the first start (a copy of

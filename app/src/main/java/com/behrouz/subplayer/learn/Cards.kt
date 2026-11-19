@@ -41,8 +41,9 @@ object Cards {
 
     /** The cards after ---REVIEW--- (or in the whole text, when it is written as Q:/O:/A:/E: cards without the mark). */
     fun parse(text: String, lang: String = "de", videoName: String = "", source: String = ""): List<ExamQuestion> {
-        val i = text.lastIndexOf(MARK)
-        val body = if (i >= 0) text.substring(i + MARK.length) else text
+        val txt = cleanAi(text)
+        val i = txt.lastIndexOf(MARK)
+        val body = if (i >= 0) txt.substring(i + MARK.length) else txt
         val out = ArrayList<ExamQuestion>()
         val cur = HashMap<String, String>()
         var last: String? = null
@@ -100,6 +101,54 @@ object Cards {
         val ws = cell.split(Regex("\\s+")).map { it.trim('*', ':', '(', ')').lowercase() }.filter { it.isNotEmpty() }
         return ws.isNotEmpty() && ws.all { it in HEADER_WORDS }
     }
+
+    /**
+     * An answer copied from ChatGPT & co. as it should be: HTML entities (&#x20; for a space) decoded, the backslash some copy
+     * buttons put at the end of every line removed, markdown escapes (\\* \\_ \\#) undone, ``` fences dropped.
+     * Same as the Windows app (practice.clean_ai).
+     */
+    fun cleanAi(text: String): String {
+        var t = text.replace("\r", "").replace('\u00a0', ' ')
+        t = Regex("&#x([0-9a-fA-F]+);").replace(t) { m -> m.groupValues[1].toInt(16).toChar().toString() }
+        t = Regex("&#([0-9]+);").replace(t) { m -> m.groupValues[1].toInt().toChar().toString() }
+        t = t.replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&nbsp;", " ").replace("&amp;", "&")
+        t = Regex("""\\[ \t]*$""", RegexOption.MULTILINE).replace(t, "")
+        t = Regex("""\\([*_#>\[\]()`~|-])""").replace(t) { it.groupValues[1] }
+        t = Regex("""^\s*```[\w-]*\s*$""", RegexOption.MULTILINE).replace(t, "")
+        return t.trim()
+    }
+
+    /** A JSON answer (the teacher's format): its collocations and example sentences, or null if the text is not JSON. */
+    fun fromJson(raw: String, lang: String, lemma: String): Pair<List<Collocation>, List<com.behrouz.subplayer.words.Example>>? {
+        val t = cleanAi(raw)
+        val a = t.indexOf('{'); val b = t.lastIndexOf('}')
+        if (a < 0 || b <= a) return null
+        val o = runCatching { org.json.JSONObject(t.substring(a, b + 1)) }.getOrNull() ?: return null
+        val cols = ArrayList<Collocation>()
+        o.optJSONArray("collocations")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val x = arr.opt(i)
+                if (x is org.json.JSONObject) {
+                    val ph = x.optString("phrase").trim()
+                    if (ph.isNotEmpty()) cols.add(Collocation(lang = lang, lemma = lemma, phrase = ph, meaning = x.optString("meaning"), example = x.optString("example")))
+                } else if (x is String && x.isNotBlank()) cols.add(Collocation(lang = lang, lemma = lemma, phrase = x.trim()))
+            }
+        }
+        val ex = ArrayList<com.behrouz.subplayer.words.Example>()
+        o.optJSONArray("examples")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val x = arr.optJSONObject(i) ?: continue
+                val de = x.optString("sentence").trim()
+                if (de.isNotEmpty()) ex.add(com.behrouz.subplayer.words.Example(de = de, en = x.optString("translation"), fa = x.optString("persian")))
+            }
+        }
+        return cols to ex
+    }
+
+    /** Lines left by an escaped paste in earlier versions ({\\, &#x20; "meaning": …) — not real collocations. */
+    fun isBroken(phrase: String): Boolean =
+        Regex("""(&#x?[0-9a-f]+;|^[{}\[\],\\]+$|"\s*:|\\$)""", RegexOption.IGNORE_CASE).containsMatchIn(phrase)
 
     /** A collocation, not a sentence: at most 5 words and no full stop / ! / ? at the end. */
     fun isPhrase(t: String): Boolean {
