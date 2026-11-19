@@ -56,14 +56,18 @@ def video_folders(settings: dict) -> list[Path]:
 def scan(settings: dict, subs_dir: Path, max_files: int = 4000) -> list[Item]:
     """All subtitled videos (SubPlayer's subtitles first, then .srt beside videos)."""
     videos: dict[str, str] = {}
+    own = {str(Path(p)) for p in settings.get("video_folders", []) if p}
+    skip = {"windows", "program files", "program files (x86)", "programdata", "appdata", "$recycle.bin", "system volume information",
+            "node_modules", "__pycache__"}
     for folder in video_folders(settings):
+        depth = 8 if str(folder) in own else 3          # folders you added (a drive, a series folder): searched deeper
         try:
             for root, dirs, files in os.walk(folder):
-                dirs[:] = [d for d in dirs if not d.startswith((".", "$"))][:200]
+                dirs[:] = [d for d in dirs if not d.startswith((".", "$")) and d.lower() not in skip][:300]
                 for f in files:
                     if f.lower().endswith(VIDEO_EXT):
                         videos.setdefault(subtitles.video_key(f), os.path.join(root, f))
-                if root.count(os.sep) - str(folder).count(os.sep) >= 3:
+                if root.count(os.sep) - str(folder).count(os.sep) >= depth:
                     dirs[:] = []
         except OSError:
             continue

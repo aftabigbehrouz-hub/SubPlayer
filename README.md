@@ -1,4 +1,4 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.9
+# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.9.1
 
 **New in Android 2.10** (versionCode 15 — the Windows 2.6.1 / 2.6.2 changes on the phone)
 - **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
@@ -26,6 +26,9 @@
 - **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
   ✕ pauses), and over other apps after Home (picture-in-picture).
 - Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
+**New in Windows 2.9.1**
+- **My Words ▸ 🎬 Find in all my videos**: type any word or phrase (saved or not) and press Enter — every subtitle line of your videos that uses it, in all its forms (bringen: bringt, brachte, gebracht, bringt … mit), with the video and the moment; double-click or ▶ Play this moment. The window has its own search box, Deutsch / English, and **Folders…** to add a drive or a folder of series and films (searched deeper). Always searched: SubPlayer's subtitles, Videos, Downloads and the folders of your recent videos.
 
 **New in Windows 2.9**
 - **Discover ▸ My sources** (the ＋ chip): add a public **Telegram channel** (t.me/name or @name), an **RSS / podcast feed**, or a **web page** with videos. Each source is a row in Suggestions; Search looks in your sources too (shown first), and **★ My sources** shows only them. Telegram is read through its public web view (no login); the video is fetched fresh when you download it. A page that names its feed is read through the feed; the same video in several qualities is listed once. Private channels and YouTube / Instagram / TikTok can't be added. Telegram needs your VPN or proxy where it is filtered.
