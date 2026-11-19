@@ -217,6 +217,11 @@ class WordsPage(QWidget):
         self.search = QLineEdit(placeholderText="Search your words…")
         self.search.textChanged.connect(self.refresh)
         frow.addWidget(self.search, 1)
+        self.find_all = QLineEdit(placeholderText="🎬 Find in all my videos…")
+        self.find_all.setToolTip("Any word or phrase: every subtitle line of your videos that uses it (all its forms) — "
+                                 "double-click a line to play that moment")
+        self.find_all.returnPressed.connect(self.find_in_videos)
+        frow.addWidget(self.find_all, 1)
         self.video_box = QComboBox()
         self.video_box.setMinimumWidth(190)
         self.video_box.setToolTip("Only the words from one video")
@@ -534,6 +539,27 @@ class WordsPage(QWidget):
                 out.append(f"{front}\t{back}\tSubPlayer {r['category']} {r['level']}".replace("\n", " "))
             Path(f).write_text("\n".join(out) + "\n", encoding="utf-8")
         self.main.msg(f"{len(rows)} words exported to {f}", 9000)
+
+    def find_in_videos(self):
+        """Any word or phrase in every subtitle of your videos — the language guessed from the dictionaries."""
+        w = self.find_all.text().strip()
+        lang = self.main.settings.get("find_lang", "de")
+        if w and " " not in w:
+            de, en = self.main.dictionary("de"), self.main.dictionary("en")
+            try:
+                in_de = bool(de and de.lookup(w))
+                in_en = bool(en and en.lookup(w))
+                if in_en and not in_de:
+                    lang = "en"
+                elif in_de and not in_en:
+                    lang = "de"
+            except Exception:
+                pass
+        from .dialogs import UsesDialog
+        d = UsesDialog(self.main, w, lang)
+        d.exec()
+        self.main.settings["find_lang"] = d.lang
+        self.main.save_settings()
 
     def export_book(self):
         """My Words as one HTML file: tabs, explanations, sentences, collocations, flashcards — audio inside."""

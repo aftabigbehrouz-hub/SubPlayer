@@ -1092,8 +1092,30 @@ class UsesDialog(QDialog):
         self.resize(860, 660)
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 18, 24, 18)
-        self.head = title(f"“{word}” in your videos")
+        self.head = title(f"“{word}” in your videos" if word else "Find in all your videos")
         v.addWidget(self.head)
+        srow = QHBoxLayout()
+        self.q = QLineEdit(placeholderText="A word or a phrase — every subtitle line of your videos that uses it")
+        self.q.setText(word)
+        self.q.returnPressed.connect(self.new_search)
+        srow.addWidget(self.q, 1)
+        self.lang_btns = {}
+        for code, label in (("de", "Deutsch"), ("en", "English")):
+            b = QPushButton(label, checkable=True)
+            b.setProperty("kind", "chip")
+            b.setChecked(code == lang)
+            b.clicked.connect(lambda _=False, c=code: self._set_lang(c))
+            self.lang_btns[code] = b
+            srow.addWidget(b)
+        go = QPushButton("Search")
+        go.setProperty("accent", True)
+        go.clicked.connect(self.new_search)
+        srow.addWidget(go)
+        fold = QPushButton("Folders…")
+        fold.setToolTip("Where SubPlayer looks for videos with subtitles — add a drive or a folder of series and films")
+        fold.clicked.connect(self.folders)
+        srow.addWidget(fold)
+        v.addLayout(srow)
         self.info = hint("Searching your subtitled videos (SubPlayer's subtitles and .srt files next to your videos)…")
         v.addWidget(self.info)
         self.forms = QLabel("")
@@ -1122,7 +1144,62 @@ class UsesDialog(QDialog):
         self.uses, self.files, self.meta, self.form = [], 0, {}, ""
         self._esc = _html.escape
         self._QLI = QListWidgetItem
-        box = {}
+        self._run = 0
+        if word.strip():
+            self._search(word, lang)
+        else:
+            self.info.setText("Type a word or a phrase and press Enter. German words are found in all their forms "
+                              "(bringen: bringt, brachte, gebracht, bringt … mit) when the dictionary is downloaded.")
+            self.play_b.setEnabled(False)
+            QTimer.singleShot(0, self.q.setFocus)
+
+    def _set_lang(self, code: str):
+        self.lang = code
+        for c, b in self.lang_btns.items():
+            b.setChecked(c == code)
+        if self.q.text().strip():
+            self.new_search()
+
+    def new_search(self):
+        w = self.q.text().strip()
+        if w:
+            self.form = ""
+            self._search(w, self.lang)
+
+    def folders(self):
+        from PySide6.QtWidgets import QFileDialog, QMenu
+        lst = self.main.settings.setdefault("video_folders", [])
+        m = QMenu(self)
+        m.addAction("＋ Add a folder or a drive…", lambda: self._add_folder())
+        if lst:
+            m.addSeparator()
+            for p in list(lst):
+                m.addAction(f"✕  {p}", lambda p=p: (lst.remove(p), self.main.save_settings(), self.new_search()))
+        m.addSeparator()
+        m.addAction("Always searched: Videos, Downloads, the folders of your recent videos, SubPlayer's subtitles").setEnabled(False)
+        m.exec(self.cursor().pos())
+
+    def _add_folder(self):
+        from PySide6.QtWidgets import QFileDialog
+        d = QFileDialog.getExistingDirectory(self, "A folder (or drive) with videos and their subtitles")
+        if d:
+            lst = self.main.settings.setdefault("video_folders", [])
+            if d not in lst:
+                lst.append(d)
+                self.main.save_settings()
+            self.new_search()
+
+    def _search(self, word: str, lang: str):
+        import threading
+        from PySide6.QtCore import QTimer
+        self.word, self.lang = word, lang
+        self._run += 1
+        run = self._run
+        self.list.clear()
+        self.forms.setText("")
+        self.play_b.setEnabled(False)
+        self.info.setText(f"Searching your subtitled videos for “{word}”…")
+        main, box = self.main, {}
 
         def work():
             from . import library, syncer as _syncer
@@ -1137,6 +1214,8 @@ class UsesDialog(QDialog):
         t.start()
 
         def poll():
+            if run != self._run:
+                return
             if t.is_alive():
                 QTimer.singleShot(150, poll)
                 return
