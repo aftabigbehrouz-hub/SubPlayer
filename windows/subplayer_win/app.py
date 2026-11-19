@@ -320,9 +320,11 @@ class Main(QMainWindow):
                                     ("review", "cards", "Review", "Review the words that are due"),
                                     ("practice", "puzzle", "Practice", "Gap-fill, dictation, der·die·das")):
             self.nav[key] = nav(ic, label, tip, lambda _=False, k=key: self.show_page(k))
-        self.writing_btn = nav("study", "Writing", "Writing coach: write a text — every sentence corrected, feedback on development, "
+        self.writing_btn = nav("pen", "Writing", "Writing coach: write a text — every sentence corrected, feedback on development, "
                                "cohesion and coherence, three better versions (Ollama, ChatGPT, Gemini, DeepSeek, Grok …)",
                                self.writing_coach, checkable=False)
+        self.notebook_btn = nav("notes", "Notebook", "Every answer of the teacher (the line explained, your questions, checked "
+                                "sentences and texts, A1 → C1) — read again and review", self.notebook, checkable=False)
         self.due_badge = QLabel("", objectName="badge", alignment=Qt.AlignCenter)
         self.due_badge.setToolTip("Words due for review")
         v.addWidget(self.due_badge)
@@ -1481,6 +1483,11 @@ class Main(QMainWindow):
         due = sum(1 for w in words if w.due <= now)
         self.due_badge.setText(f"{due} due" if due else "")
         self.due_badge.setVisible(bool(due))
+        try:
+            nd = len(self.store.due_notes(now_ms()))
+            self.notebook_btn.setText(f"Notebook · {nd}" if nd else "Notebook")
+        except Exception:
+            pass
         s = self.progress.streak
         self.streak_lbl.setText(f"🔥 {s} day{'s' if s != 1 else ''}" if s else "")
 
@@ -2043,6 +2050,13 @@ class Main(QMainWindow):
         d.show()
         d.raise_()
 
+    def notebook(self, review_first: bool = False):
+        from .notebook import NotebookDialog
+        d = NotebookDialog(self, review_first)
+        self._notebooks = [x for x in getattr(self, "_notebooks", []) if x.isVisible()] + [d]
+        d.show()
+        d.raise_()
+
     def writing_coach(self):
         """The teacher opened for writing only: German or English."""
         m = QMenu(self)
@@ -2465,8 +2479,8 @@ class Main(QMainWindow):
                 log_error("natural voice", err)
                 if not self._speech_warned:
                     self._speech_warned = True
-                    self.msg("The natural voice could not be reached — the Windows voice reads instead. "
-                             "Settings ▸ Voice: check the network / proxy, or download the offline voices.", 12000)
+                    self.msg("Microsoft's natural voice could not be reached — the Windows voice reads instead. "
+                             "For a natural voice without internet: Settings ▸ Voice ▸ Download offline voices (Piper).", 14000)
                 self._speak_windows(text, slow, lang)
             return
         if kind in ("subs", "download", "link", "clip"):

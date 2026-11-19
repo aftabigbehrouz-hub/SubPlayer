@@ -113,7 +113,12 @@ def audio_file(settings: dict, text: str, lang: str, slow: bool = False) -> Path
         if not piper_ready(lang):
             raise FileNotFoundError("piper")
         return piper_file(text, lang, slow)
-    return edge_file(text, edge_voice(settings, lang), slow)
+    try:
+        return edge_file(text, edge_voice(settings, lang), slow)
+    except Exception:
+        if piper_ready(lang):              # Microsoft not reachable (network, filter, 403): the offline voice reads it
+            return piper_file(text, lang, slow)
+        raise
 
 
 def clear_cache() -> int:

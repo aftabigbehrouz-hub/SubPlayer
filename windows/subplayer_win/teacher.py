@@ -484,6 +484,10 @@ class TeacherDialog(QDialog):
             self.show_writing(ollama.parse_json(res), res)
         elif self._mode == "levels":
             self.show_levels(ollama.parse_json(res), res)
+        elif self._mode == "text" and (res or "").strip():
+            from . import practice
+            show_markdown(self._target_view, practice.clean_ai(res))      # **bold**, ## headings, lists — shown as such
+        self._keep(res)
         if self.source() != "ollama":
             self.state.setText("Answer pasted · answers from AI can contain mistakes — trust the dictionary for the meaning")
 
@@ -683,6 +687,31 @@ class TeacherDialog(QDialog):
         q = ollama.ask_prompt(qn, self.lemma, self.sentence, video, self.lang, self.ex.currentData(), self.lv.currentText())
         self._start(self.view4, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…", q, sys_)
 
+    # ------------------------------------------------------------------ every answer is kept in the Notebook
+    def _keep(self, res: str):
+        """The answer of the open tab goes to the Notebook (to read again and review later)."""
+        if not (res or "").strip():
+            return
+        i = self.stack.currentIndex() if self._target_view is self._tab_view(self.stack.currentIndex()) else \
+            next((k for k in range(7) if self._tab_view(k) is self._target_view), -1)
+        kind, title = {1: ("line", self.sentence), 3: ("ask", self.question.text()), 2: ("check", self.attempt.text()),
+                       5: ("writing", self.w_task.text().strip() or self.w_text.toPlainText()),
+                       6: ("levels", self.l_sent.text())}.get(i, ("", ""))
+        title = " ".join((title or "").split())
+        if not kind or not title:
+            return
+        if kind == "writing" and len(title) > 160:
+            title = title[:160].rsplit(" ", 1)[0] + " …"
+        from pathlib import Path
+        from .store import Note
+        try:
+            self.main.store.add_note(Note(title=title, body=self._target_view.toHtml(), kind=kind, lang=self.lang,
+                                          lemma=self.lemma, source=self.source(),
+                                          video_name=Path(self.main.video).name if getattr(self.main, "video", "") else ""))
+            self.state.setText(self.state.text() + " · kept in your Notebook ✓")
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------ 5 writing coach
     def _w_count(self):
         t = self.w_text.toPlainText()
@@ -829,6 +858,26 @@ class TeacherDialog(QDialog):
     def closeEvent(self, e):
         self.runner.stop = True
         super().closeEvent(e)
+
+
+def show_markdown(view, text: str):
+    """An answer written with markdown (ChatGPT, Gemini …): headings, bold, lists shown as such; Persian lines right to left."""
+    import re
+    t = re.sub(r"^\s*(-{3,}|_{3,}|\*{3,})\s*$", "", text, flags=re.M)      # --- rules
+    view.setMarkdown(t)
+    doc = view.document()
+    from PySide6.QtGui import QTextBlockFormat, QTextCursor
+    from PySide6.QtCore import Qt as _Qt
+    b = doc.begin()
+    while b.isValid():
+        first = re.search(r"[A-Za-z\u00C0-\u024F\u0600-\u06FF]", b.text())       # the first letter decides, as in a browser
+        if first and "\u0600" <= first.group() <= "\u06FF":
+            c = QTextCursor(b)
+            f = b.blockFormat()
+            f.setLayoutDirection(_Qt.LayoutDirection.RightToLeft)
+            f.setAlignment(_Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignAbsolute)
+            c.setBlockFormat(f)
+        b = b.next()
 
 
 def word_from_text(text: str, lang: str) -> dict:

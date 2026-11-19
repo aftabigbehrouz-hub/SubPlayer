@@ -32,6 +32,9 @@
 - **Teacher ▸ A1 → C1**: the sentence said at A1, A2, B1, B2 and C1, each with translation and what makes it that level.
 - **Natural voices** (Settings ▸ Voice): Microsoft's natural voices (free, online — e.g. Seraphina, Florian, Katja for German; Ava, Andrew, Sonia for English) or **Piper** (free, offline after one download: Thorsten for German, Lessac for English, about 136 MB each language incl. Piper). The Windows voice stays as the fallback. Spoken texts are kept, so repeats are instant.
 - GapGPT (gapgpt.app) as an answer source in the Teacher, Learn more and the AI lesson.
+- **Notebook** (side bar): every answer of the teacher — the line explained, your questions, checked sentences, your texts, A1 → C1 — is kept by itself. Search it, star it, and **review** it: the question first, Show answer, Got it / Again (1 → 2 → 4 → 7 → 15 → 30 → 60 days). The button shows how many are due.
+- Answers pasted from ChatGPT & co. are shown formatted (headings, bold, lists), Persian lines right to left; escapes like `\=` are removed.
+- Voice order: Microsoft natural → Piper offline (if downloaded) → Windows voice.
 
 **New in Windows 2.6.2**
 - **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,

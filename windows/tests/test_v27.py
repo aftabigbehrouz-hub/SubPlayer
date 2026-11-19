@@ -104,3 +104,70 @@ class TeacherTabs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotebookAndMarkdown(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_escapes_and_markdown(self):
+        from subplayer_win import practice
+        from subplayer_win.teacher import show_markdown
+        from PySide6.QtWidgets import QTextBrowser
+        t = practice.clean_ai("## **4. Three new sentences**\n\n**plötzlich**\n\nEnglish: suddenly\n\n\\= ناگهان")
+        self.assertNotIn("\\=", t)
+        v = QTextBrowser()
+        show_markdown(v, t)
+        self.assertNotIn("**", v.toPlainText())
+        self.assertNotIn("##", v.toPlainText())
+        last = v.document().lastBlock()
+        from PySide6.QtCore import Qt
+        self.assertEqual(last.blockFormat().layoutDirection(), Qt.LayoutDirection.RightToLeft)
+
+    def test_answers_kept_and_reviewed(self):
+        from PySide6.QtWidgets import QApplication, QWidget
+        from subplayer_win.store import WordStore, now_ms, review
+        from subplayer_win.teacher import TeacherDialog
+        from subplayer_win.notebook import NotebookDialog
+        import pathlib
+        db = WordStore(pathlib.Path(tempfile.mkdtemp()) / "w.db")
+
+        class M(QWidget):
+            settings = {"teacher_source": "chatgpt"}
+            video = ""
+            store = db
+
+            def save_settings(self): pass
+
+            def speak(self, *a, **k): pass
+
+            def ask_ai(self, *a): pass
+
+            def msg(self, *a): pass
+        m = M()
+        d = TeacherDialog(m, "weigere", "weigern", "Ich weigere mich.", "de", None, 3)
+        d.question.setText("Ist das formell?")
+        QApplication.clipboard().setText("## Antwort\n\n**Ja**, eher formell.")
+        d.paste_answer()
+        notes = db.notes()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual((notes[0].kind, notes[0].title), ("ask", "Ist das formell?"))
+        self.assertIn("formell", notes[0].body)
+        d.paste_answer()                                   # the same question again: replaced, not doubled
+        self.assertEqual(len(db.notes()), 1)
+        self.assertEqual(db.due_notes(now_ms()), [])        # first review tomorrow
+        n = notes[0]
+        db.update_note(review(n, True, now_ms()))
+        self.assertEqual(db.notes()[0].reviews, 1)
+        nb = NotebookDialog(m)
+        self.assertEqual(nb.list.count(), 1)
+        self.assertIn("formell", nb.reader.toHtml())
+        nb.start_review()
+        self.assertEqual(nb.stack.currentIndex(), 1)
+        nb.reveal()
+        nb.grade(True)
+        self.assertEqual(nb.stack.currentIndex(), 0)
+        nb.close()
+        d.close()

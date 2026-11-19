@@ -89,6 +89,32 @@ class Question:
                         r["last_review"] or 0, r["uid"] or "", r["id"])
 
 
+@dataclass
+class Note:
+    """A teacher's answer kept for later: the line explained, an answer to a question, a checked text, A1 → C1 …"""
+    title: str                     # what was asked: the sentence, the question, the start of the text
+    body: str                      # the answer as HTML (as it was shown)
+    kind: str = "ask"              # line · ask · check · writing · levels
+    lang: str = "de"
+    lemma: str = ""
+    video_name: str = ""
+    source: str = ""               # ollama · chatgpt · gemini …
+    created: int = field(default_factory=now_ms)
+    reviews: int = 0
+    correct: int = 0
+    box: int = 0
+    due: int = field(default_factory=now_ms)
+    last_review: int = 0
+    starred: int = 0
+    id: int = 0
+
+
+def _note(r) -> Note:
+    return Note(r["title"] or "", r["body"] or "", r["kind"] or "", r["lang"] or "de", r["lemma"] or "", r["video_name"] or "",
+                r["source"] or "", r["created"] or 0, r["reviews"] or 0, r["correct"] or 0, r["box"] or 0, r["due"] or 0,
+                r["last_review"] or 0, r["starred"] or 0, r["id"])
+
+
 def review(w, got_it: bool, now: int):
     """The next review step of a word (or a question)."""
     box = min(w.box + 1, len(INTERVAL_DAYS) - 1) if got_it else 0
@@ -134,6 +160,10 @@ class WordStore:
                 created INTEGER, reviews INTEGER DEFAULT 0, correct INTEGER DEFAULT 0, box INTEGER DEFAULT 0, due INTEGER,
                 last_review INTEGER DEFAULT 0);
             CREATE INDEX IF NOT EXISTS questions_due ON questions(due);
+            CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, lang TEXT, kind TEXT, lemma TEXT, title TEXT,
+                body TEXT, video_name TEXT, source TEXT, created INTEGER, reviews INTEGER DEFAULT 0, correct INTEGER DEFAULT 0,
+                box INTEGER DEFAULT 0, due INTEGER, last_review INTEGER DEFAULT 0, starred INTEGER DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS notes_due ON notes(due);
         """)
         self.db.commit()
 
@@ -312,6 +342,44 @@ class WordStore:
     def update_question(self, x: "Question"):
         self.db.execute("UPDATE questions SET reviews=?, correct=?, box=?, due=?, last_review=? WHERE id=?",
                         (x.reviews, x.correct, x.box, x.due, x.last_review, x.id))
+        self.db.commit()
+
+    # ---------------------------------------------------------------- saved teacher answers (Notebook)
+    def add_note(self, n: "Note") -> int:
+        """Keeps an answer; the same question asked again replaces its older answer (and keeps its review progress)."""
+        old = self.db.execute("SELECT id FROM notes WHERE kind=? AND lower(title)=lower(?) AND lang=?",
+                              (n.kind, n.title.strip(), n.lang)).fetchone()
+        if old:
+            self.db.execute("UPDATE notes SET body=?, source=?, created=? WHERE id=?", (n.body, n.source, now_ms(), old["id"]))
+            self.db.commit()
+            return old["id"]
+        cur = self.db.execute("INSERT INTO notes(lang,kind,lemma,title,body,video_name,source,created,reviews,correct,box,due,"
+                              "last_review,starred) VALUES(?,?,?,?,?,?,?,?,0,0,0,?,0,0)",
+                              (n.lang, n.kind, (n.lemma or "").lower(), n.title.strip(), n.body, n.video_name, n.source, now_ms(),
+                               now_ms() + DAY))                       # first review the next day
+        self.db.commit()
+        return cur.lastrowid
+
+    def notes(self, search: str = "", kind: str = "") -> list:
+        q, args = "SELECT * FROM notes WHERE 1=1", []
+        if kind:
+            q += " AND kind=?"
+            args.append(kind)
+        if search.strip():
+            q += " AND (title LIKE ? OR body LIKE ? OR lemma LIKE ?)"
+            args += [f"%{search.strip()}%"] * 3
+        return [_note(r) for r in self.db.execute(q + " ORDER BY created DESC, id DESC", args)]
+
+    def due_notes(self, now: int) -> list:
+        return [_note(r) for r in self.db.execute("SELECT * FROM notes WHERE due<=? ORDER BY reviews ASC, box ASC, due ASC", (now,))]
+
+    def update_note(self, n: "Note"):
+        self.db.execute("UPDATE notes SET reviews=?, correct=?, box=?, due=?, last_review=?, starred=? WHERE id=?",
+                        (n.reviews, n.correct, n.box, n.due, n.last_review, n.starred, n.id))
+        self.db.commit()
+
+    def delete_note(self, nid: int):
+        self.db.execute("DELETE FROM notes WHERE id=?", (nid,))
         self.db.commit()
 
     def delete_question(self, qid: int):
