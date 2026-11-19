@@ -5,7 +5,7 @@ import html
 import threading
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QStackedWidget, QTextBrowser,
+from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
 from . import ollama, theme
@@ -45,7 +45,7 @@ class Runner(QObject):
 # Where the teacher's answers come from: Ollama on this PC, or an online assistant (the question is copied and the site opens;
 # its answer is pasted back with "Paste answer" and shown exactly like Ollama's).
 SOURCES = (("ollama", "Ollama (this PC)"), ("chatgpt", "ChatGPT"), ("gemini", "Gemini"), ("deepseek", "DeepSeek"), ("grok", "Grok"),
-           ("copy", "Other AI — copy the question"))
+           ("gapgpt", "GapGPT"), ("copy", "Other AI — copy the question"))
 
 
 def client(main) -> ollama.Client:
@@ -61,7 +61,9 @@ def explain(main) -> str:
 
 
 class TeacherDialog(QDialog):
-    TABS = ("Word && collocations", "Explain the line", "Check my sentence", "Ask the teacher", "{exam} questions")
+    TABS = ("Word && collocations", "Explain the line", "Check my sentence", "Ask the teacher", "{exam} questions",
+            "✍ Writing", "A1 → C1")
+    WORD_TABS = (0, 2, 4)                     # need a word; hidden when the teacher is opened for writing only
 
     def __init__(self, main, word: str, lemma: str, sentence: str, lang: str, saved=None, tab: int = 0):
         super().__init__(main)
@@ -74,12 +76,12 @@ class TeacherDialog(QDialog):
         self.main, self.word, self.lemma, self.sentence, self.lang = main, word, lemma or word, sentence, lang
         self.saved = saved                                # SavedWord getter (to add sentences)
         self.result: dict = {}
-        self.setWindowTitle(f"Teacher — „{self.lemma}“")
+        self.setWindowTitle(f"Teacher — „{self.lemma}“" if self.lemma else "Teacher — writing")
         self.resize(820, 700)
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 16, 22, 16)
         head = QHBoxLayout()
-        t = QLabel(f"<span style='font-size:19pt;font-weight:700;color:{theme.CYAN}'>{html.escape(self.lemma)}</span>"
+        t = QLabel(f"<span style='font-size:19pt;font-weight:700;color:{theme.CYAN}'>{html.escape(self.lemma or 'Teacher')}</span>"
                    f"<span style='color:{theme.DIM}'> &nbsp;· your teacher — Ollama on this PC or an online assistant</span>")
         head.addWidget(t, 1)
         head.addWidget(QLabel("Level", objectName="small"))
@@ -118,6 +120,8 @@ class TeacherDialog(QDialog):
             b = QPushButton(name.format(exam=self.exam), checkable=True)
             b.setProperty("kind", "chip")
             b.clicked.connect(lambda _=False, k=i: self.tab(k))
+            if not self.lemma and i in self.WORD_TABS:
+                b.setVisible(False)
             self.tab_btns.append(b)
             tabs.addWidget(b)
         tabs.addStretch(1)
@@ -169,6 +173,51 @@ class TeacherDialog(QDialog):
         self.view5 = QTextBrowser(openLinks=False)
         self.view5.anchorClicked.connect(self._q_link)
         self.stack.addWidget(self.view5)
+        # 5 writing coach: a paragraph corrected sentence by sentence, feedback, three better versions
+        wtab = QWidget(objectName="clear")
+        wv = QVBoxLayout(wtab)
+        wv.setContentsMargins(0, 0, 0, 0)
+        target = "English" if lang == "en" else "German"
+        self.w_task = QLineEdit(placeholderText="The task or topic (optional) — e.g. “Vor- und Nachteile des Homeoffice”")
+        self.w_task.setText(self.main.settings.get("writing_task", ""))
+        wv.addWidget(self.w_task)
+        self.w_text = QPlainTextEdit()
+        self.w_text.setPlaceholderText(f"Write your {target} paragraph or text here … the teacher corrects every sentence, comments on "
+                                       "development, cohesion and coherence, and gives you three better versions.")
+        self.w_text.setPlainText(self.main.settings.get("writing_draft", ""))
+        self.w_text.setMaximumHeight(170)
+        wv.addWidget(self.w_text)
+        row = QHBoxLayout()
+        self.w_count = QLabel("", objectName="small")
+        self.w_text.textChanged.connect(self._w_count)
+        row.addWidget(self.w_count, 1)
+        b = QPushButton("✍ Check my writing")
+        b.setProperty("accent", True)
+        b.clicked.connect(self.writing)
+        row.addWidget(b)
+        wv.addLayout(row)
+        self.view6 = QTextBrowser(openLinks=False)
+        self.view6.anchorClicked.connect(self._say_or_copy)
+        wv.addWidget(self.view6, 1)
+        self.stack.addWidget(wtab)
+        # 6 the sentence at A1, A2, B1, B2 and C1
+        ltab = QWidget(objectName="clear")
+        lv_ = QVBoxLayout(ltab)
+        lv_.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.l_sent = QLineEdit(placeholderText="A sentence — the line from the video, or your own")
+        self.l_sent.setText(sentence.replace("\n", " ") if sentence else "")
+        self.l_sent.returnPressed.connect(self.levels)
+        row.addWidget(self.l_sent, 1)
+        b = QPushButton("Say it at A1 … C1")
+        b.setProperty("accent", True)
+        b.clicked.connect(self.levels)
+        row.addWidget(b)
+        lv_.addLayout(row)
+        self.view7 = QTextBrowser(openLinks=False)
+        self.view7.anchorClicked.connect(self._say_or_copy)
+        lv_.addWidget(self.view7, 1)
+        self.stack.addWidget(ltab)
         v.addWidget(self.stack, 1)
 
         foot = QHBoxLayout()
@@ -245,11 +294,12 @@ class TeacherDialog(QDialog):
                               "then copy the whole answer and press 📋 Paste answer.")
 
     def _tab_view(self, i: int):
-        return {0: self.view, 1: self.view2, 2: self.view3, 3: self.view4, 4: self.view5}.get(i)
+        return {0: self.view, 1: self.view2, 2: self.view3, 3: self.view4, 4: self.view5, 5: self.view6, 6: self.view7}.get(i)
 
     def _ask_hint(self) -> str:
         name = dict(SOURCES)[self.source()].split(" —")[0]
-        how = {2: "Write your sentence above first. ", 3: "Write your question above first. "}.get(self.stack.currentIndex(), "")
+        how = {2: "Write your sentence above first. ", 3: "Write your question above first. ", 5: "Write your text above first. ",
+               6: "Check the sentence above first. "}.get(self.stack.currentIndex(), "")
         return (f"<p style='color:{theme.DIM}'>{how}Press <b style='color:{theme.CYAN}'>➜ Ask</b> below: the question is copied"
                 + ("" if self.source() == "copy" else f" and {html.escape(name)} opens")
                 + f". Then copy the whole answer and press <b style='color:{theme.CYAN}'>📋 Paste answer</b>.</p>")
@@ -264,6 +314,10 @@ class TeacherDialog(QDialog):
             self.check()
         elif i == 3:
             self.ask()
+        elif i == 5:
+            self.writing()
+        elif i == 6:
+            self.levels()
         else:
             self.exam_questions(fresh=True)
 
@@ -296,7 +350,8 @@ class TeacherDialog(QDialog):
             return
         i = self.stack.currentIndex()                 # the answer belongs to the tab that is open
         self._target_view, self._mode = {0: (self.view, "word"), 1: (self.view2, "text"), 2: (self.view3, "check"),
-                                         3: (self.view4, "text"), 4: (self.view5, "exam")}[i]
+                                         3: (self.view4, "text"), 4: (self.view5, "exam"), 5: (self.view6, "writing"),
+                                         6: (self.view7, "levels")}[i]
         self._run_gen = self._gen
         if self._mode == "text":
             self._target_view.setPlainText(t)
@@ -337,6 +392,12 @@ class TeacherDialog(QDialog):
                 self.attempt.setFocus()
             elif i == 3:
                 self.question.setFocus()
+            elif i == 5:
+                self.w_text.setFocus()
+                if not self.view6.toPlainText():
+                    self.view6.setHtml(self._ask_hint())
+            elif i == 6 and not self.view7.toPlainText():
+                self.view7.setHtml(self._ask_hint())
             return
         if i == 0 and not self.result:
             self.coach()
@@ -348,6 +409,10 @@ class TeacherDialog(QDialog):
             self.attempt.setFocus()
         elif i == 3:
             self.question.setFocus()
+        elif i == 5:
+            self.w_text.setFocus()
+        elif i == 6 and not self.view7.toPlainText() and self.l_sent.text().strip():
+            self.levels()
 
     def _start(self, view, mode: str, fn, waiting: str, q: str = "", sys_: str = ""):
         if self.source() != "ollama":                      # an online assistant: the question goes there, the answer is pasted
@@ -415,6 +480,14 @@ class TeacherDialog(QDialog):
             self.show_questions(d)
         elif self._mode == "check":
             self.show_check(ollama.parse_json(res), res)
+        elif self._mode == "writing":
+            self.show_writing(ollama.parse_json(res), res)
+        elif self._mode == "levels":
+            self.show_levels(ollama.parse_json(res), res)
+        elif self._mode == "text" and (res or "").strip():
+            from . import practice
+            show_markdown(self._target_view, practice.clean_ai(res))      # **bold**, ## headings, lists — shown as such
+        self._keep(res)
         if self.source() != "ollama":
             self.state.setText("Answer pasted · answers from AI can contain mistakes — trust the dictionary for the meaning")
 
@@ -614,6 +687,170 @@ class TeacherDialog(QDialog):
         q = ollama.ask_prompt(qn, self.lemma, self.sentence, video, self.lang, self.ex.currentData(), self.lv.currentText())
         self._start(self.view4, "text", lambda on, stop: c.chat(q, sys_, on_text=on, cancelled=stop), "…", q, sys_)
 
+    # ------------------------------------------------------------------ every answer is kept in the Notebook
+    def _keep(self, res: str):
+        """The answer of the open tab goes to the Notebook (to read again and review later)."""
+        if not (res or "").strip():
+            return
+        i = self.stack.currentIndex() if self._target_view is self._tab_view(self.stack.currentIndex()) else \
+            next((k for k in range(7) if self._tab_view(k) is self._target_view), -1)
+        kind, title = {1: ("line", self.sentence), 3: ("ask", self.question.text()), 2: ("check", self.attempt.text()),
+                       5: ("writing", self.w_task.text().strip() or self.w_text.toPlainText()),
+                       6: ("levels", self.l_sent.text())}.get(i, ("", ""))
+        title = " ".join((title or "").split())
+        if not kind or not title:
+            return
+        if kind == "writing" and len(title) > 160:
+            title = title[:160].rsplit(" ", 1)[0] + " …"
+        from pathlib import Path
+        from .store import Note
+        try:
+            self.main.store.add_note(Note(title=title, body=self._target_view.toHtml(), kind=kind, lang=self.lang,
+                                          lemma=self.lemma, source=self.source(),
+                                          video_name=Path(self.main.video).name if getattr(self.main, "video", "") else ""))
+            self.state.setText(self.state.text() + " · kept in your Notebook ✓")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ 5 writing coach
+    def _w_count(self):
+        t = self.w_text.toPlainText()
+        n = len(t.split())
+        self.w_count.setText(f"{n} words" if n else "")
+        self.main.settings["writing_draft"] = t
+        self.main.settings["writing_task"] = self.w_task.text()
+
+    def writing(self):
+        t = self.w_text.toPlainText().strip()
+        if len(t.split()) < 5:
+            self.view6.setPlainText("Write a few sentences first (at least one whole sentence).")
+            return
+        self.main.save_settings()
+        c = client(self.main)
+        sys_ = ollama._teacher(self.lang, self.ex.currentData())
+        q = ollama.writing_prompt(t, self.lang, self.ex.currentData(), self.lv.currentText(), self.w_task.text())
+        self._start(self.view6, "writing", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop, temperature=0.3),
+                    "Your teacher is reading your text… (a long text takes a while with Ollama)", q, sys_)
+
+    def _say_or_copy(self, url):
+        u = url.toString()
+        if u.startswith("say:"):
+            import urllib.parse
+            self.main.speak(urllib.parse.unquote(u[4:]), lang=self.lang)
+        elif u.startswith("copy:"):
+            import urllib.parse
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(urllib.parse.unquote(u[5:]))
+            self.state.setText("Copied ✓")
+        elif u.startswith("use:"):
+            import urllib.parse
+            self.w_text.setPlainText(urllib.parse.unquote(u[4:]))
+            self.state.setText("That version is in the box now — change it and check again")
+
+    def _links(self, text: str, use: bool = False) -> str:
+        import urllib.parse
+        q = urllib.parse.quote(text)
+        return (f" &nbsp;<a href='say:{q}' style='color:{theme.CYAN};text-decoration:none'>🔊</a>"
+                f" &nbsp;<a href='copy:{q}' style='color:{theme.CYAN};text-decoration:none'>copy</a>"
+                + (f" &nbsp;<a href='use:{q}' style='color:{theme.CYAN};text-decoration:none'>edit this</a>" if use else ""))
+
+    def show_writing(self, d: dict, raw: str):
+        if not d:
+            self.view6.setPlainText(raw or "The model gave no answer.")
+            return
+        e = html.escape
+        rtl = self.ex.currentData() == "fa"
+        expl = (lambda s: f"<span dir='rtl'>{e(s)}</span>") if rtl else e
+        h = ["<div style='font-size:11pt;line-height:150%'>"]
+        sc, lv = d.get("score"), d.get("level")
+        if sc not in (None, "") or lv:
+            h.append(f"<p style='font-size:14pt;color:{theme.GOLD}'>" + (f"{e(str(sc))}/10" if sc not in (None, "") else "")
+                     + (f" &nbsp;<span style='color:{theme.DIM};font-size:11pt'>level now: {e(str(lv))}</span>" if lv else "") + "</p>")
+        cors = [c for c in ollama.as_list(d.get("corrections")) if isinstance(c, dict)]
+        if cors:
+            h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:1px;margin-top:10px'>SENTENCE BY SENTENCE</p>")
+            for c in cors:
+                o, k, why = str(c.get("original", "")).strip(), str(c.get("corrected", "")).strip(), str(c.get("why", "")).strip()
+                same = not k or k == o
+                h.append(f"<p style='margin:6px 0'>" + (f"<span style='color:{theme.MINT}'>✓</span> {e(o)}" if same else
+                         f"<span style='color:{theme.DIM}'><s>{e(o)}</s></span><br><span style='color:{theme.MINT}'>→</span> "
+                         f"<b>{e(k)}</b>{self._links(k)}") + (f"<br><span style='color:{theme.DIM}'>{expl(why)}</span>" if why and not same else "")
+                         + "</p>")
+        fb = d.get("feedback")
+        if isinstance(fb, dict) and fb:
+            h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:1px;margin-top:14px'>FEEDBACK</p><table cellspacing=0 cellpadding=4>")
+            names = {"task": "Task", "development": "Development", "cohesion": "Cohesion", "coherence": "Coherence",
+                     "vocabulary": "Vocabulary", "grammar": "Grammar"}
+            for k2, v2 in fb.items():
+                if str(v2).strip():
+                    h.append(f"<tr><td style='color:{theme.GOLD};font-weight:600;padding-right:14px;vertical-align:top'>"
+                             f"{e(names.get(k2, k2.title()))}</td><td>{expl(str(v2))}</td></tr>")
+            h.append("</table>")
+        vers = [x for x in ollama.as_list(d.get("versions")) if isinstance(x, dict) and x.get("text")]
+        if vers:
+            h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:1px;margin-top:14px'>THREE BETTER VERSIONS</p>")
+            for i, x in enumerate(vers, 1):
+                txt = str(x["text"]).strip()
+                h.append(f"<p style='margin-top:10px'><b style='color:{theme.GOLD}'>{i}. {e(str(x.get('title', '')))}</b>"
+                         f"{self._links(txt, use=True)}<br>{e(txt).replace(chr(10), '<br>')}"
+                         + (f"<br><span style='color:{theme.DIM};font-style:italic'>{expl(str(x['changes']))}</span>" if x.get("changes") else "")
+                         + "</p>")
+        use = [x for x in ollama.as_list(d.get("useful")) if isinstance(x, dict) and x.get("phrase")]
+        if use:
+            h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:1px;margin-top:14px'>USEFUL LINKING WORDS</p><table cellspacing=0 cellpadding=3>")
+            for x in use:
+                h.append(f"<tr><td style='color:{theme.GOLD};font-weight:600;padding-right:14px'>{e(str(x['phrase']))}</td>"
+                         f"<td>{expl(str(x.get('meaning', '')))}</td></tr>")
+            h.append("</table>")
+        h.append("</div>")
+        self.view6.setHtml("".join(h))
+        self._save_writing(d)
+
+    def _save_writing(self, d: dict):
+        """Every checked text is kept (writing.jsonl in the data folder) with its corrections and versions."""
+        import json
+        import time
+        from . import paths
+        try:
+            with open(paths.data_dir() / "writing.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M"), "lang": self.lang, "task": self.w_task.text(),
+                                    "text": self.w_text.toPlainText(), "answer": d}, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ 6 the sentence at A1 … C1
+    def levels(self):
+        t = self.l_sent.text().strip()
+        if len(t.split()) < 2:
+            self.view7.setPlainText("Write or paste a sentence first.")
+            return
+        c = client(self.main)
+        sys_ = ollama._teacher(self.lang, self.ex.currentData())
+        q = ollama.levels_prompt(t, self.lang, self.ex.currentData())
+        self._start(self.view7, "levels", lambda on, stop: c.chat(q, sys_, json_mode=True, on_text=on, cancelled=stop, temperature=0.4),
+                    "Rewriting it at five levels…", q, sys_)
+
+    def show_levels(self, d: dict, raw: str):
+        vers = [x for x in ollama.as_list((d or {}).get("versions")) if isinstance(x, dict) and x.get("sentence")]
+        if not vers:
+            self.view7.setPlainText(raw or "The model gave no answer.")
+            return
+        e = html.escape
+        rtl = self.ex.currentData() == "fa"
+        expl = (lambda s: f"<span dir='rtl'>{e(s)}</span>") if rtl else e
+        colors = {"A1": theme.MINT, "A2": theme.MINT, "B1": theme.CYAN, "B2": theme.CYAN, "C1": theme.GOLD, "C2": theme.GOLD}
+        h = ["<div style='font-size:11.5pt;line-height:150%'><table cellspacing=0 cellpadding=6>"]
+        for x in vers:
+            lv = str(x.get("level", "")).strip().upper()
+            s_ = str(x["sentence"]).strip()
+            h.append(f"<tr><td style='vertical-align:top;font-weight:800;color:{colors.get(lv, theme.CYAN)};padding-right:12px'>{e(lv)}</td>"
+                     f"<td><b>{e(s_)}</b>{self._links(s_)}"
+                     + (f"<br>{expl(str(x['translation']))}" if x.get("translation") else "")
+                     + (f"<br><span style='color:{theme.DIM};font-style:italic'>{expl(str(x['note']))}</span>" if x.get("note") else "")
+                     + "</td></tr>")
+        h.append("</table></div>")
+        self.view7.setHtml("".join(h))
+
     def reject(self):
         self.runner.stop = True
         super().reject()
@@ -621,6 +858,26 @@ class TeacherDialog(QDialog):
     def closeEvent(self, e):
         self.runner.stop = True
         super().closeEvent(e)
+
+
+def show_markdown(view, text: str):
+    """An answer written with markdown (ChatGPT, Gemini …): headings, bold, lists shown as such; Persian lines right to left."""
+    import re
+    t = re.sub(r"^\s*(-{3,}|_{3,}|\*{3,})\s*$", "", text, flags=re.M)      # --- rules
+    view.setMarkdown(t)
+    doc = view.document()
+    from PySide6.QtGui import QTextBlockFormat, QTextCursor
+    from PySide6.QtCore import Qt as _Qt
+    b = doc.begin()
+    while b.isValid():
+        first = re.search(r"[A-Za-z\u00C0-\u024F\u0600-\u06FF]", b.text())       # the first letter decides, as in a browser
+        if first and "\u0600" <= first.group() <= "\u06FF":
+            c = QTextCursor(b)
+            f = b.blockFormat()
+            f.setLayoutDirection(_Qt.LayoutDirection.RightToLeft)
+            f.setAlignment(_Qt.AlignmentFlag.AlignRight | _Qt.AlignmentFlag.AlignAbsolute)
+            c.setBlockFormat(f)
+        b = b.next()
 
 
 def word_from_text(text: str, lang: str) -> dict:

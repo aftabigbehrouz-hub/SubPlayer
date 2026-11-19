@@ -30,6 +30,7 @@ ASSISTANTS = {
     "gemini": ("Gemini", "https://gemini.google.com/app", ""),
     "deepseek": ("DeepSeek", "https://chat.deepseek.com/", ""),
     "grok": ("Grok", "https://grok.com/", "https://grok.com/?q="),
+    "gapgpt": ("GapGPT", "https://gapgpt.app/chat", ""),
 }
 URL_LIMIT = 6000                   # longer questions don't fit in a web address — they are pasted
 

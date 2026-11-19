@@ -38,11 +38,14 @@ jobs:
           pyinstaller --noconfirm --windowed --name SubPlayer `
             --collect-all faster_whisper --collect-all ctranslate2 --collect-all onnxruntime `
             --collect-submodules av --hidden-import PySide6.QtTextToSpeech --hidden-import PySide6.QtSvg --hidden-import socks --hidden-import urllib3.contrib.socks `
+            --collect-all edge_tts --collect-data certifi `
             --add-data "subplayer_win/fonts;subplayer_win/fonts" --add-data "subplayer_win/data;subplayer_win/data" `
             run.py
       - name: Self-test the packaged app
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
+          $env:SUBPLAYER_SELFTEST_PIPER = "1"
+          $env:SUBPLAYER_HOME = "$PWD\selftest-home"
           $p = Start-Process -FilePath dist\SubPlayer\SubPlayer.exe -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { throw "self-test failed" }

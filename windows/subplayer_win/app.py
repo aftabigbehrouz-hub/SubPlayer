@@ -320,6 +320,11 @@ class Main(QMainWindow):
                                     ("review", "cards", "Review", "Review the words that are due"),
                                     ("practice", "puzzle", "Practice", "Gap-fill, dictation, der·die·das")):
             self.nav[key] = nav(ic, label, tip, lambda _=False, k=key: self.show_page(k))
+        self.writing_btn = nav("pen", "Writing", "Writing coach: write a text — every sentence corrected, feedback on development, "
+                               "cohesion and coherence, three better versions (Ollama, ChatGPT, Gemini, DeepSeek, Grok …)",
+                               self.writing_coach, checkable=False)
+        self.notebook_btn = nav("notes", "Notebook", "Every answer of the teacher (the line explained, your questions, checked "
+                                "sentences and texts, A1 → C1) — read again and review", self.notebook, checkable=False)
         self.due_badge = QLabel("", objectName="badge", alignment=Qt.AlignCenter)
         self.due_badge.setToolTip("Words due for review")
         v.addWidget(self.due_badge)
@@ -1478,6 +1483,11 @@ class Main(QMainWindow):
         due = sum(1 for w in words if w.due <= now)
         self.due_badge.setText(f"{due} due" if due else "")
         self.due_badge.setVisible(bool(due))
+        try:
+            nd = len(self.store.due_notes(now_ms()))
+            self.notebook_btn.setText(f"Notebook · {nd}" if nd else "Notebook")
+        except Exception:
+            pass
         s = self.progress.streak
         self.streak_lbl.setText(f"🔥 {s} day{'s' if s != 1 else ''}" if s else "")
 
@@ -1882,7 +1892,59 @@ class Main(QMainWindow):
             e = c.get("entries") or []
             self.speak(e[0].lemma if e and c["kind"] == "word" else c["word"], slow, c["lang"])
 
+    _speech_gen = 0
+    _speech_warned = False
+    _speech_pending = (0, "", "de", False)
+
     def speak(self, text: str, slow: bool = False, lang: str = "de"):
+        """Reads text aloud: a natural voice (Microsoft online or Piper offline — Settings ▸ Voice), the Windows voice as fallback."""
+        text = (text or "").strip()
+        if not text:
+            return
+        eng = self.settings.get("voice_engine", "edge")
+        self._speech_gen += 1
+        if self.tts is not None:
+            self.tts.stop()
+        if getattr(self, "voice_player", None):
+            self.voice_player.stop()
+        if eng == "windows":
+            return self._speak_windows(text, slow, lang)
+        from . import voice
+        if eng == "piper" and not voice.piper_ready(lang):
+            self._speak_windows(text, slow, lang)
+            self.offer_piper(lang)
+            return
+        self._speech_pending = (self._speech_gen, text, lang, slow)
+        gen, settings = self._speech_gen, dict(self.settings)
+        self.run_bg("speech", lambda: (gen, str(voice.audio_file(settings, text, lang, slow))))
+
+    def _play_speech(self, f: str):
+        if not getattr(self, "voice_player", None):
+            self.voice_player = QMediaPlayer(self)
+            self.voice_out = QAudioOutput(self)
+            self.voice_player.setAudioOutput(self.voice_out)
+        self.voice_player.stop()
+        self.voice_player.setSource(QUrl.fromLocalFile(f))
+        self.voice_player.play()
+
+    def offer_piper(self, lang: str):
+        """Piper and the voice for this language are downloaded once (about 136 MB), then read offline."""
+        from . import voice
+        missing = voice.piper_missing(lang) if lang != "all" else \
+            voice.piper_missing("de") + [a for a in voice.piper_missing("en") if a.id != voice.PIPER.id]
+        if not missing or self.busy:
+            return
+        mb = sum(a.size_mb for a in missing)
+        if QMessageBox.question(self, "Offline voice", f"The offline natural voice needs a download of about {mb} MB once "
+                                f"({', '.join(a.label for a in missing)}).\n\nDownload it now?") != QMessageBox.Yes:
+            return
+        def chain(rest):
+            if not rest:
+                return lambda: self.msg("Offline voice ready ✓ — words and sentences are read with Piper now", 9000)
+            return lambda: self.download_asset(rest[0], chain(rest[1:]))
+        self.download_asset(missing[0], chain(missing[1:]))
+
+    def _speak_windows(self, text: str, slow: bool = False, lang: str = "de"):
         try:
             from PySide6.QtCore import QLocale
             from PySide6.QtTextToSpeech import QTextToSpeech
@@ -1940,7 +2002,7 @@ class Main(QMainWindow):
 
     def learn_more(self, source, word, sentence, lang):
         q = urllib.parse.quote
-        if source in ("chatgpt", "gemini", "deepseek", "grok"):
+        if source in lessons_assistants():
             self.ask_ai(source, self.ai_prompt(word, sentence, lang), "Then copy the 3 sentences back and use ＋ Add sentences.")
             return
         elif source == "dwds":
@@ -1988,8 +2050,22 @@ class Main(QMainWindow):
         d.show()
         d.raise_()
 
+    def notebook(self, review_first: bool = False):
+        from .notebook import NotebookDialog
+        d = NotebookDialog(self, review_first)
+        self._notebooks = [x for x in getattr(self, "_notebooks", []) if x.isVisible()] + [d]
+        d.show()
+        d.raise_()
+
+    def writing_coach(self):
+        """The teacher opened for writing only: German or English."""
+        m = QMenu(self)
+        m.addAction("✍  German text (Deutsch)", lambda: self.teacher_for("", "", "", "de", None, 5))
+        m.addAction("✍  English text", lambda: self.teacher_for("", "", "", "en", None, 5))
+        m.exec(QCursor.pos())
+
     def fill_learn_menu(self, m: QMenu, word, sentence, lang, saved_getter):
-        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher (Ollama, ChatGPT, Gemini, DeepSeek, Grok) — collocations + sentences",
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher (Ollama, ChatGPT, Gemini, DeepSeek, Grok, GapGPT) — collocations + sentences",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 0))
         m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — explain the line",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 1))
@@ -1997,11 +2073,16 @@ class Main(QMainWindow):
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 2))
         m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — TestDaF / IELTS questions on the word",
                     lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 4))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — this sentence at A1, A2, B1, B2, C1",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 6))
+        m.addAction(icons.icon("study", theme.MINT, 16), "Teacher — ✍ writing coach",
+                    lambda: self.teacher_for(word, word, sentence, lang, saved_getter, 5))
         m.addSeparator()
         m.addAction(icons.icon("sparkles", theme.CYAN, 16), "ChatGPT — meaning, collocations + 3 sentences", lambda: self.learn_more("chatgpt", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.GOLD, 16), "Gemini — meaning + 3 sentences", lambda: self.learn_more("gemini", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.MINT, 16), "DeepSeek — meaning + 3 sentences", lambda: self.learn_more("deepseek", word, sentence, lang))
         m.addAction(icons.icon("sparkles", theme.MAGENTA, 16), "Grok — meaning + 3 sentences", lambda: self.learn_more("grok", word, sentence, lang))
+        m.addAction(icons.icon("sparkles", theme.CYAN, 16), "GapGPT — meaning + 3 sentences", lambda: self.learn_more("gapgpt", word, sentence, lang))
         if lang == "en":
             m.addAction(icons.icon("book", theme.GOLD, 16), "Cambridge Dictionary", lambda: self.learn_more("cambridge", word, sentence, lang))
         else:
@@ -2284,6 +2365,11 @@ class Main(QMainWindow):
         self._update_queue()
 
     def _on_done(self, kind, res):
+        if kind == "speech":
+            gen, f = res
+            if gen == self._speech_gen:
+                self._play_speech(f)
+            return
         if kind == "subs":
             self._end_task()
             cues, lang, video, name = res
@@ -2387,6 +2473,16 @@ class Main(QMainWindow):
             self._syncing = False
 
     def _on_failed(self, kind, err):
+        if kind == "speech":
+            gen, text, lang, slow = self._speech_pending
+            if gen == self._speech_gen:
+                log_error("natural voice", err)
+                if not self._speech_warned:
+                    self._speech_warned = True
+                    self.msg("Microsoft's natural voice could not be reached — the Windows voice reads instead. "
+                             "For a natural voice without internet: Settings ▸ Voice ▸ Download offline voices (Piper).", 14000)
+                self._speak_windows(text, slow, lang)
+            return
         if kind in ("subs", "download", "link", "clip"):
             queued, self._dl_queued = self._dl_queued, False
             self._end_task()
@@ -2828,7 +2924,7 @@ def selftest(out: str) -> int:
     for mod in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "numpy", "PySide6.QtMultimedia", "PySide6.QtTextToSpeech",
                 "PySide6.QtSvg", "cryptography", "requests", "socks", "urllib3.contrib.socks", "subplayer_win.discover",
                 "subplayer_win.mediathek", "subplayer_win.netcfg", "subplayer_win.english", "subplayer_win.study",
-                "subplayer_win.library", "subplayer_win.levels", "subplayer_win.lessons"):
+                "subplayer_win.library", "subplayer_win.levels", "subplayer_win.lessons", "edge_tts", "aiohttp", "subplayer_win.voice"):
         try:
             __import__(mod)
             lines.append(f"OK   {mod}")
@@ -2859,6 +2955,22 @@ def selftest(out: str) -> int:
     except Exception as e:
         ok = False
         lines.append(f"FAIL audio decoding: {e}")
+    # natural voices — reported, never a reason to fail the build (they depend on the network of the build machine)
+    try:
+        from . import voice
+        f = voice.edge_file("Die Versicherung beziffert den Schaden auf achttausend Euro.", "de-DE-SeraphinaMultilingualNeural")
+        lines.append(f"OK   Microsoft natural voice ({f.stat().st_size} bytes of mp3)")
+    except Exception as e:
+        lines.append(f"INFO Microsoft natural voice not reached: {e.__class__.__name__}: {e}")
+    if os.environ.get("SUBPLAYER_SELFTEST_PIPER"):
+        try:
+            from . import voice
+            for a_ in (voice.PIPER, voice.PIPER_VOICES["de"]):
+                downloads.ensure(a_)
+            f = voice.piper_file("Die Versicherung beziffert den Schaden auf achttausend Euro.", "de")
+            lines.append(f"OK   Piper offline voice ({f.stat().st_size} bytes of wav)")
+        except Exception as e:
+            lines.append(f"INFO Piper offline voice: {e.__class__.__name__}: {e}")
     try:
         cues = subtitles.parse_any('<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="10:00:01.000" end="10:00:02.000">'
                                    'Guten Tag</p></div></body></tt>')
@@ -2897,6 +3009,11 @@ def selftest(out: str) -> int:
     lines.append(f"device code {licence.device_code()}")
     Path(out).write_text("\n".join(lines) + ("\nALL OK\n" if ok else "\n"), encoding="utf-8")
     return 0 if ok else 1
+
+
+def lessons_assistants():
+    from . import lessons
+    return tuple(lessons.ASSISTANTS)
 
 
 def log_error(where: str, e: BaseException | None = None, tb: str = ""):

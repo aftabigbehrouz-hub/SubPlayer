@@ -155,7 +155,7 @@ class StudyPage(QWidget):
         r1.addStretch(1)
         v3.addLayout(r1)
         r2 = QHBoxLayout()
-        for key, col in (("chatgpt", theme.CYAN), ("gemini", theme.GOLD), ("deepseek", theme.MINT), ("grok", theme.MAGENTA)):
+        for key, col in (("chatgpt", theme.CYAN), ("gemini", theme.GOLD), ("deepseek", theme.MINT), ("grok", theme.MAGENTA), ("gapgpt", theme.CYAN)):
             b = ibtn("sparkles", f"Copy the question and open {lessons.ASSISTANTS[key][0]}", lambda _=False, k=key: self._ai_ask(k),
                      kind="", text=" " + lessons.ASSISTANTS[key][0], size=15, color=col)
             r2.addWidget(b)

@@ -407,6 +407,51 @@ class SettingsDialog(QDialog):
         rv.addWidget(self.motion)
         v.addWidget(f)
 
+        # voice: how words and sentences are read aloud
+        from . import voice
+        f, vv = section("Voice (reading aloud)")
+        vv.addWidget(hint("Words and example sentences are read with a natural voice. Microsoft's voices are free and need the "
+                          "internet (the proxy below is used); Piper is free and works offline after one download. If the "
+                          "natural voice can't be reached, the Windows voice reads instead."))
+        self.v_eng = QComboBox()
+        for k, label in voice.ENGINES:
+            self.v_eng.addItem(label, k)
+        self.v_eng.setCurrentIndex(max(0, self.v_eng.findData(s.get("voice_engine", "edge"))))
+        self.v_eng.currentIndexChanged.connect(self._voice_changed)
+        vv.addWidget(self.v_eng)
+        self.v_combos = {}
+        for lg, name, sample in (("de", "German voice", "Die Versicherung beziffert den Schaden auf achttausend Euro."),
+                                 ("en", "English voice", "The insurance company estimated the damage at eight thousand euros.")):
+            r = QHBoxLayout()
+            r.addWidget(QLabel(name), 0)
+            c = QComboBox()
+            for k, label in voice.EDGE_VOICES[lg]:
+                c.addItem(label, k)
+            c.setCurrentIndex(max(0, c.findData(voice.edge_voice(s, lg))))
+            c.currentIndexChanged.connect(self._voice_changed)
+            r.addWidget(c, 1)
+            t = QPushButton("▶ Test")
+            t.clicked.connect(lambda _=False, lg=lg, sample=sample: main.speak(sample, lang=lg))
+            r.addWidget(t)
+            vv.addLayout(r)
+            self.v_combos[lg] = c
+        r = QHBoxLayout()
+        miss = voice.piper_missing("de") + [a for a in voice.piper_missing("en") if a.id != "piper-win"]
+        self.v_piper = QLabel("Offline voices (Piper): " + ("✓ ready" if not miss else
+                              "not downloaded — " + ", ".join(f"{a.label} {a.size_mb} MB" for a in miss)), objectName="small")
+        self.v_piper.setWordWrap(True)
+        r.addWidget(self.v_piper, 1)
+        if miss:
+            b = QPushButton("Download offline voices")
+            b.clicked.connect(lambda: (self.accept(), main.offer_piper("all")))
+            r.addWidget(b)
+        clr = QPushButton("Clear saved audio")
+        clr.setToolTip("Spoken words are kept so they repeat instantly; this deletes them (they are made again when needed)")
+        clr.clicked.connect(lambda: main.msg(f"{voice.clear_cache()} saved audio file(s) deleted"))
+        r.addWidget(clr)
+        vv.addLayout(r)
+        v.addWidget(f)
+
         # local AI teacher
         f, ov = section("Local AI teacher (Ollama)")
         from .teacher import SetupPanel
@@ -666,6 +711,19 @@ class SettingsDialog(QDialog):
         col = QColorDialog.getColor(QColor(accent or theme.CYAN), self, "Your own colour")
         if col.isValid():
             self.set_theme(key, col.name().upper())
+
+    def _voice_changed(self, *_):
+        s = self.main.settings
+        s["voice_engine"] = self.v_eng.currentData()
+        for lg, c in self.v_combos.items():
+            s[f"voice_edge_{lg}"] = c.currentData()
+        self.main.save_settings()
+        for c in self.v_combos.values():
+            c.setEnabled(s["voice_engine"] == "edge")
+        if s["voice_engine"] == "piper":
+            from . import voice
+            if voice.piper_missing("de") or voice.piper_missing("en"):
+                self.main.msg("Piper needs a download once — press “Download offline voices”", 9000)
 
     def set_motion(self, on):
         self.main.settings["motion"] = on

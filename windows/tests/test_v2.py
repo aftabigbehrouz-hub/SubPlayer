@@ -89,7 +89,8 @@ class ExportTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from PySide6.QtGui import QGuiApplication
-        cls.app = QGuiApplication.instance() or QGuiApplication([])
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
         cls.dir = Path(tempfile.mkdtemp())
         cls.src = cls.dir / "src.mp4"
         make_video(cls.src)

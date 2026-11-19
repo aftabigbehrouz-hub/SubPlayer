@@ -27,7 +27,7 @@ def clean_ai(text: str) -> str:
     import html as _html
     t = _html.unescape(text or "").replace("\u00a0", " ").replace("\r", "")
     t = re.sub(r"\\[ \t]*$", "", t, flags=re.M)                      # "{\\" → "{"
-    t = re.sub(r"\\([*_#>\[\]()`~|-])", r"\1", t)                    # \\* → *
+    t = re.sub(r"\\([!-/:-@\[\]^_`{|}~])", r"\1", t)                  # \\* \\= \\. → * = .
     t = re.sub(r"^\s*```[\w-]*\s*$", "", t, flags=re.M)
     return t.strip()
 
