@@ -13,10 +13,13 @@ TRIES = os.environ.get("PROBE_SOURCES", "").split() or [
 ]
 os.makedirs("probe-out", exist_ok=True)
 import requests  # noqa: E402
-raw = requests.get("https://t.me/s/dw_persian", headers={"User-Agent": sources.UA}, timeout=30).text
-open("probe-out/tg-dw_persian.html", "w", encoding="utf-8").write(raw)
+raw = requests.get("https://t.me/s/bbcpersian", headers={"User-Agent": sources.UA}, timeout=30).text
+open("probe-out/tg-bbcpersian.html", "w", encoding="utf-8").write(raw)
 i = raw.find("tgme_widget_message_video_player")
-print("=== raw Telegram post with a video ===\n", raw[max(0, i - 1500):i + 2500] if i >= 0 else "(no video player in page)", "\n")
+print("=== raw Telegram post with a video ===")
+import base64, zlib
+print("RAWB64:" + base64.b64encode(zlib.compress(raw.encode("utf-8"), 9)).decode())
+print("=== end raw")
 for t in TRIES:
     print("====", t)
     try:
