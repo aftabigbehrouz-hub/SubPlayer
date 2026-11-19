@@ -1,4 +1,4 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.6.2
+# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.7
 
 **New in Android 2.10** (versionCode 15 — the Windows 2.6.1 / 2.6.2 changes on the phone)
 - **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
@@ -26,6 +26,12 @@
 - **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
   ✕ pauses), and over other apps after Home (picture-in-picture).
 - Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
+**New in Windows 2.7**
+- **✍ Writing coach** (Writing in the side bar, or Teacher ▸ ✍ Writing): write a paragraph or a whole text (and the task, if you like). The chosen AI — Ollama, ChatGPT, Gemini, DeepSeek, Grok, GapGPT — corrects every sentence with the rule, comments on task, development, cohesion, coherence, vocabulary and grammar, gives a score and your level, and writes **three better versions** (your text corrected · clear and coherent · exam level), plus useful linking words. 🔊 reads any version, “edit this” puts it back in the box. Every checked text is kept in writing.jsonl in the data folder.
+- **Teacher ▸ A1 → C1**: the sentence said at A1, A2, B1, B2 and C1, each with translation and what makes it that level.
+- **Natural voices** (Settings ▸ Voice): Microsoft's natural voices (free, online — e.g. Seraphina, Florian, Katja for German; Ava, Andrew, Sonia for English) or **Piper** (free, offline after one download: Thorsten for German, Lessac for English, about 136 MB each language incl. Piper). The Windows voice stays as the fallback. Spoken texts are kept, so repeats are instant.
+- GapGPT (gapgpt.app) as an answer source in the Teacher, Learn more and the AI lesson.
 
 **New in Windows 2.6.2**
 - **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,

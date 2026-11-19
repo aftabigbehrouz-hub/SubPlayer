@@ -304,6 +304,41 @@ def ask_prompt(question: str, word: str, sentence: str, video: str, lang: str, e
             + f"My question: {question}\n\nAnswer in {EXPLAIN.get(explain, 'English')}, with {target} examples where they help.")
 
 
+def writing_prompt(text: str, lang: str, explain: str, level: str, task: str = "") -> str:
+    """Writing coach: every sentence corrected, feedback on development / cohesion / coherence, three better versions."""
+    target = "English" if lang == "en" else "German"
+    ex = EXPLAIN.get(explain, "English")
+    exam = "IELTS Writing" if lang == "en" else "TestDaF Schriftlicher Ausdruck"
+    return (f"A learner at level {level} wrote this {target} text" + (f" for this task: „{task}“" if task.strip() else "") + ":\n"
+            f"„{text.strip()}“\n\n"
+            "Mark it like an experienced examiner and writing teacher. Answer ONLY with a JSON object with these keys:\n"
+            f'  "corrections": EVERY sentence of the text in order, each as {{"original": "the sentence as written", '
+            f'"corrected": "the corrected sentence (the same if it was correct)", "why": "what was wrong and the rule, in {ex} '
+            '(empty if it was correct)"},\n'
+            f'  "feedback": {{"task": "does it answer the task / say something clear", "development": "how the ideas are developed '
+            'and supported with reasons and examples", "cohesion": "linking words, references, transitions between sentences", '
+            '"coherence": "logical order, one idea per paragraph, a clear line from start to end", "vocabulary": "range and '
+            f'precision", "grammar": "range and accuracy"}} — each 1–3 short sentences in {ex}, saying what is good and what to improve,\n'
+            f'  "level": the CEFR level the text shows now (A1–C2),\n'
+            f'  "score": a number from 1 to 10 ({exam} standard),\n'
+            f'  "versions": exactly 3 rewritten versions of the WHOLE text in {target}, each as {{"title": "...", "text": "...", '
+            f'"changes": "what this version does better, in {ex}"}}: 1) "Corrected" — the learner\'s own words and ideas, only the mistakes fixed, '
+            '2) "Clear and coherent" — better paragraph development, cohesion and coherence at the learner\'s level, '
+            f'3) "Exam level" — how a strong C1 / {exam} answer would say it,\n'
+            f'  "useful": up to 8 linking words or phrases that would improve this text, each as {{"phrase": "...", "meaning": "... in {ex}"}}.')
+
+
+def levels_prompt(sentence: str, lang: str, explain: str) -> str:
+    """The same sentence said at A1, A2, B1, B2 and C1."""
+    target = "English" if lang == "en" else "German"
+    ex = EXPLAIN.get(explain, "English")
+    return (f"Say the meaning of this {target} sentence at five levels:\n„{sentence.replace(chr(10), ' ').strip()}“\n\n"
+            "Answer ONLY with a JSON object: {\"versions\": [ {\"level\": \"A1\", \"sentence\": \"...\", "
+            f"\"translation\": \"... in {ex}\", \"note\": \"the words or grammar that make it this level, in {ex}\"}} ]}} — "
+            f"exactly five versions, A1, A2, B1, B2 and C1, each natural, correct, everyday {target}; A1 with the simplest words and "
+            "short main clauses, C1 with precise vocabulary, nominal style or subordinate clauses where natural.")
+
+
 def parse_json(text: str) -> dict:
     """The JSON object in a model's answer (tolerates ``` fences and text around it)."""
     t = text.strip()

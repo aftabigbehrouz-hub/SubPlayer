@@ -143,7 +143,7 @@ class Lessons(unittest.TestCase):
         lessons.save("Mein Film: Teil 1.mp4", "de", "C1", "")
         self.assertEqual(lessons.kept("Mein Film: Teil 1.mp4"), [])
         self.assertEqual(lessons.all_lessons(), [])
-        self.assertEqual(set(lessons.ASSISTANTS), {"chatgpt", "gemini", "deepseek", "grok"})
+        self.assertEqual(set(lessons.ASSISTANTS), {"chatgpt", "gemini", "deepseek", "grok", "gapgpt"})
 
     def test_exam_sets(self):
         os.environ["SUBPLAYER_HOME"] = tempfile.mkdtemp()
