@@ -484,6 +484,8 @@ class WordsPage(QWidget):
     def export_menu(self):
         m = QMenu(self)
         n = len(self.words)
+        m.addAction(f"🔊 Word book — HTML with tabs and natural audio ({n} words)…", self.export_book)
+        m.addSeparator()
         m.addAction(f"CSV for Excel ({n} words)…", lambda: self.export("csv"))
         m.addAction(f"Text list ({n} words)…", lambda: self.export("txt"))
         m.addAction(f"Anki import file ({n} words)…", lambda: self.export("anki"))
@@ -532,6 +534,68 @@ class WordsPage(QWidget):
                 out.append(f"{front}\t{back}\tSubPlayer {r['category']} {r['level']}".replace("\n", " "))
             Path(f).write_text("\n".join(out) + "\n", encoding="utf-8")
         self.main.msg(f"{len(rows)} words exported to {f}", 9000)
+
+    def export_book(self):
+        """My Words as one HTML file: tabs, explanations, sentences, collocations, flashcards — audio inside."""
+        import datetime
+        from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QVBoxLayout
+        from . import voice, wordbook
+        if not self.words:
+            self.main.msg("No words to export")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Word book (HTML)")
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel(f"<b>{len(self.words)} words</b> (the ones in the list now) as one HTML file: tabs for the words with "
+                           "their explanations, all sentences, collocations and flashcards. Double-click it — it opens in any "
+                           "browser, also on the phone and without internet.", wordWrap=True))
+        v.addWidget(QLabel("Audio in the file, read by", objectName="small"))
+        eng = QComboBox()
+        eng.addItem("Microsoft natural voice (online)", "edge")
+        eng.addItem("Piper natural voice (offline)" + ("" if voice.piper_ready("de") else " — needs a download once"), "piper")
+        eng.addItem("No audio in the file (the browser's own voice reads)", "none")
+        cur = self.main.settings.get("voice_engine", "edge")
+        eng.setCurrentIndex(max(0, eng.findData("piper" if cur == "piper" else "edge")))
+        v.addWidget(eng)
+        c_w = QCheckBox("Audio for the words", checked=True)
+        c_s = QCheckBox("Audio for the sentences (from the video and the ones you added)", checked=True)
+        c_c = QCheckBox("Audio for the collocations and their examples (takes longer)", checked=False)
+        c_f = QCheckBox("Also save the word audio as MP3 files in a folder next to it", checked=False)
+        for c in (c_w, c_s, c_c, c_f):
+            v.addWidget(c)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if not dlg.exec():
+            return
+        engine = eng.currentData()
+        if engine == "piper" and (voice.piper_missing("de") or voice.piper_missing("en")):
+            langs = {w.lang for w in self.words}
+            if any(voice.piper_missing(lg) for lg in langs):
+                self.main.offer_piper("all")
+                self.main.msg("After the offline voices are downloaded, export the word book again", 12000)
+                return
+        default = str(Path.home() / "Documents" / f"SubPlayer words {datetime.date.today():%Y-%m-%d}.html")
+        f, _ = QFileDialog.getSaveFileName(self, "Save the word book", default, "Web page (*.html)")
+        if not f:
+            return
+        items = wordbook.collect(self.main, list(self.words), self._level_name, self.pos_of)
+        settings = dict(self.main.settings, voice_engine=engine)
+        want = wordbook.wanted(items, c_w.isChecked(), c_s.isChecked(), c_c.isChecked()) if engine != "none" else {}
+        mp3_dir = Path(f).with_suffix("") if c_f.isChecked() else None
+        main = self.main
+
+        def job():
+            clips, note = {}, ""
+            if want:
+                clips, note = wordbook.make_audio(settings, want,
+                                                  lambda d, t, _n: main._bg_progress(d / max(t, 1), f"Word book: audio {d} of {t}…"),
+                                                  lambda: main.cancel)
+            Path(f).write_text(wordbook.build_html(items, clips), encoding="utf-8")
+            n = wordbook.save_mp3_folder(mp3_dir, items, clips) if mp3_dir and clips else 0
+            return f, len(items), len(clips), len(want), note, n, str(mp3_dir) if mp3_dir else ""
+        self.main.run_bg("wordbook", job, cancellable=True, label=f"Word book: {len(items)} words…")
 
     def _level_name(self, w) -> str:
         from .levels import NAMES
