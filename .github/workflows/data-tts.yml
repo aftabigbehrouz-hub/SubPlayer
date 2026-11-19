@@ -1,0 +1,48 @@
+name: Mirror offline voices (Piper)
+
+# Copies Piper (offline neural text-to-speech for Windows) and one natural German and one English voice into the data-v1
+# release, so the Windows app downloads them from GitHub (works where Hugging Face is blocked) and can SHA-check them.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/data-tts.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-win-release
+  cancel-in-progress: false
+
+jobs:
+  voices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Piper for Windows
+        run: |
+          curl -fL -o piper_windows_amd64.zip https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip
+          unzip -q piper_windows_amd64.zip -d pw && ls pw pw/piper | head -30
+          (cd pw && zip -q -r ../piper-win-v1.zip piper)
+      - name: Voices
+        run: |
+          pip install -q "huggingface_hub>=0.24"
+          python3 - <<'PY'
+          from huggingface_hub import hf_hub_download as d
+          import shutil, os
+          for lang, path in [("de", "de/de_DE/thorsten/high/de_DE-thorsten-high"), ("en", "en/en_US/lessac/high/en_US-lessac-high")]:
+              os.makedirs(f"voice-{lang}/voices", exist_ok=True)
+              for ext in (".onnx", ".onnx.json"):
+                  f = d("rhasspy/piper-voices", path + ext)
+                  shutil.copy(f, f"voice-{lang}/voices/" + path.split("/")[-1] + ext)
+          PY
+          (cd voice-de && zip -q -0 -r ../voice-de-v1.zip voices)
+          (cd voice-en && zip -q -0 -r ../voice-en-v1.zip voices)
+      - name: Fingerprints
+        run: |
+          for f in piper-win-v1 voice-de-v1 voice-en-v1; do sha256sum $f.zip | tee $f.sha256; stat -c '%n %s' $f.zip; done
+      - name: Publish to data-v1 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload data-v1 piper-win-v1.zip piper-win-v1.sha256 voice-de-v1.zip voice-de-v1.sha256 voice-en-v1.zip voice-en-v1.sha256 --clobber --repo ${{ github.repository }}
