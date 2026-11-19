@@ -2273,7 +2273,7 @@ class Main(QMainWindow):
         self.bus.progress.emit(float(frac), text)
 
     def run_bg(self, kind, fn, cancellable=False, label=None):
-        heavy = kind in ("subs", "download", "link", "clip")
+        heavy = kind in ("subs", "download", "link", "clip", "wordbook")
         if heavy and self.busy:
             if kind == "link":                              # downloads wait their turn in the queue
                 self.dl_queue.append((kind, fn, cancellable, label or "Download"))
@@ -2365,6 +2365,20 @@ class Main(QMainWindow):
         self._update_queue()
 
     def _on_done(self, kind, res):
+        if kind == "wordbook":
+            self._end_task()
+            f, nw, nclips, nwant, note, nmp3, mp3_dir = res
+            text = f"Word book saved: {nw} words" + (f", {nclips} audio clips inside" if nclips else "")
+            if nwant and nclips < nwant:
+                text += (" — no natural voice could be reached, the browser's voice reads instead"
+                         if not nclips else f" — {nwant - nclips} clip(s) missing, the browser reads those")
+                if note:
+                    log_error("word book audio", None, note)
+            if nmp3:
+                text += f" · {nmp3} MP3 files in {mp3_dir}"
+            self.msg(text, 15000)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(f))
+            return
         if kind == "speech":
             gen, f = res
             if gen == self._speech_gen:
@@ -2483,7 +2497,7 @@ class Main(QMainWindow):
                              "For a natural voice without internet: Settings ▸ Voice ▸ Download offline voices (Piper).", 14000)
                 self._speak_windows(text, slow, lang)
             return
-        if kind in ("subs", "download", "link", "clip"):
+        if kind in ("subs", "download", "link", "clip", "wordbook"):
             queued, self._dl_queued = self._dl_queued, False
             self._end_task()
             if kind == "link" and (queued or self.dl_queue):     # a failed download in the queue: note it, go on with the rest
