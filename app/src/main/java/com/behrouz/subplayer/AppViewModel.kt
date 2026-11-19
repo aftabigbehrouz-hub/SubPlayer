@@ -38,7 +38,10 @@ import com.behrouz.subplayer.sync.SSub
 import com.behrouz.subplayer.sync.SyncDoc
 import com.behrouz.subplayer.sync.SyncMerge
 import com.behrouz.subplayer.words.Cloze
+import com.behrouz.subplayer.learn.Teacher.Mode as TMode
+import com.behrouz.subplayer.words.Collocation
 import com.behrouz.subplayer.words.Example
+import com.behrouz.subplayer.words.ExamQuestion
 import com.behrouz.subplayer.words.Practice
 import com.behrouz.subplayer.words.Progress
 import com.behrouz.subplayer.words.Recents
@@ -115,6 +118,12 @@ sealed class Sheet {
     object PlayerOptions : Sheet()
     data class FilmInfo(val film: com.behrouz.subplayer.net.Catalog.Film) : Sheet()
     object WordsExport : Sheet()
+    // 2.10: the teacher with online AIs, and adding by hand
+    data class Teacher(val wordId: Long, val word: String, val lemma: String, val sentence: String, val lang: String, val video: String,
+                       val mode: com.behrouz.subplayer.learn.Teacher.Mode = com.behrouz.subplayer.learn.Teacher.Mode.WORD,
+                       val asked: Boolean = false, val answer: String = "", val note: String = "") : Sheet()
+    data class EditWord(val wordId: Long) : Sheet()          // 0 = a new word
+    data class NewQuestion(val lang: String, val lemma: String, val video: String) : Sheet()
 }
 
 enum class Screen { PLAYER, WORDS, REVIEW, PRACTICE, DISCOVER, STUDY }
@@ -314,7 +323,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 if (autoPause && playing && pointB < 0 && lastCueIdx in cues.indices && idx != lastCueIdx) {
-                    val r = unitOf(lastCueIdx)
+                    val r = partOf(lastCueIdx)
                     val end = cues[lastCueIdx].endMs
                     if (lastCueIdx == r.last && position >= end - 120 && position <= end + 900) {
                         player.pause(); playing = false; heldCue = lastCueIdx
@@ -447,8 +456,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun loopLine() {
         val i = if (currentCue >= 0) currentCue else CueBuilder.indexBefore(cues, player.currentPosition)
         if (i < 0) { message = "No subtitle line here"; return }
-        pointA = (cues[i].startMs - 150).coerceAtLeast(0)
-        pointB = cues[i].endMs + 250
+        val r = partOf(i)                                   // the chosen part: whole sentence or 1–3 lines
+        pointA = (cues[r.first].startMs - 150).coerceAtLeast(0)
+        pointB = cues[r.last].endMs + 250
         player.seekTo(pointA); player.play()
     }
 
@@ -1149,7 +1159,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------ learn more
 
-    enum class Source { CHATGPT, GEMINI, DEEPSEEK, GROK, DWDS, DICTCC, CAMBRIDGE, OTHER }
+    enum class Source { CHATGPT, GEMINI, DEEPSEEK, GROK, GAPGPT, DWDS, DICTCC, CAMBRIDGE, OTHER }
 
     private fun aiPrompt(word: String, sentence: String, lang: String = wordLang()) = if (lang == "en")
         "Explain the English word “$word”" + (if (sentence.isNotBlank()) " as used in: “${sentence.replace('\n', ' ')}”" else "") + ".\n" +
@@ -1168,7 +1178,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\n" +
             "DE: … | EN: … | FA: …"
 
-    private fun isAi(s: Source) = s == Source.CHATGPT || s == Source.GEMINI || s == Source.DEEPSEEK || s == Source.GROK
+    private fun isAi(s: Source) = s == Source.CHATGPT || s == Source.GEMINI || s == Source.DEEPSEEK || s == Source.GROK || s == Source.GAPGPT
 
     /**
      * Hands a question to ChatGPT / Gemini / DeepSeek / Grok: into the installed app when there is one, otherwise the web
@@ -1178,12 +1188,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         runCatching { cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", question)) }
         val (pkg, home, withQ) = when (source) {
+            Source.GAPGPT -> Triple("", "https://gapgpt.app/chat", "")
             Source.CHATGPT -> Triple(AppLinks.CHATGPT, "https://chatgpt.com/", "https://chatgpt.com/?q=")
             Source.GEMINI -> Triple(AppLinks.GEMINI, "https://gemini.google.com/app", "")
             Source.DEEPSEEK -> Triple(AppLinks.DEEPSEEK, "https://chat.deepseek.com/", "")
             else -> Triple(AppLinks.GROK, "https://grok.com/", "https://grok.com/?q=")
         }
-        if (AppLinks.installed(ctx, pkg) && AppLinks.sendText(ctx, pkg, question)) {
+        if (pkg.isNotEmpty() && AppLinks.installed(ctx, pkg) && AppLinks.sendText(ctx, pkg, question)) {
             android.widget.Toast.makeText(ctx, "Question placed in the app — tap send. $after", android.widget.Toast.LENGTH_LONG).show()
             return
         }
@@ -1337,7 +1348,155 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sheet = Sheet.AddSentences(w.id, w.text, clipboardText())
     }
 
-    fun previewSentences(raw: String) = Sentences.parse(raw)
+    fun previewSentences(raw: String): List<Example> {
+        val c = com.behrouz.subplayer.learn.Cards.cleanAi(raw)
+        return com.behrouz.subplayer.learn.Cards.fromJson(c, "de", "")?.second ?: Sentences.parse(com.behrouz.subplayer.learn.Cards.collocations(c, "de", "").second)
+    }
+
+    fun previewCollocations(raw: String): Int {
+        val c = com.behrouz.subplayer.learn.Cards.cleanAi(raw)
+        return (com.behrouz.subplayer.learn.Cards.fromJson(c, "de", "")?.first ?: com.behrouz.subplayer.learn.Cards.collocations(c, "de", "").first).size
+    }
+
+    // ------------------------------------------------------------------ 2.10 teacher (online AIs) and adding by hand
+
+    var teacherAi by mutableStateOf(runCatching { Source.valueOf(uiPrefs.getString("teacher_ai", "CHATGPT") ?: "CHATGPT") }.getOrDefault(Source.CHATGPT)); private set
+    fun chooseTeacherAi(s: Source) { teacherAi = s; uiPrefs.edit().putString("teacher_ai", s.name).apply() }
+    fun teacherLevel(): String = lessonLevel.takeIf { it in com.behrouz.subplayer.learn.Lessons.LEVELS } ?: "B1"
+
+    fun openTeacher(w: SavedWord) {
+        sheet = Sheet.Teacher(w.id, w.text, if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, w.sentence, w.lang, w.videoName)
+    }
+
+    fun openTeacherFromSheet() { ensureSavedFromSheet()?.let { openTeacher(it) } }
+
+    fun teacherMode(m: com.behrouz.subplayer.learn.Teacher.Mode) { (sheet as? Sheet.Teacher)?.let { sheet = it.copy(mode = m, asked = false, answer = "", note = "") } }
+
+    fun teacherPrompt(s: Sheet.Teacher, extra: String): String? {
+        val T = com.behrouz.subplayer.learn.Teacher
+        val lv = teacherLevel(); val ex = lessonExplain
+        return when (s.mode) {
+            TMode.WORD -> T.wordPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
+            TMode.SENTENCE -> extra.ifBlank { s.sentence }.takeIf { it.isNotBlank() }?.let { T.sentencePrompt(it, s.lang, ex, lv) }
+            TMode.CHECK -> extra.takeIf { it.isNotBlank() }?.let { T.checkPrompt(s.lemma, it, s.lang, ex, lv) }
+            TMode.ASK -> extra.takeIf { it.isNotBlank() }?.let { T.askPrompt(it, s.lemma, s.sentence, s.video, s.lang, ex, lv) }
+            TMode.EXAM -> T.examPrompt(s.word, s.lemma, s.sentence, s.lang, lv, ex)
+        }
+    }
+
+    /** Sends the question to the chosen AI (OTHER = only copy it). */
+    fun askTeacher(s: Sheet.Teacher, extra: String) {
+        val q = teacherPrompt(s, extra) ?: run {
+            message = when (s.mode) {
+                com.behrouz.subplayer.learn.Teacher.Mode.CHECK -> "Write your sentence first"
+                com.behrouz.subplayer.learn.Teacher.Mode.ASK -> "Write your question first"
+                else -> "No sentence to explain"
+            }; return
+        }
+        if (teacherAi == Source.OTHER) {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("SubPlayer question", q))
+            message = "Question copied — paste it into any assistant, then copy the answer and tap Paste answer"
+        } else askAi(teacherAi, q, "Copy the whole answer, come back and tap Paste answer.")
+        sheet = s.copy(asked = true)
+    }
+
+    /** Reads the copied answer for the open tab: a word's meaning, collocations and sentences are saved; questions go to Review. */
+    fun pasteTeacher(s: Sheet.Teacher, typed: String = "") {
+        val T = com.behrouz.subplayer.learn.Teacher
+        val raw = typed.ifBlank { clipboardText() }.trim()
+        if (raw.isEmpty()) { message = "Nothing copied yet — copy the assistant's whole answer first"; return }
+        if (raw.startsWith("You are an experienced") || raw.startsWith("Write 6 ") || raw.startsWith("My ") && "My question:" in raw) {
+            message = "That is still the question — copy the assistant's ANSWER, then tap Paste answer"; return
+        }
+        when (s.mode) {
+            TMode.WORD -> {
+                val a = T.readWord(raw, s.lang, s.lemma)
+                val w = words.firstOrNull { it.id == s.wordId }
+                var n = 0; var k = 0
+                if (w != null) {
+                    if ((w.english.isBlank() && a.meaning.isNotBlank()) || (w.persian.isBlank() && a.persian.isNotBlank()))
+                        store.update(w.copy(english = w.english.ifBlank { a.meaning.take(200) }, persian = w.persian.ifBlank { a.persian.take(200) },
+                            updated = System.currentTimeMillis()))
+                    if (a.examples.isNotEmpty()) n = store.addExamples(w.id, a.examples)
+                    if (a.collocations.isNotEmpty()) k = store.addCollocations(w.lang, s.lemma, a.collocations)
+                    refreshWordsAndSync()
+                }
+                sheet = s.copy(answer = a.readable, note = if (w == null) "" else "Saved to „${s.word}“: $k collocation(s), $n sentence(s)")
+            }
+            TMode.CHECK -> sheet = s.copy(answer = T.readCheck(raw))
+            TMode.EXAM -> {
+                val qs = T.readExam(raw, s.lang, s.lemma, s.video)
+                val n = if (qs.isNotEmpty()) store.addQuestions(qs) else 0
+                if (qs.isNotEmpty()) refreshWords()
+                sheet = s.copy(answer = qs.joinToString("\n\n") { q -> "• ${q.question}" + (if (q.options.isNotEmpty()) "\n   " + q.options.joinToString(" · ") else "") +
+                    "\n   → ${q.answer}" }, note = if (qs.isEmpty()) "No questions found in that answer" else "$n question(s) put into Review")
+            }
+            else -> sheet = s.copy(answer = com.behrouz.subplayer.learn.Cards.cleanAi(raw))
+        }
+    }
+
+    /** Saves a word typed by hand (wordId 0 = new) with its collocations and sentences; pasted AI answers in the boxes are sorted. */
+    fun saveEditedWord(wordId: Long, text: String, lemma: String, article: String, ipa: String, english: String, persian: String,
+                       lang: String, colsRaw: String, sentsRaw: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) { message = "Write the word first"; return false }
+        val lem = lemma.trim().ifEmpty { t }
+        val key = if (t.contains(' ')) t else lem
+        val cols = ArrayList<Collocation>(); val ex = ArrayList<Example>()
+        var meaning = ""
+        for (box in listOf(colsRaw, sentsRaw)) {
+            val c = com.behrouz.subplayer.learn.Cards.cleanAi(box)
+            if (c.isBlank()) continue
+            val js = com.behrouz.subplayer.learn.Cards.fromJson(c, lang, key)
+            if (js != null) {
+                cols += js.first; ex += js.second
+                if (meaning.isEmpty()) meaning = com.behrouz.subplayer.learn.Teacher.json(c)?.optString("meaning").orEmpty()
+            } else if (box === colsRaw) {
+                val (kc, rest) = com.behrouz.subplayer.learn.Cards.collocations(c, lang, key)
+                cols += kc
+                rest.split('\n').map { it.trim() }.filter { it.isNotEmpty() }.forEach { line ->
+                    val p = line.split('|').map { it.trim() }
+                    if (p[0].isNotEmpty()) cols.add(Collocation(lang = lang, lemma = key, phrase = p[0], meaning = p.getOrElse(1) { "" }, example = p.getOrElse(2) { "" }))
+                }
+            } else {
+                val (kc, rest) = com.behrouz.subplayer.learn.Cards.collocations(c, lang, key)
+                cols += kc; ex += Sentences.parse(rest, primary = lang)
+            }
+        }
+        val now = System.currentTimeMillis()
+        val id: Long
+        val old = words.firstOrNull { it.id == wordId }
+        if (old != null) {
+            store.update(old.copy(text = t, lemma = lem, article = article.trim(), ipa = ipa.trim(), english = english.trim().ifEmpty { meaning.take(200) },
+                persian = persian.trim(), lang = lang, updated = now))
+            id = old.id
+        } else {
+            store.findSame(t, lem, lang)?.let { same -> message = "„$t“ is already in My Words — opened it"; sheet = Sheet.EditWord(same.id); return false }
+            id = store.insert(SavedWord(text = t, lemma = lem, article = article.trim(), ipa = ipa.trim(), english = english.trim().ifEmpty { meaning.take(200) },
+                persian = persian.trim(), sentence = ex.firstOrNull()?.de ?: "", videoUri = "", videoName = "", startMs = 0, endMs = 0,
+                created = now, due = now, lang = lang))
+        }
+        val n = if (ex.isNotEmpty()) store.addExamples(id, ex) else 0
+        val k = if (cols.isNotEmpty()) store.addCollocations(lang, key, cols) else 0
+        refreshWordsAndSync()
+        sheet = null
+        message = (if (old != null) "„$t“ saved" else "„$t“ added to My Words") +
+            listOfNotNull(if (k > 0) "$k collocation(s)" else null, if (n > 0) "$n sentence(s)" else null).let { if (it.isEmpty()) "" else " · " + it.joinToString(", ") }
+        return true
+    }
+
+    fun saveOwnQuestion(lang: String, lemma: String, video: String, question: String, optionsRaw: String, answer: String, explanation: String): Boolean {
+        val q = question.trim(); val a = answer.trim()
+        if (q.isEmpty() || a.isEmpty()) { message = "Write the question and its answer"; return false }
+        val opts = optionsRaw.split('\n').map { it.trim().removePrefix("-").trim() }.filter { it.isNotEmpty() }
+        val n = store.addQuestions(listOf(ExamQuestion(question = q, answer = a, options = opts, explanation = explanation.trim(),
+            kind = com.behrouz.subplayer.learn.Cards.kind(opts), lang = lang, lemma = lemma, videoName = video, source = "mine")))
+        refreshWords()
+        sheet = null
+        message = if (n > 0) "Question put into Review" else "That question is already in Review"
+        return n > 0
+    }
 
     fun addSentences(wordId: Long, raw: String) {
         val w = words.firstOrNull { it.id == wordId }
@@ -1507,10 +1666,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return unitsCache.getOrElse(i) { i..i }
     }
 
+    /** 2.10: how much Pause each line, Loop and Shadowing take — "sentence" (the whole sentence) or 1 / 2 / 3 lines of it. */
+    var partSize by mutableStateOf(uiPrefs.getString("part", "sentence") ?: "sentence"); private set
+
+    fun choosePart(k: String) {
+        partSize = k; uiPrefs.edit().putString("part", k).apply()
+        message = "Pause, loop and shadowing: " + if (k == "sentence") "whole sentence" else "$k line${if (k == "1") "" else "s"} at a time"
+        if (pointA >= 0 && !autoPause) loopLine()
+    }
+
+    /** The part line [i] belongs to: its sentence, cut into pieces of [partSize] lines (never across two sentences). */
+    fun partOf(i: Int): IntRange {
+        val r = unitOf(i)
+        val n = partSize.toIntOrNull() ?: return r
+        if (i !in r) return i..i
+        val a = r.first + ((i - r.first) / n) * n
+        return a..minOf(a + n - 1, r.last)
+    }
+
     fun unitText(i: Int): String = unitOf(i).let { r -> CueBuilder.sentenceText(cues, r).split(Regex("\\s+")).joinToString(" ").trim() }
 
     /** Pause each line holds at the end of a sentence of several lines: they are all shown. */
-    fun heldSentence(i: Int): IntRange? = if (autoPause && !playing && i >= 0 && i == heldCue && unitOf(i).let { it.first < it.last }) unitOf(i) else null
+    fun heldSentence(i: Int): IntRange? = if (autoPause && !playing && i >= 0 && i == heldCue && partOf(i).let { it.first < it.last }) partOf(i) else null
 
     // ---------------------------------------------------------- licence
 

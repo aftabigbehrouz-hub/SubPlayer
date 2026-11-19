@@ -1,3 +1,9 @@
+### Android 2.10
+- **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
+- **By hand**: ＋ New word in My Words; ✎ Edit a word (meanings, article, IPA, collocations one per line `phrase | meaning | example`, sentences); ✎ Question writes your own TestDaF question for Review.
+- **Part length** for Pause each line, Loop and Shadowing: whole sentence, 1, 2 or 3 lines (translation stays by whole sentence).
+- GapGPT also in Learn more and in the AI lesson.
+
 # SubPlayer — learn German (and English) with your own videos · Android 2.9 + Windows 2.6
 
 - Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.

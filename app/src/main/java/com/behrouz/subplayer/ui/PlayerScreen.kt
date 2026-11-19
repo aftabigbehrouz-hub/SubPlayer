@@ -148,6 +148,9 @@ fun PlayerScreen(
         Sheet.PlayerOptions -> PlayerOptionsSheet(vm)
         is Sheet.FilmInfo -> FilmInfoSheet(vm, s)
         Sheet.WordsExport -> WordsExportSheet(vm)
+        is Sheet.Teacher -> TeacherSheet(vm, s)
+        is Sheet.EditWord -> EditWordSheet(vm, s)
+        is Sheet.NewQuestion -> NewQuestionSheet(vm, s)
         null -> {}
     }
     if (vm.showTour) Tour(vm)
@@ -630,6 +633,15 @@ private fun ControlPanel(vm: AppViewModel, onToggleFullscreen: () -> Unit, onLoa
             Pill("🎙 Shadowing", active = vm.shadowing) { vm.toggleShadowing() }
             Pill("A1–C2", active = vm.showLevels) { vm.toggleLevels() }
             Pill("Translation", active = vm.showTranslation) { vm.toggleTranslation() }
+        }
+        if (vm.autoPause || vm.shadowing || vm.pointA >= 0) {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Part", color = White.copy(alpha = 0.6f), fontSize = 12.sp)
+                listOf("sentence" to "whole sentence", "1" to "1 line", "2" to "2 lines", "3" to "3 lines").forEach { (k, label) ->
+                    Pill(label, active = vm.partSize == k) { vm.choosePart(k) }
+                }
+            }
         }
         if (vm.autoPause) {
             Row(Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),

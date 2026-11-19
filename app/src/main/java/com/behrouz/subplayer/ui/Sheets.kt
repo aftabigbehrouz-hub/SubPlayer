@@ -496,10 +496,12 @@ fun LearnMore(vm: AppViewModel, word: String, sentence: String, lang: String = "
         Pill("Gemini") { vm.learnMore(AppViewModel.Source.GEMINI, word, sentence, lang) }
         Pill("DeepSeek") { vm.learnMore(AppViewModel.Source.DEEPSEEK, word, sentence, lang) }
         Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, word, sentence, lang) }
+        Pill("GapGPT") { vm.learnMore(AppViewModel.Source.GAPGPT, word, sentence, lang) }
         if (lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, word, sentence, lang) }
         else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, word, sentence, lang) }
         Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, word, sentence, lang) }
         Pill("Other app…") { vm.learnMore(AppViewModel.Source.OTHER, word, sentence, lang) }
         Pill("＋ Add sentences", active = true) { vm.ensureSavedFromSheet()?.let { vm.openAddSentences(it) } }
+        Pill("🎓 Teacher", active = true) { vm.openTeacherFromSheet() }
     }
 }

@@ -569,6 +569,7 @@ fun StudyScreen(vm: AppViewModel) {
                     Pill("Gemini", active = true) { vm.askLesson(AppViewModel.Source.GEMINI) }
                     Pill("DeepSeek", active = true) { vm.askLesson(AppViewModel.Source.DEEPSEEK) }
                     Pill("Grok", active = true) { vm.askLesson(AppViewModel.Source.GROK) }
+                    Pill("GapGPT", active = true) { vm.askLesson(AppViewModel.Source.GAPGPT) }
                     Pill("Copy question") { vm.askLesson(null) }
                 }
                 Spacer(Modifier.height(10.dp))
