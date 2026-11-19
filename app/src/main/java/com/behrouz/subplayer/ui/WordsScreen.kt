@@ -91,6 +91,7 @@ fun WordsScreen(vm: AppViewModel) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.screen = Screen.PLAYER }) { Icon(Icons.Back, "Back", tint = W) }
                 NeonTitle("My Words", 26.sp, Modifier.weight(1f))
+                Pill("＋ New word", active = true) { vm.sheet = com.behrouz.subplayer.Sheet.EditWord(0) }
             }
             Explain(
                 "Every word or phrase you save keeps its meaning, its sentence and the exact moment in the video. " +
@@ -242,7 +243,7 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                             maxLines = 4, overflow = TextOverflow.Ellipsis)
                     }
                     PanelTile("COLLOCATIONS · ${cols.size}", Modifier.weight(1f), { big = "coll" }) {
-                        Text(if (cols.isEmpty()) "None yet — ask ChatGPT, then ＋ Add sentences" else cols.take(3).joinToString("\n") { it.phrase },
+                        Text(if (cols.isEmpty()) "None yet — 🎓 Teacher, or ✎ Edit to add your own" else cols.take(3).joinToString("\n") { it.phrase },
                             color = if (cols.isEmpty()) W.copy(alpha = 0.5f) else Neon.Gold, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -254,10 +255,14 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                     Pill("Gemini") { vm.learnMore(AppViewModel.Source.GEMINI, lw, w.sentence, w.lang) }
                     Pill("DeepSeek") { vm.learnMore(AppViewModel.Source.DEEPSEEK, lw, w.sentence, w.lang) }
                     Pill("Grok") { vm.learnMore(AppViewModel.Source.GROK, lw, w.sentence, w.lang) }
+                    Pill("GapGPT") { vm.learnMore(AppViewModel.Source.GAPGPT, lw, w.sentence, w.lang) }
                     if (w.lang == "en") Pill("Cambridge") { vm.learnMore(AppViewModel.Source.CAMBRIDGE, lw, w.sentence, w.lang) }
                     else Pill("DWDS") { vm.learnMore(AppViewModel.Source.DWDS, lw, w.sentence, w.lang) }
                     Pill("dict.cc") { vm.learnMore(AppViewModel.Source.DICTCC, lw, w.sentence, w.lang) }
                     Pill("＋ Add sentences", active = true) { vm.openAddSentences(w) }
+                    Pill("🎓 Teacher", active = true) { vm.openTeacher(w) }
+                    Pill("✎ Edit") { vm.sheet = com.behrouz.subplayer.Sheet.EditWord(w.id) }
+                    Pill("✎ Question") { vm.sheet = com.behrouz.subplayer.Sheet.NewQuestion(w.lang, lw, w.videoName) }
                     Pill("Where else?", icon = Icons.Search) { vm.openUses(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, w.lang) }
                 }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
