@@ -1,12 +1,11 @@
-### Android 2.10
+# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.6.2
+
+**New in Android 2.10** (versionCode 15 — the Windows 2.6.1 / 2.6.2 changes on the phone)
 - **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
 - **By hand**: ＋ New word in My Words; ✎ Edit a word (meanings, article, IPA, collocations one per line `phrase | meaning | example`, sentences); ✎ Question writes your own TestDaF question for Review.
 - **Part length** for Pause each line, Loop and Shadowing: whole sentence, 1, 2 or 3 lines (translation stays by whole sentence).
 - GapGPT also in Learn more and in the AI lesson.
 
-# SubPlayer — learn German (and English) with your own videos · Android 2.9 + Windows 2.6
-
-- Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
 
 **New in Android 2.9** (versionCode 14 — the Windows 2.6 changes on the phone)
 - **My Words newest first**, and **one entry per word**: saving a word you already have (from another line or video) adds
@@ -26,6 +25,7 @@
   (Next / remove) and finished ones (Open). A finished download doesn't take the screen away while you watch.
 - **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
   ✕ pauses), and over other apps after Home (picture-in-picture).
+- Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
 
 **New in Windows 2.6.2**
 - **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,
