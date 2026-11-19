@@ -31,6 +31,29 @@ data class SavedWord(
     val updated: Long = System.currentTimeMillis()
 )
 
+/** A collocation the AI wrote for a word (kept per base word, so every saved copy of the word shows it). */
+data class Collocation(val id: Long = 0, val lang: String, val lemma: String, val phrase: String, val meaning: String = "", val example: String = "")
+
+/** An exam-style question (TestDaF / IELTS) that comes back in Review like a word. */
+data class ExamQuestion(
+    val id: Long = 0,
+    val question: String,
+    val answer: String,
+    val options: List<String> = emptyList(),
+    val explanation: String = "",
+    val kind: String = "",            // mc · tf · yn · open
+    val lang: String = "de",
+    val lemma: String = "",
+    val videoName: String = "",
+    val source: String = "",
+    val created: Long = System.currentTimeMillis(),
+    val reviews: Int = 0,
+    val correct: Int = 0,
+    val box: Int = 0,
+    val due: Long = System.currentTimeMillis(),
+    val lastReview: Long = 0
+)
+
 object Srs {
     val INTERVAL_DAYS = intArrayOf(0, 1, 2, 4, 7, 15, 30, 60)
     private const val DAY = 24L * 60 * 60 * 1000
@@ -44,6 +67,12 @@ object Srs {
             correct = w.correct + if (gotIt) 1 else 0,
             box = box, due = due, lastReview = now
         )
+    }
+
+    fun review(q: ExamQuestion, gotIt: Boolean, now: Long): ExamQuestion {
+        val box = if (gotIt) minOf(q.box + 1, INTERVAL_DAYS.size - 1) else 0
+        val due = if (gotIt) now + INTERVAL_DAYS[box] * DAY else now + AGAIN_MS
+        return q.copy(reviews = q.reviews + 1, correct = q.correct + if (gotIt) 1 else 0, box = box, due = due, lastReview = now)
     }
 
     /** "today", "in 3 days", … for the list. */
@@ -62,7 +91,7 @@ object Srs {
 }
 
 
-class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 3) {
+class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -75,6 +104,17 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 3) {
         db.execSQL("CREATE INDEX words_due ON words(due)")
         createExamples(db)
         db.execSQL("CREATE TABLE IF NOT EXISTS deleted(uid TEXT PRIMARY KEY, at INTEGER)")
+        createV4(db)
+    }
+
+    /** v4 (2.9): collocations per base word, and exam questions reviewed like words. */
+    private fun createV4(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS collocations(id INTEGER PRIMARY KEY AUTOINCREMENT, lang TEXT, lemma TEXT, phrase TEXT, meaning TEXT, example TEXT, created INTEGER)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS collocations_word ON collocations(lang, lemma)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS questions(id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT, lang TEXT, lemma TEXT,
+            video_name TEXT, source TEXT, kind TEXT, question TEXT, options TEXT, answer TEXT, explanation TEXT, created INTEGER,
+            reviews INTEGER DEFAULT 0, correct INTEGER DEFAULT 0, box INTEGER DEFAULT 0, due INTEGER, last_review INTEGER DEFAULT 0)""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS questions_due ON questions(due)")
     }
 
     /** v2: extra example sentences per word (pasted from ChatGPT, Grok, DWDS, dict.cc …). */
@@ -98,17 +138,149 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 3) {
             db.execSQL("UPDATE examples SET uid=lower(hex(randomblob(16))), updated=created")
             db.execSQL("CREATE TABLE IF NOT EXISTS deleted(uid TEXT PRIMARY KEY, at INTEGER)")
         }
+        if (oldVersion < 4) createV4(db)
     }
 
-    fun all(): List<SavedWord> = query("SELECT * FROM words ORDER BY due ASC, id DESC", emptyArray())
+    /** Newest first (the day the word was saved). */
+    fun all(): List<SavedWord> = query("SELECT * FROM words ORDER BY created DESC, id DESC", emptyArray())
 
     fun dueCount(now: Long): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM words WHERE due <= ?", arrayOf(now.toString())).use {
             if (it.moveToFirst()) it.getInt(0) else 0
         }
 
+    /** Due words, the least reviewed first (then the lowest box, then the longest waiting). */
     fun due(now: Long): List<SavedWord> =
-        query("SELECT * FROM words WHERE due <= ? ORDER BY box ASC, due ASC", arrayOf(now.toString()))
+        query("SELECT * FROM words WHERE due <= ? ORDER BY reviews ASC, box ASC, due ASC", arrayOf(now.toString()))
+
+    /** The word already saved with the same base form (from any line or video), or null. */
+    fun findSame(text: String, lemma: String, lang: String): SavedWord? {
+        val k = wordKey(text, lemma, lang)
+        return all().firstOrNull { wordKey(it.text, it.lemma, it.lang) == k }
+    }
+
+    /**
+     * Joins entries of the same word into one (the most reviewed, then the oldest, is kept): the others' sentences and
+     * video lines become its example sentences. Returns how many entries were joined into others.
+     */
+    fun mergeDuplicates(): Int {
+        var n = 0
+        for (group in all().groupBy { wordKey(it.text, it.lemma, it.lang) }.values) {
+            if (group.size < 2) continue
+            val sorted = group.sortedWith(compareBy<SavedWord>({ -it.reviews }, { it.created }, { it.id }))
+            var keep = sorted.first()
+            val rest = sorted.drop(1)
+            val items = ArrayList<Example>()
+            for (o in rest) {
+                if (o.sentence.isNotBlank() && o.sentence.trim().lowercase() != keep.sentence.trim().lowercase())
+                    items.add(Example(wordId = keep.id, de = o.sentence.replace('\n', ' ').trim(),
+                        en = if (o.videoName.isNotEmpty()) "from “${o.videoName}”" else "", fa = ""))
+                items.addAll(examples(o.id))
+            }
+            addExamples(keep.id, items)
+            var changed = false
+            if (keep.english.isBlank()) rest.firstOrNull { it.english.isNotBlank() }?.let { keep = keep.copy(english = it.english); changed = true }
+            if (keep.persian.isBlank()) rest.firstOrNull { it.persian.isNotBlank() }?.let { keep = keep.copy(persian = it.persian); changed = true }
+            if (keep.ipa.isBlank()) rest.firstOrNull { it.ipa.isNotBlank() }?.let { keep = keep.copy(ipa = it.ipa); changed = true }
+            if (keep.article.isBlank()) rest.firstOrNull { it.article.isNotBlank() }?.let { keep = keep.copy(article = it.article); changed = true }
+            if (changed) update(keep)
+            for (o in rest) { delete(o.id); n++ }
+        }
+        return n
+    }
+
+    // ------------------------------------------------------------------ collocations
+
+    fun collocations(lang: String, lemma: String): List<Collocation> {
+        val out = ArrayList<Collocation>()
+        readableDatabase.rawQuery("SELECT * FROM collocations WHERE lang=? AND lemma=? ORDER BY id", arrayOf(lang, lemma.lowercase())).use { c ->
+            while (c.moveToNext()) out.add(Collocation(c.getLong(c.getColumnIndexOrThrow("id")), lang, lemma.lowercase(),
+                c.getString(c.getColumnIndexOrThrow("phrase")) ?: "", c.getString(c.getColumnIndexOrThrow("meaning")) ?: "",
+                c.getString(c.getColumnIndexOrThrow("example")) ?: ""))
+        }
+        return out
+    }
+
+    fun addCollocations(lang: String, lemma: String, list: List<Collocation>): Int {
+        val have = collocations(lang, lemma).map { it.phrase.lowercase() }.toMutableSet()
+        var n = 0
+        for (c in list) {
+            val ph = c.phrase.trim()
+            if (ph.isEmpty() || ph.lowercase() in have) continue
+            writableDatabase.insert("collocations", null, ContentValues().apply {
+                put("lang", lang); put("lemma", lemma.lowercase()); put("phrase", ph); put("meaning", c.meaning.trim())
+                put("example", c.example.trim()); put("created", System.currentTimeMillis())
+            })
+            have.add(ph.lowercase()); n++
+        }
+        return n
+    }
+
+    fun removeBrokenCollocations(isBroken: (String) -> Boolean): Int {
+        val ids = ArrayList<Long>()
+        readableDatabase.rawQuery("SELECT id, phrase FROM collocations", null).use { c ->
+            while (c.moveToNext()) if (isBroken(c.getString(1) ?: "")) ids.add(c.getLong(0))
+        }
+        ids.forEach { deleteCollocation(it) }
+        return ids.size
+    }
+
+    fun deleteCollocation(id: Long) { writableDatabase.delete("collocations", "id=?", arrayOf(id.toString())) }
+
+    // ------------------------------------------------------------------ exam questions
+
+    private fun readQuestion(c: Cursor): ExamQuestion {
+        fun s(n: String) = c.getString(c.getColumnIndexOrThrow(n)) ?: ""
+        fun l(n: String) = c.getLong(c.getColumnIndexOrThrow(n))
+        val opts = runCatching { org.json.JSONArray(s("options")).let { a -> List(a.length()) { a.getString(it) } } }.getOrDefault(emptyList())
+        return ExamQuestion(l("id"), s("question"), s("answer"), opts, s("explanation"), s("kind"), s("lang").ifEmpty { "de" }, s("lemma"),
+            s("video_name"), s("source"), l("created"), l("reviews").toInt(), l("correct").toInt(), l("box").toInt(), l("due"), l("last_review"))
+    }
+
+    private fun questionQuery(sql: String, args: Array<String>): List<ExamQuestion> {
+        val out = ArrayList<ExamQuestion>()
+        readableDatabase.rawQuery(sql, args).use { c -> while (c.moveToNext()) out.add(readQuestion(c)) }
+        return out
+    }
+
+    fun questions(): List<ExamQuestion> = questionQuery("SELECT * FROM questions ORDER BY id", emptyArray())
+
+    fun questionsFor(lang: String, lemma: String): List<ExamQuestion> =
+        questionQuery("SELECT * FROM questions WHERE lang=? AND lemma=? ORDER BY id", arrayOf(lang, lemma.lowercase()))
+
+    fun dueQuestions(now: Long): List<ExamQuestion> =
+        questionQuery("SELECT * FROM questions WHERE due <= ? ORDER BY reviews ASC, box ASC, due ASC", arrayOf(now.toString()))
+
+    fun dueQuestionCount(now: Long): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM questions WHERE due <= ?", arrayOf(now.toString())).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    /** Adds new questions (the same question text is not added twice); returns how many were new. */
+    fun addQuestions(list: List<ExamQuestion>): Int {
+        val have = HashSet<String>()
+        readableDatabase.rawQuery("SELECT question FROM questions", emptyArray()).use { c -> while (c.moveToNext()) have.add((c.getString(0) ?: "").trim().lowercase()) }
+        var n = 0
+        for (q in list) {
+            val k = q.question.trim().lowercase()
+            if (k.isEmpty() || k in have) continue
+            val now = System.currentTimeMillis()
+            writableDatabase.insert("questions", null, ContentValues().apply {
+                put("uid", java.util.UUID.randomUUID().toString()); put("lang", q.lang); put("lemma", q.lemma.lowercase())
+                put("video_name", q.videoName); put("source", q.source); put("kind", q.kind); put("question", q.question.trim())
+                put("options", org.json.JSONArray(q.options).toString()); put("answer", q.answer); put("explanation", q.explanation)
+                put("created", now); put("reviews", 0); put("correct", 0); put("box", 0); put("due", now); put("last_review", 0)
+            })
+            have.add(k); n++
+        }
+        return n
+    }
+
+    fun updateQuestion(q: ExamQuestion) {
+        writableDatabase.update("questions", ContentValues().apply {
+            put("reviews", q.reviews); put("correct", q.correct); put("box", q.box); put("due", q.due); put("last_review", q.lastReview)
+        }, "id=?", arrayOf(q.id.toString()))
+    }
+
+    fun deleteQuestion(id: Long) { writableDatabase.delete("questions", "id=?", arrayOf(id.toString())) }
 
     /** Same text from the same moment is saved only once. */
     fun find(text: String, videoUri: String, startMs: Long): SavedWord? =
@@ -250,6 +422,15 @@ class WordStore(ctx: Context) : SQLiteOpenHelper(ctx, "words.db", null, 3) {
             for ((uid, at) in doc.deleted) db.insert("deleted", null, ContentValues().apply { put("uid", uid); put("at", at) })
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+    }
+
+    companion object {
+        /** What makes two saved entries the same word: the language and the base form (a phrase: its text). */
+        fun wordKey(text: String, lemma: String, lang: String): String {
+            val t = text.trim()
+            val base = if (t.contains(' ')) t else lemma.trim().ifEmpty { t }
+            return lang.ifEmpty { "de" } + "|" + base.lowercase().split(Regex("\\s+")).joinToString(" ")
+        }
     }
 
     private fun values(w: SavedWord) = ContentValues().apply {

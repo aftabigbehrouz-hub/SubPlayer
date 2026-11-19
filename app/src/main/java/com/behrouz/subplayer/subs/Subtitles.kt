@@ -178,6 +178,33 @@ object CueBuilder {
         return a..b
     }
 
+    /**
+     * For every line, the sentence it belongs to (first..last line). The sentences don't overlap: a new one starts after a
+     * line ending in . ! ? … : or after a pause longer than [maxGapMs]; a sentence of more than [maxLines] lines is cut into
+     * equal parts. Without punctuation every line is its own unit. Same rule as the Windows app (subtitles.sentence_ranges).
+     */
+    fun sentenceRanges(cues: List<Cue>, maxLines: Int = 6, maxGapMs: Long = 1500): List<IntRange> {
+        val n = cues.size
+        if (!hasPunctuation(cues)) return List(n) { it..it }
+        val out = arrayOfNulls<IntRange>(n)
+        var a = 0
+        for (i in 0 until n) {
+            val last = i == n - 1 || endsSentence(cues[i].text) || cues[i + 1].startMs - cues[i].endMs > maxGapMs
+            if (!last) continue
+            val size = i - a + 1
+            val parts = (size + maxLines - 1) / maxLines
+            val step = (size + parts - 1) / parts
+            var p0 = a
+            while (p0 <= i) {
+                val p1 = minOf(i, p0 + step - 1)
+                for (k in p0..p1) out[k] = p0..p1
+                p0 += step
+            }
+            a = i + 1
+        }
+        return out.mapIndexed { k, r -> r ?: k..k }
+    }
+
     fun sentenceText(cues: List<Cue>, r: IntRange) = r.joinToString(" ") { cues[it].text.replace('\n', ' ').trim() }
 
     /** Index of the cue showing at [posMs], or -1 (binary search; cues sorted by start). */

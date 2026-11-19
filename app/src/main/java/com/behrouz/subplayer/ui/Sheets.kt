@@ -113,7 +113,7 @@ fun WordSheet(vm: AppViewModel, s: Sheet.Word) {
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
+internal fun EntryView(vm: AppViewModel, e: Dictionary.Entry) {
     // headword
     Row(verticalAlignment = Alignment.Bottom) {
         if (e.article.isNotEmpty()) {

@@ -1,4 +1,25 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.8 + Windows 2.6
+# SubPlayer — learn German (and English) with your own videos · Android 2.9 + Windows 2.6
+
+- Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
+**New in Android 2.9** (versionCode 14 — the Windows 2.6 changes on the phone)
+- **My Words newest first**, and **one entry per word**: saving a word you already have (from another line or video) adds
+  the line to its sentences instead of a second entry; words saved twice are joined once, on the first start (a copy of
+  the word database is kept as words-before-2.9.db).
+- **Four panels** in an opened word: **Video** (the picture of the moment — *Play here* plays it in the small window),
+  **Dictionary**, **Sentences**, **Collocations**. Tap a panel to open it big; ✕ or Back returns.
+- **Collocations:** the ChatGPT / Gemini / DeepSeek / Grok question now asks for 6 collocations as lines
+  `KOLL: … | … | …`; *＋ Add sentences* puts them in the Collocations panel and the example sentences in Sentences.
+- **TestDaF / IELTS questions in Review:** the AI lesson question asks for review cards at the end (---REVIEW---); when the
+  answer is pasted they go into Review (*To Review* does it by hand). Tap an answer — green or red — then Got it / Again.
+- **Review starts with the least reviewed** words and questions.
+- **Pause each line** stops at the end of each sentence, shows the whole sentence and goes on by itself; the row under it
+  chooses how long it waits (as long as the sentence took · 2–10 s · until ▶). Tap a word to stay.
+- **Translation line of whole sentences**, also *Translate all* (saved per sentence, the same file as Windows writes).
+- **Download queue** (Discover): a second download waits its turn; Discover ▸ Downloads shows the running, waiting
+  (Next / remove) and finished ones (Open). A finished download doesn't take the screen away while you watch.
+- **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
+  ✕ pauses), and over other apps after Home (picture-in-picture).
 
 **New in Windows 2.6.2**
 - **Teacher:** choosing another AI stops Ollama — nothing it was still writing appears any more. With ChatGPT, Gemini,

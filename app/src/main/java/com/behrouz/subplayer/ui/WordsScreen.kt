@@ -219,44 +219,34 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
         }
         AnimatedVisibility(open, enter = expandVertically() + fadeIn()) {
             Column(Modifier.padding(top = 12.dp)) {
-                var snap by remember(w.uid) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-                LaunchedEffect(w.uid) {
-                    vm.snapshot(w)?.let { f -> snap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() } }
-                }
-                snap?.let { b ->
-                    Box(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp)).clickable { vm.playClip(w, stayOnScreen = false) }) {
-                        androidx.compose.foundation.Image(b, "The video at ${fmt(w.startMs)}", Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-                        Text("▶ ${fmt(w.startMs)}", color = W, fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
-                }
-                Text("${vm.category(w)} · saved ${java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US).format(java.util.Date(w.created))}",
+                var big by remember(w.uid) { mutableStateOf<String?>(null) }
+                Text("${vm.category(w)} · saved ${java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.US).format(java.util.Date(w.created))}" +
+                    (if (w.ipa.isNotEmpty()) " · ${w.ipa}" else ""),
                     color = Neon.Cyan.copy(alpha = 0.8f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-                if (w.ipa.isNotEmpty()) Text(w.ipa, color = W.copy(alpha = 0.7f), fontSize = 15.sp)
-                Text(highlight(w.sentence, w.text), color = W.copy(alpha = 0.9f), fontStyle = FontStyle.Italic,
-                    modifier = Modifier.padding(vertical = 8.dp))
                 Explain("From “${w.videoName}” at ${fmt(w.startMs)} · reviewed ${w.reviews}× (${w.correct} correct)" +
                     if (w.lastReview > 0) " · last ${Srs.dueLabel(w.lastReview, now).replace("in ", "")} ago".replace("due now ago", "just now") else "")
-                val extra = vm.wordExamples[w.id].orEmpty()
-                if (extra.isNotEmpty()) {
-                    Text("MORE SENTENCES", color = Neon.Cyan, fontSize = 11.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
-                    extra.forEach { e ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-                                Text(highlight(e.de, w.text), color = W, fontSize = 14.sp)
-                                if (e.en.isNotEmpty()) Text(e.en, color = W.copy(alpha = 0.6f), fontSize = 12.sp)
-                                if (e.fa.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                                    Text(e.fa, color = W.copy(alpha = 0.75f), fontSize = 14.sp, modifier = Modifier.fillMaxWidth())
-                                }
-                            }
-                            IconButton(onClick = { vm.speak(e.de, lang = w.lang) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
-                            IconButton(onClick = { vm.deleteExample(e) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Close, "Remove", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(16.dp)) }
-                        }
+                // four panels: video · dictionary · sentences · collocations — tap one to open it big
+                val v = vm.wordInfoVersion
+                val sentences = remember(w.id, v) { vm.sentencesOf(w) }
+                val cols = remember(w.uid, v) { vm.collocationsOf(w) }
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PanelTile("VIDEO", Modifier.weight(1f), { big = "video" }) { SnapThumb(vm, w) }
+                    PanelTile("DICTIONARY", Modifier.weight(1f), { big = "dict" }) {
+                        Text(listOf(w.english, w.persian).filter { it.isNotBlank() }.joinToString("\n").ifEmpty { "Meanings, forms, examples" },
+                            color = W.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     }
                 }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PanelTile("SENTENCES · ${sentences.size}", Modifier.weight(1f), { big = "sent" }) {
+                        Text(highlight(sentences.lastOrNull()?.de ?: w.sentence, w.text), color = W.copy(alpha = 0.85f), fontSize = 12.sp,
+                            maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                    PanelTile("COLLOCATIONS · ${cols.size}", Modifier.weight(1f), { big = "coll" }) {
+                        Text(if (cols.isEmpty()) "None yet — ask ChatGPT, then ＋ Add sentences" else cols.take(3).joinToString("\n") { it.phrase },
+                            color = if (cols.isEmpty()) W.copy(alpha = 0.5f) else Neon.Gold, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                big?.let { which -> BigPanel(vm, w, which, sentences, cols) { big = null } }
                 androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val lw = w.lemma.ifEmpty { w.text }
@@ -271,10 +261,143 @@ private fun WordCard(vm: AppViewModel, w: SavedWord, now: Long) {
                     Pill("Where else?", icon = Icons.Search) { vm.openUses(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, w.lang) }
                 }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Pill("Play in video", icon = Icons.Play) { vm.playClip(w, stayOnScreen = false) }
+                    Pill("Play here", icon = Icons.Play) { vm.playClip(w, stayOnScreen = true) }
+                    Pill("In the player", icon = Icons.Movie) { vm.playClip(w, stayOnScreen = false) }
                     Pill("Speak", icon = Icons.Volume) { vm.speak(if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text }, lang = w.lang) }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { vm.deleteWord(w) }) { Icon(Icons.Delete, "Delete", tint = W.copy(alpha = 0.6f)) }
+                }
+            }
+        }
+    }
+}
+
+/** A small panel of a word; tap it to open it big. */
+@Composable
+private fun PanelTile(title: String, modifier: Modifier, onOpen: () -> Unit, content: @Composable () -> Unit) {
+    Column(modifier.height(118.dp).clip(RoundedCornerShape(16.dp)).background(W.copy(alpha = 0.06f)).clickable(onClick = onOpen).padding(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, color = Neon.Cyan, fontSize = 10.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
+            Icon(Icons.Fullscreen, "Open big", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        content()
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun SnapThumb(vm: AppViewModel, w: SavedWord, fill: Boolean = false) {
+    var snap by remember(w.uid) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(w.uid) {
+        vm.snapshot(w)?.let { f -> snap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() } }
+    }
+    val b = snap
+    if (b == null) {
+        Text("▶ ${fmt(w.startMs)}", color = W.copy(alpha = 0.6f), fontSize = 12.sp)
+        return
+    }
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))) {
+        androidx.compose.foundation.Image(b, "The video at ${fmt(w.startMs)}",
+            if (fill) Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)) else Modifier.fillMaxWidth().height(78.dp),
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        Text("▶ ${fmt(w.startMs)}", color = W, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp)).padding(horizontal = 4.dp, vertical = 1.dp))
+    }
+}
+
+/** One panel of the word, full screen; ✕ (or Back) returns to the four. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun BigPanel(vm: AppViewModel, w: SavedWord, which: String, sentences: List<com.behrouz.subplayer.words.Example>,
+                     cols: List<com.behrouz.subplayer.words.Collocation>, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(Color(0xFF0E0B22)).statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(when (which) { "video" -> "VIDEO"; "dict" -> "DICTIONARY"; "sent" -> "SENTENCES"; else -> "COLLOCATIONS" },
+                        color = Neon.Cyan, fontSize = 12.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+                    Text(if (w.lemma.isNotEmpty() && !w.text.contains(' ')) w.lemma else w.text, color = W, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                }
+                IconButton(onClick = onClose) { Icon(Icons.Close, "Back to the four panels", tint = W) }
+            }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
+                when (which) {
+                    "video" -> {
+                        SnapThumb(vm, w, fill = true)
+                        Text(highlight(w.sentence, w.text), color = W, fontStyle = FontStyle.Italic, fontSize = 16.sp, modifier = Modifier.padding(vertical = 10.dp))
+                        Explain("“${w.videoName}” at ${fmt(w.startMs)}")
+                        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill("Play here", icon = Icons.Play) { vm.playClip(w, stayOnScreen = true); onClose() }
+                            Pill("In the player", icon = Icons.Movie) { onClose(); vm.playClip(w, stayOnScreen = false) }
+                        }
+                    }
+                    "dict" -> {
+                        var entries by remember(w.uid) { mutableStateOf<List<com.behrouz.subplayer.dict.Dictionary.Entry>?>(emptyList()) }
+                        var loaded by remember(w.uid) { mutableStateOf(false) }
+                        LaunchedEffect(w.uid) { entries = vm.entriesFor(w); loaded = true }
+                        val list = entries
+                        when {
+                            !loaded -> Text("…", color = W)
+                            list == null -> Explain("The dictionary isn't downloaded yet — tap any word in a subtitle once to get it.")
+                            list.isEmpty() -> {
+                                if (w.english.isNotEmpty()) Text(w.english, color = W, fontSize = 16.sp)
+                                if (w.persian.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                                    Text(w.persian, color = W, fontSize = 18.sp, modifier = Modifier.fillMaxWidth())
+                                }
+                                Explain("Not in the offline dictionary.", Modifier.padding(top = 6.dp))
+                            }
+                            else -> androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
+                                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides W) {
+                                    list.take(3).forEach { e -> com.behrouz.subplayer.ui.EntryView(vm, e); Spacer(Modifier.height(14.dp)) }
+                                }
+                            }
+                        }
+                    }
+                    "sent" -> {
+                        sentences.forEachIndexed { i, e ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
+                                    if (i == 0) Text("▶ video", color = Neon.Pink, fontSize = 11.sp)
+                                    Text(highlight(e.de, w.text), color = W, fontSize = 15.sp)
+                                    if (e.en.isNotEmpty()) Text(e.en, color = W.copy(alpha = 0.6f), fontSize = 13.sp)
+                                    if (e.fa.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                                        Text(e.fa, color = W.copy(alpha = 0.75f), fontSize = 14.sp, modifier = Modifier.fillMaxWidth())
+                                    }
+                                }
+                                IconButton(onClick = { vm.speak(e.de, lang = w.lang) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
+                                if (i > 0) IconButton(onClick = { vm.deleteExample(e) }, modifier = Modifier.size(34.dp)) { Icon(Icons.Close, "Remove", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(16.dp)) }
+                            }
+                        }
+                        Pill("＋ Add sentences", active = true) { onClose(); vm.openAddSentences(w) }
+                    }
+                    else -> {
+                        if (cols.isEmpty()) Explain("No collocations yet. Ask ChatGPT, Gemini, DeepSeek or Grok (Learn more) — the answer has lines like " +
+                            "“KOLL: … | … | …”. Copy it and tap ＋ Add sentences: the sentences go to Sentences, the collocations here. " +
+                            "The teacher on the PC (Ollama) makes them too.")
+                        cols.forEach { c ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                                    Text(c.phrase, color = Neon.Gold, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    if (c.meaning.isNotEmpty()) Text(c.meaning, color = W.copy(alpha = 0.85f), fontSize = 14.sp)
+                                    if (c.example.isNotEmpty()) Text(c.example, color = W.copy(alpha = 0.6f), fontSize = 13.sp, fontStyle = FontStyle.Italic)
+                                }
+                                if (c.example.isNotEmpty()) IconButton(onClick = { vm.speak(c.example, lang = w.lang) }, modifier = Modifier.size(34.dp)) {
+                                    Icon(Icons.Volume, "Speak", tint = Neon.Cyan, modifier = Modifier.size(18.dp)) }
+                                IconButton(onClick = { vm.deleteCollocation(c) }, modifier = Modifier.size(34.dp)) {
+                                    Icon(Icons.Close, "Remove", tint = W.copy(alpha = 0.5f), modifier = Modifier.size(16.dp)) }
+                            }
+                        }
+                        val qs = remember(w.uid, vm.wordInfoVersion) { vm.questionsOf(w) }
+                        if (qs.isNotEmpty()) Explain("📝 ${qs.size} exam question(s) on this word are in Review.", Modifier.padding(top = 10.dp))
+                        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill("Ask ChatGPT") { vm.learnMore(AppViewModel.Source.CHATGPT, w.lemma.ifEmpty { w.text }, w.sentence, w.lang) }
+                            Pill("＋ Paste the answer", active = true) { onClose(); vm.openAddSentences(w) }
+                        }
+                    }
                 }
             }
         }
@@ -364,9 +487,7 @@ private fun highlight(sentence: String, text: String) = buildAnnotatedString {
 @Composable
 fun ReviewScreen(vm: AppViewModel) {
     BackHandler { vm.endReview() }
-    val w = vm.reviewQueue.getOrNull(vm.reviewIndex)
-    // each review shows another of the word's sentences (video line first, then the added ones)
-    val shown = w?.let { vm.sentencesOf(it).let { list -> list[it.reviews % list.size] } }
+    val item = vm.reviewQueue.getOrNull(vm.reviewIndex)
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
             IconButton(onClick = { vm.endReview() }) { Icon(Icons.Close, "End review", tint = W) }
@@ -378,10 +499,17 @@ fun ReviewScreen(vm: AppViewModel) {
             val p = if (vm.reviewQueue.isEmpty()) 0f else vm.reviewIndex.toFloat() / vm.reviewQueue.size
             Box(Modifier.fillMaxWidth(p).height(5.dp).background(Neon.brush))
         }
-        if (w == null) {
+        if (item == null) {
             ReviewFinished(vm)
             return@Column
         }
+        if (item is com.behrouz.subplayer.ReviewItem.Q) {
+            QuestionReview(vm, item.q)
+            return@Column
+        }
+        val w = (item as com.behrouz.subplayer.ReviewItem.W).w
+        // each review shows another of the word's sentences (video line first, then the added ones)
+        val shown = vm.sentencesOf(w).let { list -> list[w.reviews % list.size] }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -420,7 +548,7 @@ fun ReviewScreen(vm: AppViewModel) {
                 Modifier.fillMaxWidth().glass(RoundedCornerShape(26.dp)).padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(highlight(shown?.de ?: w.sentence, w.text), color = W, fontSize = 19.sp, textAlign = TextAlign.Center, lineHeight = 27.sp)
+                Text(highlight(shown.de.ifEmpty { w.sentence }, w.text), color = W, fontSize = 19.sp, textAlign = TextAlign.Center, lineHeight = 27.sp)
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     if (w.article.isNotEmpty() && vm.reviewRevealed) Text(w.article + " ", color = articleTint(w.article), fontSize = 22.sp)
@@ -433,7 +561,7 @@ fun ReviewScreen(vm: AppViewModel) {
                         if (w.ipa.isNotEmpty()) Text(w.ipa, color = W.copy(alpha = 0.6f), fontSize = 15.sp)
                         Spacer(Modifier.height(8.dp))
                         if (w.english.isNotEmpty()) Text(w.english, color = W, fontSize = 17.sp, textAlign = TextAlign.Center)
-                        if (shown != null && shown.en.isNotEmpty()) Text("„${shown.en}“", color = W.copy(alpha = 0.7f), fontSize = 14.sp,
+                        if (shown.en.isNotEmpty()) Text("„${shown.en}“", color = W.copy(alpha = 0.7f), fontSize = 14.sp,
                             textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                         if (w.persian.isNotEmpty()) CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                             Text(w.persian, color = W, fontSize = 19.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
@@ -457,6 +585,56 @@ fun ReviewScreen(vm: AppViewModel) {
                 ) { Text("Again · 10 min", color = Neon.Pink, fontWeight = FontWeight.Bold) }
                 GlowButton("Got it · ${Srs.INTERVAL_DAYS[minOf(w.box + 1, Srs.INTERVAL_DAYS.size - 1)]} d", Modifier.weight(1f), icon = Icons.Check) { vm.answer(true) }
             }
+        }
+    }
+}
+
+/** An exam question (TestDaF / IELTS) in Review: tap an answer (it turns green or red), then Got it / Again. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.QuestionReview(vm: AppViewModel, q: com.behrouz.subplayer.words.ExamQuestion) {
+    val C = com.behrouz.subplayer.learn.Cards
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text((if (q.lang == "en") "IELTS" else "TestDaF") + " question · reviewed ${q.reviews}×" +
+            (if (q.videoName.isNotEmpty()) " · ${q.videoName.substringBeforeLast('.').take(40)}" else "") +
+            (if (q.lemma.isNotEmpty()) " · „${q.lemma}“" else ""),
+            color = W.copy(alpha = 0.55f), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+        Column(Modifier.fillMaxWidth().padding(top = 12.dp).glass(RoundedCornerShape(26.dp)).padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(q.question, color = W, fontSize = 18.sp, textAlign = TextAlign.Center, lineHeight = 25.sp)
+            IconButton(onClick = { vm.speak(q.question, lang = q.lang) }) { Icon(Icons.Volume, "Speak", tint = Neon.Cyan) }
+            if (vm.reviewRevealed) {
+                val picked = vm.reviewPicked
+                val ok = picked == null || C.isAnswer(picked, q.answer)
+                Text((if (picked == null) "" else if (ok) "✓ Right! " else "✗ ") + q.answer, color = if (ok) Neon.Mint else Neon.Pink,
+                    fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                if (q.explanation.isNotEmpty()) Text(q.explanation, color = W.copy(alpha = 0.7f), fontSize = 14.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        q.options.forEach { o ->
+            val right = C.isAnswer(o, q.answer)
+            val bg = when {
+                !vm.reviewRevealed -> W.copy(alpha = 0.07f)
+                right -> Neon.Mint.copy(alpha = 0.35f)
+                o == vm.reviewPicked -> Neon.Pink.copy(alpha = 0.35f)
+                else -> W.copy(alpha = 0.04f)
+            }
+            Text(o, color = W, fontSize = 15.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp))
+                .background(bg).clickable(enabled = !vm.reviewRevealed) { vm.pickAnswer(o) }.padding(horizontal = 14.dp, vertical = 12.dp))
+        }
+    }
+    if (!vm.reviewRevealed) {
+        GlowButton(if (q.options.isEmpty()) "Show the answer" else "Show the answer without choosing", Modifier.fillMaxWidth().padding(vertical = 12.dp)) { vm.revealAnswer() }
+    } else {
+        val ok = vm.reviewPicked?.let { C.isAnswer(it, q.answer) } ?: true
+        Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(50)).background(Neon.Pink.copy(alpha = if (ok) 0.2f else 0.4f))
+                .clickable { vm.answer(false) }.padding(vertical = 14.dp), contentAlignment = Alignment.Center) {
+                Text("Again · 10 min", color = Neon.Pink, fontWeight = FontWeight.Bold)
+            }
+            GlowButton("Got it · ${Srs.INTERVAL_DAYS[minOf(q.box + 1, Srs.INTERVAL_DAYS.size - 1)]} d", Modifier.weight(1f), icon = Icons.Check) { vm.answer(true) }
         }
     }
 }

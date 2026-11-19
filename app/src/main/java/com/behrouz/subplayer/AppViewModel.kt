@@ -133,6 +133,13 @@ sealed class Question {
     data class Article(val word: SavedWord) : Question()
 }
 
+/** One card of a review session: a saved word, or an exam question (TestDaF / IELTS). */
+sealed class ReviewItem {
+    abstract val reviews: Int; abstract val box: Int; abstract val due: Long
+    data class W(val w: SavedWord) : ReviewItem() { override val reviews get() = w.reviews; override val box get() = w.box; override val due get() = w.due }
+    data class Q(val q: com.behrouz.subplayer.words.ExamQuestion) : ReviewItem() { override val reviews get() = q.reviews; override val box get() = q.box; override val due get() = q.due }
+}
+
 /** Result of the current practice answer (null = not answered yet). */
 data class Feedback(val correct: Boolean, val detail: String, val marks: List<Practice.Mark> = emptyList())
 
@@ -191,13 +198,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var words by mutableStateOf<List<SavedWord>>(emptyList()); private set
     var savedKeys by mutableStateOf<Set<String>>(emptySet()); private set
     var dueCount by mutableIntStateOf(0); private set
-    var reviewQueue by mutableStateOf<List<SavedWord>>(emptyList()); private set
+    var reviewQueue by mutableStateOf<List<ReviewItem>>(emptyList()); private set
+    var reviewPicked by mutableStateOf<String?>(null); private set
     var reviewIndex by mutableIntStateOf(0); private set
     var reviewRevealed by mutableStateOf(false); private set
     var reviewDone by mutableIntStateOf(0); private set
     var reviewGot by mutableIntStateOf(0); private set
     var recentList by mutableStateOf<List<Recents.Item>>(emptyList()); private set
     var wordExamples by mutableStateOf<Map<Long, List<Example>>>(emptyMap()); private set
+    /** Changes whenever words, sentences, collocations or questions change (the word panels read it). */
+    var wordInfoVersion by mutableIntStateOf(0); private set
 
     // ---- practice
     private val progress = Progress(app)
@@ -214,6 +224,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var shadowing by mutableStateOf(false)
     var shadowWaiting by mutableStateOf(false); private set
     var heldCue by mutableIntStateOf(-1); private set
+    /** Pause each line goes on by itself at this time (0 = waits for ▶). */
+    private var autoResumeAt = 0L
+    var resumeIn by mutableIntStateOf(0); private set
+    var pauseWait by mutableStateOf("auto"); private set          // read from the settings in init (uiPrefs comes later)
     private var shadowResumeAt = 0L
     private var lastCueIdx = -1
     /** A–B / loop line: 0 = repeat until stopped, otherwise play on after this many times. */
@@ -242,6 +256,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         if (!whisperSupported) genEngine = if (VoskEngine.AVAILABLE) Engine.FAST else Engine.ONLINE
+        pauseWait = uiPrefs.getString("pause_wait", "auto") ?: "auto"
+        if (!uiPrefs.getBoolean("joined_29", false)) {       // 2.9: the same word saved twice becomes one entry (a copy is kept first)
+            runCatching {
+                val db = app.getDatabasePath("words.db")
+                val bak = java.io.File(db.parentFile, "words-before-2.9.db")
+                if (db.exists() && !bak.exists()) db.copyTo(bak)
+                val n = store.mergeDuplicates()
+                if (n > 0) message = "My Words: $n word(s) saved twice were joined into one entry (their sentences kept)"
+            }
+            uiPrefs.edit().putBoolean("joined_29", true).apply()
+        }
+        if (!uiPrefs.getBoolean("colfix_29", false)) {       // once: lines of an escaped JSON paste stored as collocations
+            runCatching {
+                val n = store.removeBrokenCollocations { com.behrouz.subplayer.learn.Cards.isBroken(it) }
+                if (n > 0) message = "My Words: $n unreadable collocation line(s) from an escaped paste removed — paste that answer again"
+            }
+            uiPrefs.edit().putBoolean("colfix_29", true).apply()
+        }
         refreshWords()
         recentList = recents.list()
         viewModelScope.launch { delay(1500); if (syncToken.isNotBlank()) syncNow(silent = true) }
@@ -272,9 +304,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 val idx = CueBuilder.indexAt(cues, position)
-                // Pause after each line (keeps the finished line on screen to read and tap)
-                if (autoPause && playing && pointB < 0 && lastCueIdx >= 0 && idx != lastCueIdx) {
-                    player.pause(); playing = false; heldCue = lastCueIdx
+                // Pause each line: stops at the end of a sentence (a long one: of each part) — only when it was played through,
+                // not after a seek — keeps the sentence on screen, then goes on by itself after the chosen wait
+                if (autoResumeAt > 0) {
+                    resumeIn = ((autoResumeAt - nowMs + 999) / 1000).toInt().coerceAtLeast(0)
+                    if (nowMs >= autoResumeAt) {
+                        autoResumeAt = 0; resumeIn = 0
+                        if (autoPause && !player.isPlaying) { player.play(); playing = true }
+                    }
+                }
+                if (autoPause && playing && pointB < 0 && lastCueIdx in cues.indices && idx != lastCueIdx) {
+                    val r = unitOf(lastCueIdx)
+                    val end = cues[lastCueIdx].endMs
+                    if (lastCueIdx == r.last && position >= end - 120 && position <= end + 900) {
+                        player.pause(); playing = false; heldCue = lastCueIdx
+                        val wait = pauseWaitMs(r)
+                        autoResumeAt = if (wait > 0) nowMs + wait else 0
+                    }
                 }
                 if (playing && idx >= 0) heldCue = -1
                 lastCueIdx = idx
@@ -359,13 +405,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun togglePlay() {
         android.util.Log.d("SubPlayer", "play/pause: playWhenReady=${player.playWhenReady} state=${player.playbackState} at ${player.currentPosition} ms")
         // playWhenReady, not isPlaying: a tap while the video is still loading must pause it, not be lost
+        autoResumeAt = 0; resumeIn = 0
         if (player.playWhenReady && player.playbackState != androidx.media3.common.Player.STATE_ENDED) player.pause() else {
             if (player.playbackState == androidx.media3.common.Player.STATE_ENDED) player.seekTo(0)
             player.play()
         }
     }
 
-    fun seekTo(ms: Long) = player.seekTo(ms.coerceIn(0, maxOf(duration, 0)))
+    fun seekTo(ms: Long) { autoResumeAt = 0; resumeIn = 0; player.seekTo(ms.coerceIn(0, maxOf(duration, 0))) }
     fun skip(deltaMs: Long) = seekTo(player.currentPosition + deltaMs)
 
     fun prevLine() {
@@ -410,7 +457,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------------------------------------------- word selection
 
     fun onWordTap(cueIndex: Int, wordIndex: Int) {
-        player.pause()
+        player.pause(); autoResumeAt = 0; resumeIn = 0
         val cue = cues.getOrNull(cueIndex) ?: return
         val words = tokens(cue.text)
         if (phraseMode && selCue == cueIndex && selStart >= 0) {
@@ -429,7 +476,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A word of the translation line: its word card in the translation's language, saved with the translated line and the moment. */
     fun onTranslationWordTap(cueIndex: Int, wordIndex: Int) {
-        player.pause()
+        player.pause(); autoResumeAt = 0; resumeIn = 0
         val cue = cues.getOrNull(cueIndex) ?: return
         val t = translationFor(cueIndex) ?: return
         val w = tokens(t).getOrNull(wordIndex) ?: return
@@ -438,14 +485,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onWordLongPress(cueIndex: Int, wordIndex: Int) {
-        player.pause()
+        player.pause(); autoResumeAt = 0; resumeIn = 0
         selCue = cueIndex; selStart = wordIndex; selEnd = wordIndex; phraseMode = true
         message = "Now tap the last word of the phrase"
     }
 
     fun selectWholeLine(cueIndex: Int) {
         val cue = cues.getOrNull(cueIndex) ?: return
-        player.pause()
+        player.pause(); autoResumeAt = 0; resumeIn = 0
         val w = tokens(cue.text)
         selCue = cueIndex; selStart = 0; selEnd = w.size - 1; phraseMode = false
         val (sent, cs, ce) = sentenceAround(cueIndex)
@@ -687,7 +734,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         words = all
         savedKeys = all.map { key(it.text) }.toSet()
         wordExamples = store.allExamples()
-        dueCount = store.dueCount(System.currentTimeMillis())
+        dueCount = store.dueCount(System.currentTimeMillis()) + store.dueQuestionCount(System.currentTimeMillis())
+        wordInfoVersion++
     }
 
     /** Saves the word/phrase in the open card, with its sentence and video moment. */
@@ -721,6 +769,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> return
         }
         val existing = store.find(w.text, w.videoUri, w.startMs)
+        val same = if (existing == null) store.findSame(w.text, w.lemma, w.lang) else null
+        if (same != null) {
+            // the same word from another line or video: one entry, and this line joins its sentences
+            val n = if (w.sentence.isNotBlank() && w.sentence.trim().lowercase() != same.sentence.trim().lowercase())
+                store.addExamples(same.id, listOf(Example(wordId = same.id, de = w.sentence.replace('\n', ' ').trim(),
+                    en = if (videoName.isNotEmpty()) "from “$videoName”" else "", fa = ""))) else 0
+            message = "„${same.text}“ is already in My Words" + if (n > 0) " — this line was added to its sentences" else ""
+            refreshWordsAndSync()
+            when (val s = sheet) {
+                is Sheet.Word -> sheet = s.copy(saved = true)
+                is Sheet.Phrase -> sheet = s.copy(saved = true)
+                else -> {}
+            }
+            return
+        }
         if (existing != null) {
             store.delete(existing.id)
             message = "Removed from My Words"
@@ -753,28 +816,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         pointB = w.endMs + 300
         player.seekTo(pointA)
         player.play()
+        if (stayOnScreen && screen != Screen.PLAYER && screen != Screen.REVIEW) miniPinned = true     // seen in the small window
     }
 
     fun startReview() {
-        val q = store.due(System.currentTimeMillis()).ifEmpty { store.all().sortedBy { it.due }.take(20) }
-        if (q.isEmpty()) { message = "Save some words first: pause, tap a word, then ★ Save"; return }
-        reviewQueue = q; reviewIndex = 0; reviewRevealed = false; reviewDone = 0; reviewGot = 0
+        val now = System.currentTimeMillis()
+        var items: List<ReviewItem> = store.due(now).map { ReviewItem.W(it) } + store.dueQuestions(now).map { ReviewItem.Q(it) }
+        if (items.isEmpty()) items = store.all().sortedWith(compareBy<SavedWord>({ it.reviews }, { it.due })).take(20).map { ReviewItem.W(it) }
+        if (items.isEmpty()) { message = "Save some words first: pause, tap a word, then ★ Save"; return }
+        reviewQueue = items.sortedWith(compareBy<ReviewItem>({ it.reviews }, { it.box }, { it.due }))      // the least reviewed first
+        reviewIndex = 0; reviewRevealed = false; reviewDone = 0; reviewGot = 0; reviewPicked = null
         screen = Screen.REVIEW
     }
 
     fun revealAnswer() { reviewRevealed = true }
 
+    /** An answer of an exam question was tapped: it is checked and the right one shown. */
+    fun pickAnswer(option: String) {
+        if (reviewRevealed) return
+        reviewPicked = option
+        reviewRevealed = true
+    }
+
     fun answer(gotIt: Boolean) {
-        val w = reviewQueue.getOrNull(reviewIndex) ?: return
-        val updated = Srs.review(w, gotIt, System.currentTimeMillis())
-        store.update(updated)
+        val item = reviewQueue.getOrNull(reviewIndex) ?: return
+        val now = System.currentTimeMillis()
+        val updated: ReviewItem = when (item) {
+            is ReviewItem.W -> Srs.review(item.w, gotIt, now).also { store.update(it) }.let { ReviewItem.W(it) }
+            is ReviewItem.Q -> Srs.review(item.q, gotIt, now).also { store.updateQuestion(it) }.let { ReviewItem.Q(it) }
+        }
         recordProgress()
         reviewDone++
         if (gotIt) reviewGot++
-        // "Again" puts the word back at the end of this session
+        // "Again" puts the card back at the end of this session
         if (!gotIt) reviewQueue = reviewQueue + updated
         reviewIndex++
         reviewRevealed = false
+        reviewPicked = null
         clearAB()
         player.pause()
         refreshWordsAndSync()
@@ -965,7 +1043,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun importLink(raw: String) {
         val url = Regex("""https?://\S+""").find(raw)?.value ?: run { message = "No web link found"; return }
         LinkImporter.refusedReason(url)?.let { message = it; return }
-        if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        if (job?.isActive == true) { enqueue(url.substringAfterLast('/').take(60)) { LinkImporter.resolve(url) }; sheet = null; return }
         sheet = null
         job = viewModelScope.launch {
             task = Task("Video link", "Looking for the video…", -1)
@@ -982,7 +1060,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun downloadFound(found: LinkImporter.Found) {
+    // ---- download queue: a download asked for while another task runs waits its turn (2.9)
+    data class PendingDownload(val title: String, val find: suspend () -> LinkImporter.Found)
+    val dlQueue = androidx.compose.runtime.mutableStateListOf<PendingDownload>()
+    val dlDone = androidx.compose.runtime.mutableStateListOf<Pair<String, Uri>>()
+
+    private fun enqueue(title: String, find: suspend () -> LinkImporter.Found) {
+        dlQueue.add(PendingDownload(title, find))
+        message = "Added to the download queue — ${dlQueue.size} waiting (Discover ▸ Downloads)"
+    }
+
+    fun removeQueued(p: PendingDownload) { dlQueue.remove(p) }
+    fun moveQueuedFirst(p: PendingDownload) { if (dlQueue.remove(p)) dlQueue.add(0, p) }
+
+    private fun nextDownload() {
+        if (job?.isActive == true || dlQueue.isEmpty()) return
+        val p = dlQueue.removeAt(0)
+        job = viewModelScope.launch {
+            task = Task("Downloading", p.title, -1)
+            try {
+                downloadFound(p.find(), queued = true)
+            } catch (e: CancellationException) {
+                message = "Cancelled"
+            } catch (e: Throwable) {
+                message = "Download failed — ${p.title}: " + describe(e)
+            } finally {
+                task = null
+            }
+        }
+    }
+
+    private suspend fun downloadFound(found: LinkImporter.Found, queued: Boolean = false) {
         if (Regex("""\.m3u8(\?|$)""", RegexOption.IGNORE_CASE).containsMatchIn(found.videoUrl))
             throw java.io.IOException("This programme is offered only as a stream, which the phone app can't save (the Windows app can).")
         task = Task("Downloading", found.title, 0)
@@ -999,8 +1107,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 got = list.size
             }
         }
-        openVideo(uri, resume = false)
         val where = if (found.audio) "Music/SubPlayer" else "Movies/SubPlayer"
+        if (queued || dlQueue.isNotEmpty() || player.isPlaying) {        // don't take the screen away: it waits in Downloads
+            dlDone.add(found.title to uri)
+            message = "Downloaded: ${found.title} — open it from Discover ▸ Downloads" + if (got > 0) " (with subtitles)" else ""
+            if (got > 0) scheduleSync()
+            return
+        }
+        openVideo(uri, resume = false)
         if (got > 0) { message = "Saved to $where — with the broadcaster's subtitles ($got lines)"; scheduleSync() }
         else { message = "Saved to $where — tap Subtitles to transcribe it"; sheet = Sheet.Generate }
     }
@@ -1040,13 +1154,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun aiPrompt(word: String, sentence: String, lang: String = wordLang()) = if (lang == "en")
         "Explain the English word “$word”" + (if (sentence.isNotBlank()) " as used in: “${sentence.replace('\n', ' ')}”" else "") + ".\n" +
             "1) Meaning in simple English, plus the German and the Persian translation.\n" +
-            "2) IPA (UK and US), word forms, and common collocations.\n" +
+            "2) IPA (UK and US) and word forms.\n" +
+            "2b) 6 typical collocations (verb + noun, adjective + noun, with prepositions), one per line, in this format:\n" +
+            "COLL: collocation | meaning | short example sentence\n" +
             "3) Exactly 3 natural example sentences of everyday English, one per line, in this format:\n" +
             "EN: … | DE: … | FA: …"
     else
         "Explain the German word „$word“" + (if (sentence.isNotBlank()) " as used in: „${sentence.replace('\n', ' ')}“" else "") + ".\n" +
             "1) Meaning in English and in Persian.\n" +
-            "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt.\n" +
+            "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt; the preposition or case it goes with.\n" +
+            "2b) 6 typical collocations (Kollokationen: Nomen-Verb-Verbindungen, Adjektiv + Nomen, feste Wendungen), one per line, in this format:\n" +
+            "KOLL: Kollokation | meaning in English | kurzer Beispielsatz\n" +
             "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\n" +
             "DE: … | EN: … | FA: …"
 
@@ -1157,7 +1275,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         when {
             t.isEmpty() -> message = "Nothing copied yet — copy the assistant's answer first"
             t.startsWith("You are an experienced") && "TRANSCRIPT" in t -> message = "That is still the question — copy the assistant's ANSWER, then tap Paste"
-            else -> { saveLesson(if (lessonText.isBlank()) t else lessonText.trimEnd() + "\n\n──────────\n\n" + t); message = "Lesson kept ($lessonLevel)" }
+            else -> {
+                saveLesson(if (lessonText.isBlank()) t else lessonText.trimEnd() + "\n\n──────────\n\n" + t)
+                val n = lessonCards()
+                message = "Lesson kept ($lessonLevel)" + when {
+                    n > 0 -> " · $n review card(s) put into Review"
+                    n == 0 -> " · its review cards are already in Review"
+                    else -> ""
+                }
+            }
+        }
+    }
+
+    /** The lesson's ---REVIEW--- cards into Review. Returns how many were new, or -1 when the lesson has none. */
+    fun lessonCards(): Int {
+        val qs = com.behrouz.subplayer.learn.Cards.parse(lessonText, wordLang(), videoName, "lesson:$lessonLevel")
+        if (qs.isEmpty()) return -1
+        val n = store.addQuestions(qs)
+        refreshWords()
+        return n
+    }
+
+    fun lessonCardsButton() {
+        val n = lessonCards()
+        message = when {
+            n > 0 -> "$n review card(s) put into Review"
+            n == 0 -> "This lesson's review cards are already in Review"
+            else -> "This lesson has no review cards (a part starting with ---REVIEW---). Ask the assistant again — the question asks for them now."
         }
     }
 
@@ -1168,7 +1312,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clipboardText(): String {
         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        return cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+        val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+        return com.behrouz.subplayer.learn.Cards.cleanAi(t)      // &#x20; and line-end backslashes of some copy buttons
     }
 
     /** Makes sure the word in the open card is saved (without toggling) and returns it. */
@@ -1180,8 +1325,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> return null
         }
         store.find(Dictionary.normalize(text), u, start)?.let { return it }
+        val s = sheet
+        val lemma = (s as? Sheet.Word)?.entries?.firstOrNull()?.lemma ?: text
+        val lang = (s as? Sheet.Word)?.let { it.entries.firstOrNull()?.lang ?: it.lang } ?: (s as? Sheet.Phrase)?.lang ?: wordLang()
+        store.findSame(Dictionary.normalize(text), lemma, lang)?.let { return it }
         saveFromSheet()
-        return store.find(Dictionary.normalize(text), u, start)
+        return store.find(Dictionary.normalize(text), u, start) ?: store.findSame(Dictionary.normalize(text), lemma, lang)
     }
 
     fun openAddSentences(w: SavedWord) {
@@ -1191,13 +1340,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun previewSentences(raw: String) = Sentences.parse(raw)
 
     fun addSentences(wordId: Long, raw: String) {
-        val lang = words.firstOrNull { it.id == wordId }?.lang ?: "de"
-        val list = Sentences.parse(raw, primary = lang)
-        if (list.isEmpty()) { message = "No sentences found. Each line should look like: DE: … | EN: … | FA: …"; return }
-        val n = store.addExamples(wordId, list)
+        val w = words.firstOrNull { it.id == wordId }
+        val lang = w?.lang ?: "de"
+        val lemma = w?.let { if (it.text.contains(' ')) it.text else it.lemma.ifEmpty { it.text } } ?: ""
+        val clean = com.behrouz.subplayer.learn.Cards.cleanAi(raw)
+        val js = com.behrouz.subplayer.learn.Cards.fromJson(clean, lang, lemma)       // a JSON answer: its parts
+        val (cols, rest) = js?.let { it.first to "" } ?: com.behrouz.subplayer.learn.Cards.collocations(clean, lang, lemma)
+        val list = js?.second ?: Sentences.parse(rest, primary = lang)
+        if (list.isEmpty() && cols.isEmpty()) { message = "No sentences found. Each line should look like: DE: … | EN: … | FA: …"; return }
+        val n = if (list.isNotEmpty()) store.addExamples(wordId, list) else 0
+        val k = if (cols.isNotEmpty() && w != null) store.addCollocations(lang, lemma, cols) else 0
         refreshWordsAndSync()
         sheet = null
-        message = if (n == 0) "Those sentences are already saved" else "$n sentence${if (n == 1) "" else "s"} added — they'll appear in review and practice"
+        message = if (n == 0 && k == 0) "Those sentences are already saved"
+            else listOfNotNull(if (n > 0) "$n sentence${if (n == 1) "" else "s"} added (review and practice)" else null,
+                if (k > 0) "$k collocation${if (k == 1) "" else "s"} added" else null).joinToString(" · ")
+    }
+
+    fun collocationsOf(w: SavedWord): List<com.behrouz.subplayer.words.Collocation> =
+        store.collocations(w.lang, if (w.text.contains(' ')) w.text else w.lemma.ifEmpty { w.text })
+
+    fun deleteCollocation(c: com.behrouz.subplayer.words.Collocation) { store.deleteCollocation(c.id); wordInfoVersion++ }
+
+    fun questionsOf(w: SavedWord) = store.questionsFor(w.lang, w.lemma.ifEmpty { w.text })
+
+    /** The dictionary entries of a saved word (for its Dictionary panel). */
+    suspend fun entriesFor(w: SavedWord): List<Dictionary.Entry>? {
+        if (w.text.contains(' ')) return emptyList()
+        val d = dictionaryOrNull(w.lang) ?: return null
+        return withContext(Dispatchers.IO) { runCatching { d.lookup(w.lemma.ifEmpty { w.text }).ifEmpty { d.lookup(w.text) } }.getOrDefault(emptyList()) }
     }
 
     fun deleteExample(e: Example) { store.deleteExample(e.id); refreshWordsAndSync() }
@@ -1309,8 +1480,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleAutoPause() {
         autoPause = !autoPause
-        if (autoPause) { shadowing = false; clearAB(); message = "Pauses after every line — tap words, then ▶ to go on" }
+        autoResumeAt = 0; resumeIn = 0
+        if (autoPause) {
+            shadowing = false; clearAB()
+            message = if (pauseWait == "tap") "Pauses after each sentence — tap words, then ▶ to go on"
+                else "Pauses after each sentence, then goes on by itself — tap a word to stay"
+        }
     }
+
+    /** How long Pause each line waits: "auto" (as long as the sentence took, 1.5–8 s), "2" … "10" seconds, or "tap" (until ▶). */
+    fun choosePauseWait(k: String) { pauseWait = k; uiPrefs.edit().putString("pause_wait", k).apply() }
+
+    private fun pauseWaitMs(r: IntRange): Long = when (pauseWait) {
+        "tap" -> 0L
+        "auto" -> (((cues[r.last].endMs - cues[r.first].startMs) * 0.8 / speed.coerceAtLeast(0.25f)).toLong()).coerceIn(1500L, 8000L)
+        else -> (pauseWait.toLongOrNull() ?: 3L) * 1000
+    }
+
+    // sentences of the subtitles (for Pause each line and the translation line): computed once per set of subtitles
+    private var unitsFor: List<Cue>? = null
+    private var unitsCache: List<IntRange> = emptyList()
+
+    /** The whole sentence line [i] belongs to (first..last line). */
+    fun unitOf(i: Int): IntRange {
+        if (unitsFor !== cues) { unitsCache = CueBuilder.sentenceRanges(cues); unitsFor = cues }
+        return unitsCache.getOrElse(i) { i..i }
+    }
+
+    fun unitText(i: Int): String = unitOf(i).let { r -> CueBuilder.sentenceText(cues, r).split(Regex("\\s+")).joinToString(" ").trim() }
+
+    /** Pause each line holds at the end of a sentence of several lines: they are all shown. */
+    fun heldSentence(i: Int): IntRange? = if (autoPause && !playing && i >= 0 && i == heldCue && unitOf(i).let { it.first < it.last }) unitOf(i) else null
 
     // ---------------------------------------------------------- licence
 
@@ -1481,12 +1681,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The line on screen is translated on the fly when the whole file isn't translated yet. */
     fun ensureTranslation(i: Int) {
-        if (!showTranslation || i !in cues.indices || translationFor(i) != null || !liveAsked.add(i)) return
-        val text = cues[i].text.replace('\n', ' '); val from = cueLangOrDe(); val to = trLang()
+        if (!showTranslation || i !in cues.indices || translationFor(i) != null) return
+        val r = unitOf(i)                                   // the whole sentence, so the translation makes sense
+        if (!liveAsked.add(r.first)) return
+        val text = unitText(i); val from = cueLangOrDe(); val to = trLang(); val list = cues
         viewModelScope.launch {
             runCatching { Translator.translate(text, from, to).text }
-                .onSuccess { if (cues.getOrNull(i)?.text?.replace('\n', ' ') == text) liveTr[i] = it }
-                .onFailure { liveAsked.remove(i) }
+                .onSuccess { if (cues === list) for (k in r) liveTr[k] = it }
+                .onFailure { liveAsked.remove(r.first) }
         }
     }
 
@@ -1494,20 +1696,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (cues.isEmpty()) { message = "No subtitles to translate yet — tap Subtitles first"; return }
         if (job?.isActive == true) { message = "Please wait for the current task"; return }
         val list = cues; val from = cueLangOrDe(); val to = trLang(); val uri = videoUri; val f = trFile()
+        val units = list.indices.map { unitOf(it) }.distinct()           // whole sentences, each once
+        val texts = units.map { CueBuilder.sentenceText(list, it).split(Regex("\\s+")).joinToString(" ").trim() }
         sheet = null
         job = viewModelScope.launch {
             val title = "Translating subtitles → ${langLabel(to)}"
-            task = Task(title, "0 / ${list.size} lines", 0)
+            task = Task(title, "0 / ${units.size} sentences", 0)
             try {
-                val out = Translator.translateLines(list.map { it.text }, from, to) { n ->
-                    ui { task = Task(title, "$n / ${list.size} lines", n * 100 / list.size) }
+                val out = Translator.translateLines(texts, from, to) { n ->
+                    ui { task = Task(title, "$n / ${units.size} sentences", n * 100 / units.size.coerceAtLeast(1)) }
                 }
-                withContext(Dispatchers.IO) { writeTranslations(f, list, out) }
+                // one entry per sentence (from its first to its last line) — the same file as the Windows app writes
+                val sentenceCues = units.map { Cue(list[it.first].startMs, list[it.last].endMs, "") }
+                withContext(Dispatchers.IO) { writeTranslations(f, sentenceCues, out) }
                 if (videoUri == uri) {
                     loadTranslations()
                     if (!showTranslation) { showTranslation = true; uiPrefs.edit().putBoolean("tr_line", true).apply() }
                 }
-                message = "${list.size} lines translated — shown under each line, also offline (switch off in ⋯ Options)"
+                message = "${units.size} sentences (${list.size} lines) translated — shown under each line, also offline (switch off in ⋯ Options)"
             } catch (e: CancellationException) {
                 message = "Cancelled"
             } catch (e: Exception) {
@@ -1899,7 +2105,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun importFilm(f: Catalog.Film) {
-        if (job?.isActive == true) { message = "Please wait for the current task"; return }
+        if (job?.isActive == true) {
+            enqueue(f.title) { if (f.urlVideo.isNotEmpty()) LinkImporter.fromFilm(f) else LinkImporter.resolve(f.urlWebsite) }
+            sheet = null
+            return
+        }
         sheet = null
         screen = Screen.PLAYER
         job = viewModelScope.launch {
@@ -1917,6 +2127,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- the video keeps playing on other screens in a small window; picture-in-picture over other apps (2.9)
+    var inPip by mutableStateOf(false)
+    var miniPinned by mutableStateOf(false)
+
+    fun closeMini() { player.pause(); miniPinned = false }
+
+    /** Home was pressed while a video plays on the player screen: it goes on in a small window over other apps. */
+    fun wantsPip(): Boolean = videoUri != null && player.isPlaying && !audioOnly
+
     // ---- audio files (podcasts) have no picture
     var audioOnly by mutableStateOf(false); private set
 
@@ -1929,8 +2148,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // a long task (download, transcribing, translating all) keeps running in the background with a notification
         viewModelScope.launch {
             androidx.compose.runtime.snapshotFlow { task }.collect { t ->
-                if (t == null) WorkService.stop(ctx)
-                else WorkService.show(ctx, "SubPlayer · ${t.title}", t.message, t.progress)
+                if (t == null) {
+                    if (dlQueue.isNotEmpty()) { delay(400); nextDownload() }       // the next download of the queue
+                    if (task == null) WorkService.stop(ctx)
+                } else WorkService.show(ctx, "SubPlayer · ${t.title}" + if (dlQueue.isNotEmpty()) " (+${dlQueue.size} waiting)" else "", t.message, t.progress)
+            }
+        }
+        // leaving the player while the video plays: it goes on in the small window
+        viewModelScope.launch {
+            var last = screen
+            androidx.compose.runtime.snapshotFlow { screen }.collect { sc ->
+                if (last == Screen.PLAYER && sc != Screen.PLAYER && sc != Screen.REVIEW && player.isPlaying) miniPinned = true
+                if (sc == Screen.PLAYER || sc == Screen.REVIEW) miniPinned = false
+                last = sc
             }
         }
         // new subtitles (opened, made, loaded, edited): their saved translation and word levels
