@@ -10,13 +10,15 @@ from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
                                QScrollArea, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget)
 
-from . import english, mediathek, theme
+from . import english, mediathek, sources, theme
 from .cosmos import GradientLabel
 
 CH_COLOR = {"ARD": "#3B7BFF", "ZDF": "#FF8A1F", "3sat": "#E8364F", "Arte": "#FF5A36", "DW": "#19B6FF", "KiKA": "#7CCB2B",
             "phoenix": "#22B8D8", "BR": "#4AA3FF", "SWR": "#3FD0B0", "WDR": "#4F86FF", "NDR": "#2F7DE1", "MDR": "#5C9DFF",
             "HR": "#3C8CFF", "RBB": "#E84B6B", "ORF": "#E8364F", "SRF": "#E8364F", "VOA": "#3D8BFF", "NASA": "#FF5A3C", "BBC": "#FF4F6D",
             "PBS": "#3FA9FF", "TED": "#FF3B30", "NPR": "#7CA6FF", "Podcasts": "#FFB347"}
+CH_COLOR.update({"Telegram": "#2AABEE", "Feed": "#F2994A", "Web": "#9B7BFF"})
+MINE = ("Telegram", "Feed", "Web")                    # films from the user's own sources
 DE_CHANNELS = ("ARD", "ZDF", "3sat", "Arte", "DW", "KiKA", "phoenix")
 EN_CHANNELS = ("VOA", "NASA", "Podcasts")
 
@@ -56,7 +58,7 @@ class FilmCard(QFrame):
             cc.setToolTip("Comes with the broadcaster's own subtitles — no transcription needed")
             top.addWidget(cc)
         top.addStretch(1)
-        audio = film.channel in ("BBC", "PBS", "TED", "NPR", "Podcast")
+        audio = film.channel in ("BBC", "PBS", "TED", "NPR", "Podcast") or (film.channel == "Feed" and film.url_video.split("?")[0].lower().endswith((".mp3", ".m4a", ".aac", ".ogg", ".opus")))
         top.addWidget(QLabel(("🎧 " if audio else "") + film.length, objectName="small"))
         v.addLayout(top)
         t = QLabel()
@@ -78,6 +80,131 @@ class FilmCard(QFrame):
 
     def set_selected(self, on: bool):
         self.setStyleSheet(f"QFrame#recent{{border:1px solid {theme.CYAN};background:rgba(62,240,255,0.10)}}" if on else "")
+
+
+class MyShelf:
+    """A suggestion row for one of the user's sources."""
+    def __init__(self, src: sources.Source):
+        self.src = src
+        self.title = src.name
+        self.level = {"telegram": "Telegram", "feed": "Feed", "page": "Web"}[src.kind]
+        self.why = "your source · " + src.url.replace("https://", "")
+        self.text = self.topic = self.title_q = ""
+        self.channels = ()
+
+
+class SourcesDialog(QWidget):
+    """My sources: add a website, an RSS / podcast feed or a public Telegram channel; remove one."""
+    def __init__(self, page):
+        from PySide6.QtWidgets import QDialog, QListWidget
+        super().__init__()
+        self.page, self.main = page, page.main
+        d = self.dlg = QDialog(page)
+        d.setWindowTitle("My sources")
+        d.resize(640, 480)
+        v = QVBoxLayout(d)
+        v.addWidget(QLabel("<b>Your own sources</b> — their videos appear in Discover (Suggestions and Search) next to the "
+                           "broadcasters'.", wordWrap=True))
+        v.addWidget(QLabel("Paste: a public Telegram channel (<b>t.me/name</b> or <b>@name</b>), an RSS / podcast feed, or a web page "
+                           "with videos. Telegram, like other filtered sites, needs your VPN or proxy (Settings ▸ Internet "
+                           "connection). Private channels and YouTube, Instagram, TikTok can't be added.", objectName="small",
+                           wordWrap=True))
+        row = QHBoxLayout()
+        self.url = QLineEdit(placeholderText="t.me/channel · @channel · https://… feed or page")
+        self.url.returnPressed.connect(self.add)
+        row.addWidget(self.url, 1)
+        self.lang = QComboBox()
+        self.lang.addItem("Deutsch", "de")
+        self.lang.addItem("English", "en")
+        self.lang.setCurrentIndex(0 if page.lang == "de" else 1)
+        row.addWidget(self.lang)
+        self.add_b = QPushButton("＋ Add")
+        self.add_b.setProperty("accent", True)
+        self.add_b.clicked.connect(self.add)
+        row.addWidget(self.add_b)
+        v.addLayout(row)
+        self.state = QLabel("", objectName="small", wordWrap=True)
+        v.addWidget(self.state)
+        self.list = QListWidget()
+        v.addWidget(self.list, 1)
+        r2 = QHBoxLayout()
+        rm = QPushButton("Remove")
+        rm.clicked.connect(self.remove)
+        r2.addWidget(rm)
+        r2.addStretch(1)
+        close = QPushButton("Close")
+        close.clicked.connect(d.accept)
+        r2.addWidget(close)
+        v.addLayout(r2)
+        self.relay = _Relay()
+        self.relay.done.connect(self._added)
+        self.relay.failed.connect(self._failed)
+        self.fill()
+
+    def fill(self):
+        self.list.clear()
+        for s in my_sources(self.main):
+            icon = {"telegram": "✈", "feed": "📡", "page": "🌐"}.get(s.kind, "•")
+            self.list.addItem(f"{icon}  {s.name}   ·  {'Deutsch' if s.lang == 'de' else 'English'}   ·  {s.url}")
+
+    def add(self):
+        t = self.url.text().strip()
+        if not t:
+            return
+        self.add_b.setEnabled(False)
+        self.state.setText("Looking at it…")
+        lang = self.lang.currentData()
+
+        def work():
+            try:
+                src = sources.detect(t, lang)
+                n = len(sources.videos(src, tg_pages=1))
+                self.relay.done.emit(0, (src, n))
+            except Exception as e:  # noqa: BLE001
+                self.relay.failed.emit(0, str(e) or e.__class__.__name__)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _added(self, _g, res):
+        src, n = res
+        self.add_b.setEnabled(True)
+        lst = self.main.settings.setdefault("my_sources", [])
+        if any(x.get("url") == src.url for x in lst):
+            self.state.setText(f"„{src.name}“ is already in your sources")
+            return
+        lst.append(src.to_dict())
+        self.main.save_settings()
+        kind = {"telegram": "Telegram channel", "feed": "feed", "page": "web page"}[src.kind]
+        self.state.setText(f"<span style='color:{theme.MINT}'>✓ Added the {kind} „{html.escape(src.name)}“</span> — "
+                           + (f"{n} video(s) found now." if n else "no videos found right now (new ones will show up)."))
+        self.url.clear()
+        self.fill()
+        self.page.shelves_loaded = False
+
+    def _failed(self, _g, err):
+        self.add_b.setEnabled(True)
+        low = err.lower()
+        if any(k in low for k in ("connection", "timed out", "timeout", "proxy", "resolve", "max retries")):
+            err = "It can't be reached. Telegram and many sites are filtered — turn on your VPN or set the proxy in Settings ▸ Internet connection."
+        self.state.setText(f"<span style='color:{theme.MAGENTA}'>{html.escape(err[:400])}</span>")
+
+    def remove(self):
+        r = self.list.currentRow()
+        lst = self.main.settings.get("my_sources", [])
+        if 0 <= r < len(lst):
+            del lst[r]
+            self.main.save_settings()
+            self.fill()
+            self.page.shelves_loaded = False
+
+    def exec(self):
+        self.dlg.exec()
+        if not self.page.shelves_loaded and self.page.mode == "shelves":
+            self.page.show_shelves()
+
+
+def my_sources(main, lang: str | None = None) -> list:
+    out = [sources.Source.from_dict(d) for d in main.settings.get("my_sources", [])]
+    return [s for s in out if lang is None or s.lang == lang]
 
 
 class DiscoverPage(QWidget):
@@ -142,6 +269,16 @@ class DiscoverPage(QWidget):
             b.clicked.connect(lambda _=False: self.search(new=True) if self.mode == "search" or self.q.text().strip() else self._chips_changed())
             self.ch_btns[ch] = b
             f.addWidget(b)
+        self.mine = QPushButton("★ My sources", checkable=True)
+        self.mine.setProperty("kind", "chip")
+        self.mine.setToolTip("Only your own sources (websites, feeds, Telegram channels)")
+        self.mine.clicked.connect(lambda _=False: self.search(new=True))
+        f.addWidget(self.mine)
+        manage = QPushButton("＋")
+        manage.setProperty("kind", "chip")
+        manage.setToolTip("Add or remove your own sources: websites, RSS / podcast feeds, public Telegram channels")
+        manage.clicked.connect(self.manage_sources)
+        f.addWidget(manage)
         f.addSpacing(8)
         self.length = QComboBox()
         self.length.addItems(list(mediathek.LENGTHS))
@@ -263,6 +400,7 @@ class DiscoverPage(QWidget):
             it = self.bv.takeAt(0)
             w = it.widget()
             if w:
+                w.hide()
                 w.deleteLater()
             elif it.layout():
                 self._clear_layout(it.layout())
@@ -271,6 +409,7 @@ class DiscoverPage(QWidget):
         while lay.count():
             it = lay.takeAt(0)
             if it.widget():
+                it.widget().hide()
                 it.widget().deleteLater()
             elif it.layout():
                 self._clear_layout(it.layout())
@@ -313,9 +452,13 @@ class DiscoverPage(QWidget):
         if self._chosen_channels():
             self.search(new=True)
 
+    def manage_sources(self):
+        SourcesDialog(self).exec()
+
     def show_shelves(self):
         self.mode = "shelves"
         self.q.clear()
+        self.mine.setChecked(False)
         for b in self.ch_btns.values():
             b.setChecked(False)
         self._clear()
@@ -323,19 +466,33 @@ class DiscoverPage(QWidget):
         self.status.setText("Loading suggestions…")
         src = english if self.lang == "en" else mediathek
         shelves = src.SHELVES
+        mine = [MyShelf(s) for s in my_sources(self.main, self.lang)]
 
         def job():
             from concurrent.futures import ThreadPoolExecutor
-            first = src.shelf_films(shelves[0], 10)          # fails fast when there is no connection
 
-            def one(sh):
+            def own(sh):
                 try:
-                    return sh, src.shelf_films(sh, 10)
-                except Exception as e:
+                    return sh, sources.videos(sh.src, tg_pages=1)
+                except Exception as e:  # noqa: BLE001
                     return sh, e
-            with ThreadPoolExecutor(max_workers=4) as ex:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                fut_mine = [ex.submit(own, sh) for sh in mine]       # your sources first, read alongside the catalogue
+                try:
+                    first = src.shelf_films(shelves[0], 10)      # fails fast when there is no connection
+                except Exception:
+                    if not mine:
+                        raise
+                    first = []
+
+                def one(sh):
+                    try:
+                        return sh, src.shelf_films(sh, 10)
+                    except Exception as e:
+                        return sh, e
                 rest = list(ex.map(one, shelves[1:]))
-            return "shelves", [(shelves[0], first)] + rest
+                mine_res = [f.result() for f in fut_mine]
+            return "shelves", mine_res + [(shelves[0], first)] + rest
         self._run(job)
 
     def _render_shelves(self, shelves):
@@ -379,6 +536,14 @@ class DiscoverPage(QWidget):
 
     def search_shelf(self, sh):
         self.mode = "search"
+        if isinstance(sh, MyShelf):                    # all the videos of one of your sources
+            self.q.clear()
+            self._shelf = sh
+            self.status.setText(f"Reading „{sh.title}“…")
+            self._clear()
+            self.bv.addStretch(1)
+            self._run(lambda: ("search", (sources.videos(sh.src, tg_pages=6), None, True)))
+            return
         if self.lang == "en":
             self.q.setText(getattr(sh, "nasa", "") or "")
             self._shelf = sh
@@ -393,7 +558,8 @@ class DiscoverPage(QWidget):
     def search(self, new=True, shelf=None):
         text = self.q.text().strip()
         chans = self._chosen_channels()
-        if not text and not chans and shelf is None:
+        mine_only = self.mine.isChecked()
+        if not text and not chans and shelf is None and not mine_only:
             self.show_shelves()
             return
         self.mode = "search"
@@ -408,7 +574,23 @@ class DiscoverPage(QWidget):
 
         en = self.lang == "en"
 
+        own = my_sources(self.main, self.lang) if (off == 0 and shelf is None and not chans and not cc) else []
+
         def job():
+            if mine_only:
+                films, errs = sources.search(own, text)
+                return "search", (films, len(films), new)
+            mine_films = sources.search(own, text)[0] if own and text else []
+            try:
+                res = job_catalogue()
+            except Exception:
+                if mine_films:                       # the catalogue can't be reached, your sources can
+                    return "search", (mine_films, len(mine_films), new)
+                raise
+            films, total, nw = res[1]
+            return "search", (mine_films + list(films), (total or 0) + len(mine_films), nw)
+
+        def job_catalogue():
             if en:
                 if shelf is not None and getattr(shelf, "feed", ""):
                     films = english.voa_feed(shelf.feed, 40) if off == 0 else []
@@ -424,6 +606,8 @@ class DiscoverPage(QWidget):
         self._run(job)
 
     def _render_results(self, films, total, new, keep_offset=False):
+        if total is None:                              # all the videos of one source
+            total = len(films)
         if new and not keep_offset:
             self._results = list(films)
         elif not keep_offset:
@@ -440,7 +624,9 @@ class DiscoverPage(QWidget):
             if it.widget():
                 it.widget().deleteLater()
         if new and not films:
-            self.status.setText("Nothing found. Try fewer or other words, another channel, or untick “With subtitles”.")
+            self.status.setText("Nothing found in your sources. Try other words, or press ＋ to add sources."
+                                if self.mine.isChecked() else
+                                "Nothing found. Try fewer or other words, another channel, or untick “With subtitles”.")
             self.bv.addStretch(1)
             return
         if not keep_offset:
@@ -474,7 +660,7 @@ class DiscoverPage(QWidget):
 
     def _show_info(self, f: mediathek.Film | None):
         self.dl_btn.setEnabled(f is not None)
-        self.q_btn.setEnabled(f is not None and f.channel not in ("VOA", "NASA", "BBC", "PBS", "TED", "NPR", "Podcast"))
+        self.q_btn.setEnabled(f is not None and f.channel not in ("VOA", "NASA", "BBC", "PBS", "TED", "NPR", "Podcast") + MINE)
         self.web_btn.setEnabled(bool(f and f.url_website))
         if f is None and self.lang == "en":
             self.info.setHtml(f"<p style='font-size:19pt;font-weight:800;color:{theme.CYAN};margin-bottom:6px'>Pick a programme</p>"
@@ -502,7 +688,11 @@ class DiscoverPage(QWidget):
                               "Settings ▸ Internet connection.</p>")
             return
         col = CH_COLOR.get(f.label, theme.VIOLET)
-        if f.channel in ("BBC", "PBS", "TED", "NPR", "Podcast"):
+        if f.channel in MINE:
+            cc = (f"<span style='color:{theme.DIM}'>from your source — " +
+                  ("the video is fetched from Telegram when you download it; " if f.channel == "Telegram" else "") +
+                  "SubPlayer makes the subtitles after downloading</span>")
+        elif f.channel in ("BBC", "PBS", "TED", "NPR", "Podcast"):
             cc = (f"<span style='color:{theme.GOLD};font-weight:700'>🎧 audio (podcast)</span><span style='color:{theme.DIM}'>"
                   " — offered for download by the broadcaster for personal listening; SubPlayer makes subtitles after "
                   "downloading</span>")

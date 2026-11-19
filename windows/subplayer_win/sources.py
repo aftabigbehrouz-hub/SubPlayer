@@ -130,9 +130,6 @@ def telegram_posts(page: str, channel: str, channel_title: str = "") -> list[Fil
         has_video = "tgme_widget_message_video_player" in p or "<video" in p
         if not has_video:
             continue
-        vids = [html.unescape(v) for v in re.findall(r'<video[^>]+src="([^"]+)"', p)]
-        vid = next((v for v in vids if ".mp4" in v.split("?")[0] or "telesco.pe" in v or "telegram" in v), vids[0] if vids else "")
-        too_big = not vid or "message_media_not_supported" in p or "not_supported" in p.split("tgme_widget_message_video_player", 1)[-1][:200]
         dur = re.search(r'message_video_duration[^>]*>([\d:]+)<', p)
         txt = re.search(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', p, re.S)
         text = _text(txt.group(1)) if txt else ""
@@ -146,12 +143,12 @@ def telegram_posts(page: str, channel: str, channel_title: str = "") -> list[Fil
                 ts = 0
         first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
         title = first[:140] + ("…" if len(first) > 140 else "") if first else f"Video {post.group(1).split('/')[-1]}"
-        note = "" if not too_big else "\n\n(Telegram shows this video only in the app — too big for its web view. " \
-                                      "Open it in Telegram and save it, then open the file in SubPlayer.)"
-        out.append(Film(channel="Telegram", topic=channel_title or channel, title=title, description=(text + note).strip()[:1500],
+        # the video address is fetched when downloading (the addresses on the page expire, and "Media is too big" posts
+        # still give their video when the post is opened on its own)
+        out.append(Film(channel="Telegram", topic=channel_title or channel, title=title, description=text.strip()[:1500],
                         timestamp=ts, duration=_clock(dur.group(1)) if dur else 0, size=0,
                         url_website=f"https://t.me/{post.group(1)}", url_subtitle="",
-                        url_video="" if too_big else vid, id="tg:" + post.group(1)))
+                        url_video="", id="tg:" + post.group(1)))
     return out
 
 
@@ -265,10 +262,20 @@ def feed_videos(src: Source, session=None) -> list[Film]:
 
 
 # ------------------------------------------------------------------ pages
+QUALITY = re.compile(r"\.(webs|webm|webl|webxl|webxxl)(?=\.)|[_-](\d{3,4}p|hq|lq|sd|hd|fullhd|low|high|mobile)(?=\.)|"
+                     r"[_-]\d{3,4}x\d{3,4}(?=\.)")
+
+
 def page_videos(src: Source, session=None) -> list[Film]:
     page = _get(src.url, session).text[:5_000_000]
     text = page.replace("\\/", "/").replace("\\u002F", "/").replace("&amp;", "&")
     urls = list(dict.fromkeys(m.group(0) for m in linkimport.VIDEO_URL.finditer(text)))
+    groups: dict[str, list[str]] = {}
+    for u in urls:                                   # the same video in several qualities: one entry, the best quality
+        name = urllib.parse.unquote(u.split("?")[0].rsplit("/", 1)[-1])
+        key = QUALITY.sub("", name.lower())
+        groups.setdefault(key, []).append(u)
+    urls = [max(g, key=linkimport.score) for g in groups.values()]
     title = _page_title(page) or src.name
     out = []
     for u in urls[:60]:

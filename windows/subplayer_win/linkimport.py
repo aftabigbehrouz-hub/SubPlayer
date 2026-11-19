@@ -244,6 +244,14 @@ def resolve(url: str, session=None) -> Found:
     if HLS.search(path_q):
         return Found(u, Path(parsed.path).stem or "video", hls=True)
     s = session or requests.Session()
+    tg = re.match(r"^https?://(?:www\.)?(?:t\.me|telegram\.me)/(?:s/)?([A-Za-z0-9_]+)/(\d+)", u)
+    if tg:                                       # a post of a public Telegram channel: its video, fetched fresh
+        from . import sources
+        v = sources.fresh_video(u, s)
+        if not v:
+            raise ValueError("Telegram doesn't offer this video outside its app (or the post has no video). Open the post in "
+                             "Telegram, save the video, then open the file in SubPlayer.")
+        return Found(v, f"Telegram {tg.group(1)} {tg.group(2)}")
     nm = re.search(r"images\.nasa\.gov/details/([^/?#]+)", u)
     if nm:
         from . import english
