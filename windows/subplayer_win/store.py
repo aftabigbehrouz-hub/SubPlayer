@@ -76,6 +76,7 @@ class Question:
     last_review: int = 0
     uid: str = ""
     id: int = 0
+    passage: str = ""              # the text the question is about (a reading paragraph) — shown above it in Review
 
     @staticmethod
     def of(r) -> "Question":
@@ -86,7 +87,16 @@ class Question:
         return Question(r["question"] or "", r["answer"] or "", opts if isinstance(opts, list) else [], r["explanation"] or "",
                         r["kind"] or "", r["lang"] or "de", r["lemma"] or "", r["video_name"] or "", r["source"] or "",
                         r["created"] or 0, r["reviews"] or 0, r["correct"] or 0, r["box"] or 0, r["due"] or 0,
-                        r["last_review"] or 0, r["uid"] or "", r["id"])
+                        r["last_review"] or 0, r["uid"] or "", r["id"], _col(r, "passage"))
+
+
+def _col(r, name: str, default=""):
+    """A column added in a later version (an old row read before the table was migrated has none)."""
+    try:
+        v = r[name]
+    except (IndexError, KeyError):
+        return default
+    return default if v is None else v
 
 
 @dataclass
@@ -107,12 +117,13 @@ class Note:
     last_review: int = 0
     starred: int = 0
     id: int = 0
+    at_ms: int = -1                # where in the video the line was (−1: not known)
 
 
 def _note(r) -> Note:
     return Note(r["title"] or "", r["body"] or "", r["kind"] or "", r["lang"] or "de", r["lemma"] or "", r["video_name"] or "",
                 r["source"] or "", r["created"] or 0, r["reviews"] or 0, r["correct"] or 0, r["box"] or 0, r["due"] or 0,
-                r["last_review"] or 0, r["starred"] or 0, r["id"])
+                r["last_review"] or 0, r["starred"] or 0, r["id"], int(_col(r, "at_ms", -1)))
 
 
 def review(w, got_it: bool, now: int):
@@ -165,6 +176,12 @@ class WordStore:
                 box INTEGER DEFAULT 0, due INTEGER, last_review INTEGER DEFAULT 0, starred INTEGER DEFAULT 0);
             CREATE INDEX IF NOT EXISTS notes_due ON notes(due);
         """)
+        # 2.9.2: synonyms kept with the collocations, the reading text of a question, the video moment of a note
+        for table, col, decl in (("collocations", "kind", "TEXT DEFAULT ''"), ("questions", "passage", "TEXT DEFAULT ''"),
+                                 ("notes", "at_ms", "INTEGER DEFAULT -1")):
+            have = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if col not in have:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
         self.db.commit()
 
     # ------------------------------------------------------------- words
@@ -283,7 +300,8 @@ class WordStore:
 
     # ------------------------------------------------------------- collocations (from the teacher; kept per base word)
     def collocations(self, lang: str, lemma: str) -> list[dict]:
-        return [dict(id=r["id"], phrase=r["phrase"] or "", meaning=r["meaning"] or "", example=r["example"] or "")
+        return [dict(id=r["id"], phrase=r["phrase"] or "", meaning=r["meaning"] or "", example=r["example"] or "",
+                     kind=r["kind"] or "")
                 for r in self.db.execute("SELECT * FROM collocations WHERE lang=? AND lemma=? ORDER BY id",
                                          (lang or "de", (lemma or "").lower()))]
 
@@ -295,9 +313,9 @@ class WordStore:
             if not ph or ph.lower() in have:
                 continue
             have.add(ph.lower())
-            self.db.execute("INSERT INTO collocations(lang,lemma,phrase,meaning,example,created) VALUES(?,?,?,?,?,?)",
+            self.db.execute("INSERT INTO collocations(lang,lemma,phrase,meaning,example,created,kind) VALUES(?,?,?,?,?,?,?)",
                             (lang or "de", (lemma or "").lower(), ph, str(c.get("meaning", "")).strip(),
-                             str(c.get("example", "")).strip(), now_ms()))
+                             str(c.get("example", "")).strip(), now_ms(), "syn" if c.get("kind") == "syn" else ""))
             n += 1
         self.db.commit()
         return n
@@ -323,18 +341,22 @@ class WordStore:
 
     def add_questions(self, items: list["Question"]) -> int:
         """Adds new questions (the same question text is not added twice); returns how many were new."""
-        have = {r["question"].strip().lower() for r in self.db.execute("SELECT question FROM questions")}
+        rows = {r["question"].strip().lower(): (r["id"], r["passage"] or "")
+                for r in self.db.execute("SELECT id, question, passage FROM questions")}
+        have = set(rows)
         n = 0
         for x in items:
             k = x.question.strip().lower()
+            if k in rows and (x.passage or "").strip() and not rows[k][1]:      # pasted again, now with its text
+                self.db.execute("UPDATE questions SET passage=? WHERE id=?", (x.passage.strip(), rows[k][0]))
             if not k or k in have:
                 continue
             have.add(k)
             t = now_ms()
             self.db.execute("INSERT INTO questions(uid,lang,lemma,video_name,source,kind,question,options,answer,explanation,"
-                            "created,reviews,correct,box,due,last_review) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,0)",
+                            "created,reviews,correct,box,due,last_review,passage) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,0,?)",
                             (str(uuid.uuid4()), x.lang, (x.lemma or "").lower(), x.video_name, x.source, x.kind, x.question.strip(),
-                             json.dumps(x.options, ensure_ascii=False), x.answer, x.explanation, t, t))
+                             json.dumps(x.options, ensure_ascii=False), x.answer, x.explanation, t, t, (x.passage or "").strip()))
             n += 1
         self.db.commit()
         return n
@@ -350,25 +372,46 @@ class WordStore:
         old = self.db.execute("SELECT id FROM notes WHERE kind=? AND lower(title)=lower(?) AND lang=?",
                               (n.kind, n.title.strip(), n.lang)).fetchone()
         if old:
-            self.db.execute("UPDATE notes SET body=?, source=?, created=? WHERE id=?", (n.body, n.source, now_ms(), old["id"]))
+            self.db.execute("UPDATE notes SET body=?, source=?, created=?, lemma=CASE WHEN COALESCE(lemma,'')='' THEN ? ELSE lemma END, "
+                            "video_name=CASE WHEN COALESCE(video_name,'')='' THEN ? ELSE video_name END, "
+                            "at_ms=CASE WHEN COALESCE(at_ms,-1)<0 THEN ? ELSE at_ms END WHERE id=?",
+                            (n.body, n.source, now_ms(), (n.lemma or "").lower(), n.video_name or "",
+                             int(n.at_ms if n.at_ms is not None else -1), old["id"]))
             self.db.commit()
             return old["id"]
         cur = self.db.execute("INSERT INTO notes(lang,kind,lemma,title,body,video_name,source,created,reviews,correct,box,due,"
-                              "last_review,starred) VALUES(?,?,?,?,?,?,?,?,0,0,0,?,0,0)",
+                              "last_review,starred,at_ms) VALUES(?,?,?,?,?,?,?,?,0,0,0,?,0,0,?)",
                               (n.lang, n.kind, (n.lemma or "").lower(), n.title.strip(), n.body, n.video_name, n.source, now_ms(),
-                               now_ms() + DAY))                       # first review the next day
+                               now_ms() + DAY, int(n.at_ms if n.at_ms is not None else -1)))                       # first review the next day
         self.db.commit()
         return cur.lastrowid
 
-    def notes(self, search: str = "", kind: str = "") -> list:
+    def notes(self, search: str = "", kind: str = "", lemma: str | None = None, video_name: str = "") -> list:
         q, args = "SELECT * FROM notes WHERE 1=1", []
         if kind:
             q += " AND kind=?"
             args.append(kind)
+        if lemma is not None:                             # "" = answers that belong to no word (a line, a text …)
+            q += " AND lower(COALESCE(lemma,''))=?"
+            args.append(lemma.lower())
+        if video_name:
+            q += " AND video_name=?"
+            args.append(video_name)
         if search.strip():
             q += " AND (title LIKE ? OR body LIKE ? OR lemma LIKE ?)"
             args += [f"%{search.strip()}%"] * 3
         return [_note(r) for r in self.db.execute(q + " ORDER BY created DESC, id DESC", args)]
+
+    def note_words(self) -> list[tuple[str, int]]:
+        """The words / phrases the Notebook's answers belong to, with how many answers each has (most first)."""
+        return [(r[0], r[1]) for r in self.db.execute(
+            "SELECT lower(lemma), COUNT(*) FROM notes WHERE COALESCE(lemma,'')<>'' GROUP BY lower(lemma) ORDER BY COUNT(*) DESC, lower(lemma)")]
+
+    def note_count(self, lemmas) -> int:
+        ks = sorted({(x or "").lower() for x in lemmas if x})
+        if not ks:
+            return 0
+        return self.db.execute(f"SELECT COUNT(*) FROM notes WHERE lower(lemma) IN ({','.join('?' * len(ks))})", ks).fetchone()[0]
 
     def due_notes(self, now: int) -> list:
         return [_note(r) for r in self.db.execute("SELECT * FROM notes WHERE due<=? ORDER BY reviews ASC, box ASC, due ASC", (now,))]

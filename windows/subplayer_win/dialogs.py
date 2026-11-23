@@ -157,16 +157,18 @@ class AddSentencesDialog(QDialog):
 
     def add(self):
         from . import ollama
-        from .teacher import collocations_of, word_from_text
+        from .teacher import collocations_of, synonym_examples, word_from_text
         raw = practice.clean_ai(self.text.toPlainText())                       # &#x20;, line-end backslashes, ``` fences
         d = ollama.parse_json(raw)
         if d:                                                                  # a JSON answer (the teacher's format)
             cols = collocations_of(d)
             items = [Example(de=str(x.get("sentence", "")).strip(), en=str(x.get("translation", "")))
                      for x in ollama.as_list(d.get("examples")) if isinstance(x, dict) and x.get("sentence")]
+            items += synonym_examples(d)
         else:
-            cols, rest = practice.split_collocations(raw)                     # collocation lines / table rows go to Collocations
+            cols, rest = practice.split_collocations(raw)                     # collocation / SYN lines, table rows → Collocations
             items = practice.parse_sentences(rest, primary=self.word.lang)
+            items += synonym_examples({"collocations": cols})                  # the synonyms' sentences → Sentences
         if not items and not cols:
             self.info.setText("No sentences found. Each line should look like the format above.")
             return
@@ -174,9 +176,11 @@ class AddSentencesDialog(QDialog):
         n = self.main.store.add_examples(w.id, items) if items else 0
         k = self.main.store.add_collocations(w.lang, w.text if " " in w.text.strip() else (w.lemma or w.text), cols) if cols else 0
         self.main.after_change()
+        ns = sum(1 for c in cols if c.get("kind") == "syn")
         self.main.msg("Those sentences are already saved" if n == 0 and k == 0 else
                       " · ".join(x for x in (f"{n} sentence(s) added (review and practice)" if n else "",
-                                             f"{k} collocation(s) added" if k else "") if x))
+                                             f"{k} collocation(s) / synonym(s) added" if k else "",
+                                             f"{ns} synonym(s) in the answer" if ns else "") if x))
         self.accept()
 
 
@@ -191,7 +195,8 @@ class WordEditDialog(QDialog):
         self.setMinimumSize(640, 640)
         v = QVBoxLayout(self)
         v.addWidget(title(f"„{word.text}“ — edit / add" if word else "A new word for My Words", 17))
-        v.addWidget(hint("Everything here is optional except the word. Collocations: one per line — phrase | meaning | example. "
+        v.addWidget(hint("Everything here is optional except the word. Collocations: one per line — phrase | meaning | example "
+                         "(start a line with ≈ for a synonym: ≈ prima | great | Das ist prima!). "
                          "Sentences: one per line — sentence | translation | Persian (or just the sentence)."))
         f = QFormLayout()
         self.f_text = QLineEdit(word.text if word else "")
@@ -214,7 +219,7 @@ class WordEditDialog(QDialog):
             self.f_text.setReadOnly(True)
             self.f_lang.setEnabled(False)
         v.addLayout(f)
-        v.addWidget(QLabel("Collocations to add", objectName="small"))
+        v.addWidget(QLabel("Collocations and synonyms (≈) to add", objectName="small"))
         self.f_cols = QPlainTextEdit(placeholderText="etliche Male | several times | Ich war etliche Male dort.")
         v.addWidget(self.f_cols, 1)
         v.addWidget(QLabel("Sentences to add", objectName="small"))
@@ -253,20 +258,27 @@ class WordEditDialog(QDialog):
             raw = box.toPlainText()
             if raw.strip() and practice.looks_like_ai_answer(raw):
                 from . import ollama
-                from .teacher import collocations_of, word_from_text
+                from .teacher import collocations_of, synonym_examples, word_from_text
                 t = practice.clean_ai(raw)
                 d = ollama.parse_json(t) or word_from_text(t, w.lang)
                 cols += collocations_of(d)
                 sents += [Example(de=str(x.get("sentence", "")).strip(), en=str(x.get("translation", "")))
                           for x in ollama.as_list(d.get("examples")) if isinstance(x, dict) and x.get("sentence")]
+                sents += synonym_examples(d)
                 if not w.english and isinstance(d.get("meaning"), str):
                     w.english = d["meaning"][:200]
                 box.setPlainText("")
         st.update(w)
         for line in practice.clean_ai(self.f_cols.toPlainText()).splitlines():
+            import re as _re
+            syn = bool(_re.match(r"^\s*(≈|SYN\s*:)", line, _re.I))           # "≈ prima | great | …" or "SYN: …" = a synonym
+            line = _re.sub(r"^\s*(≈|SYN\s*:)\s*", "", line, flags=_re.I)
             p = [x.strip() for x in line.split("|")]
             if p and p[0]:
-                cols.append({"phrase": p[0], "meaning": p[1] if len(p) > 1 else "", "example": p[2] if len(p) > 2 else ""})
+                cols.append({"phrase": p[0], "meaning": p[1] if len(p) > 1 else "", "example": p[2] if len(p) > 2 else "",
+                             "kind": "syn" if syn else ""})
+                if syn and len(p) > 2 and len(p[2].split()) >= 3:
+                    sents.append(Example(de=p[2]))
         k = st.add_collocations(w.lang, w.text if " " in w.text.strip() else (w.lemma or w.text), cols) if cols else 0
         for line in practice.clean_ai(self.f_sents.toPlainText()).splitlines():
             p = [x.strip() for x in line.split("|")]
@@ -288,10 +300,13 @@ class QuestionDialog(QDialog):
         super().__init__(parent)
         self.main, self.lang, self.lemma, self.video = main, lang, lemma, video
         self.setWindowTitle("Write a question")
-        self.setMinimumSize(600, 520)
+        self.setMinimumSize(600, 620)
         v = QVBoxLayout(self)
         v.addWidget(title(("IELTS" if lang == "en" else "TestDaF") + " question" + (f" on „{lemma}“" if lemma else ""), 17))
-        v.addWidget(QLabel("Question (a short text can go in it too)", objectName="small"))
+        v.addWidget(QLabel("The text it is about (optional — a reading paragraph; shown above the question in Review)", objectName="small"))
+        self.t = QPlainTextEdit()
+        v.addWidget(self.t, 1)
+        v.addWidget(QLabel("Question", objectName="small"))
         self.q = QPlainTextEdit()
         v.addWidget(self.q, 1)
         v.addWidget(QLabel("Choices — one per line (empty for an open question). E.g. richtig / falsch, or A) … B) … C) …", objectName="small"))
@@ -318,7 +333,7 @@ class QuestionDialog(QDialog):
         opts = [x.strip() for x in self.o.toPlainText().splitlines() if x.strip()]
         n = self.main.store.add_questions([Question(question=q, answer=a, options=opts, explanation=self.e.text().strip(),
                                                     kind=questions._kind(opts), lang=self.lang, lemma=self.lemma,
-                                                    video_name=self.video, source="mine")])
+                                                    video_name=self.video, source="mine", passage=self.t.toPlainText().strip())])
         self.main.after_change()
         self.main.msg("Question added to Review ✓" if n else "That question is already in Review")
         self.accept()

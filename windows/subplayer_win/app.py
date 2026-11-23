@@ -382,6 +382,9 @@ class Main(QMainWindow):
         g.addWidget(b_sent, 1, 0)
         g.addWidget(b_teach, 1, 1)
         g.addWidget(self.learn_btn, 1, 2)
+        b_para = ibtn("paraphrase", "Paraphrase the sentence of this word: the same meaning at A1, A2, B1, B2 and C1 (P)",
+                      lambda: self.open_teacher(6) if self.card else self.paraphrase_line(), kind="", text=" Paraphrase the sentence (A1 → C1)")
+        g.addWidget(b_para, 2, 0, 1, 3)
         cv.addLayout(g)
         self.panel_stack.addWidget(card_page)
 
@@ -464,7 +467,7 @@ class Main(QMainWindow):
                         ("F", self.toggle_fullscreen), ("F11", self.toggle_fullscreen),
                         ("G", lambda: self.shift_subs(-100)), ("H", lambda: self.shift_subs(100)), ("V", lambda: self.hide_btn.click()),
                         ("Ctrl+T", lambda: self.trl_btn.click()), ("T", lambda: self.panel_tab(1 if self.panel_stack.currentIndex() == 0 else 0, show=True)),
-                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("K", lambda: self.lvl_btn.click()), ("E", lambda: self.edit_cue()), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
+                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("K", lambda: self.lvl_btn.click()), ("E", lambda: self.edit_cue()), ("P", lambda: self.paraphrase_line()), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
                         ("Ctrl+=", lambda: self.step_sub_size(1)), ("Ctrl++", lambda: self.step_sub_size(1)), ("Ctrl+-", lambda: self.step_sub_size(-1))):
             QShortcut(QKeySequence(key), page, activated=fn, context=Qt.WidgetWithChildrenShortcut)
         self.ticker = QTimer(self, interval=40, timeout=self._tick)
@@ -580,7 +583,10 @@ class Main(QMainWindow):
         self.lvl_btn.setContextMenuPolicy(Qt.CustomContextMenu)
         self.lvl_btn.customContextMenuRequested.connect(lambda _: self.level_menu())
         self.edit_btn = ibtn("edit", "Correct this subtitle line (E) — text and timing", lambda: self.edit_cue(), size=17)
-        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.lvl_btn, self.edit_btn, self.trs_btn):
+        self.para_btn = ibtn("paraphrase", "Paraphrase this line (P): the same meaning said at A1, A2, B1, B2 and C1 — the teacher's "
+                                           "A1 → C1, with translations. The video pauses; a line you paraphrased before opens at once.",
+                             lambda: self.paraphrase_line(), size=17, color=theme.CYAN)
+        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.lvl_btn, self.para_btn, self.edit_btn, self.trs_btn):
             tools.addWidget(b)
         tools.addStretch(1)
         sl.addLayout(tools)
@@ -1981,12 +1987,16 @@ class Main(QMainWindow):
                     "2) IPA (UK and US) and word forms.\n"
                     "2b) 6 typical collocations (verb + noun, adjective + noun, with prepositions), one per line, in this format:\n"
                     "COLL: collocation | meaning | short example sentence\n"
+                    "2c) 4 synonyms or near-synonyms, one per line, in this format:\n"
+                    "SYN: synonym | meaning and how it differs | an example sentence that uses the synonym\n"
                     "3) Exactly 3 natural example sentences of everyday English, one per line, in this format:\nEN: … | DE: … | FA: …")
         return (f"Explain the German word „{word}“" + (f" as used in: „{s}“" if s else "") + ".\n"
                 "1) Meaning in English and in Persian.\n"
                 "2) IPA; for nouns article and plural, for verbs Präteritum and Perfekt; the preposition or case it goes with.\n"
                 "2b) 6 typical collocations (Kollokationen: Nomen-Verb-Verbindungen, Adjektiv + Nomen, feste Wendungen), one per line, in this format:\n"
                 "KOLL: Kollokation | meaning in English | kurzer Beispielsatz\n"
+                "2c) 4 Synonyme (Wörter, die man stattdessen sagen kann), one per line, in this format:\n"
+                "SYN: Synonym | meaning in English and how it differs | ein Beispielsatz mit dem Synonym\n"
                 "3) Exactly 3 natural example sentences (Beispielsätze) of everyday German, one per line, in this format:\nDE: … | EN: … | FA: …")
 
     def ask_ai(self, source: str, question: str, after: str = ""):
@@ -2003,7 +2013,7 @@ class Main(QMainWindow):
     def learn_more(self, source, word, sentence, lang):
         q = urllib.parse.quote
         if source in lessons_assistants():
-            self.ask_ai(source, self.ai_prompt(word, sentence, lang), "Then copy the 3 sentences back and use ＋ Add sentences.")
+            self.ask_ai(source, self.ai_prompt(word, sentence, lang), "Then copy the whole answer and use ＋ Add sentences — collocations and synonyms go to Collocations.")
             return
         elif source == "dwds":
             url = "https://www.dwds.de/wb/" + q(word)
@@ -2029,7 +2039,7 @@ class Main(QMainWindow):
             self.msg("Click a word in the subtitles first")
             return
         lemma = c["entries"][0].lemma if c.get("entries") else c["word"]
-        self.teacher_for(c["word"], lemma, c["sentence"], c["lang"], self.ensure_saved_from_card, tab)
+        self.teacher_for(c["word"], lemma, c["sentence"], c["lang"], self.ensure_saved_from_card, tab, at_ms=c.get("start", -1))
 
     def ensure_teacher(self) -> bool:
         """True when a local model is chosen; otherwise opens the set-up (Settings ▸ Local AI teacher) first."""
@@ -2042,17 +2052,21 @@ class Main(QMainWindow):
         d.exec()
         return bool(self.settings.get("ollama_model"))
 
-    def teacher_for(self, word, lemma, sentence, lang, saved_getter=None, tab: int = 0):
+    def teacher_for(self, word, lemma, sentence, lang, saved_getter=None, tab: int = 0, at_ms: int | None = None,
+                    video: str | None = None):
         from .teacher import TeacherDialog                 # Ollama or an online assistant — chosen in the window
-        d = TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab)      # not modal: the video keeps playing
+        if at_ms is None:                                  # the line of the word card / of the player, if it is this one
+            c = self.card or {}
+            at_ms = c.get("start", -1) if c.get("sentence") and " ".join(c["sentence"].split()) == " ".join((sentence or "").split()) else -1
+        d = TeacherDialog(self, word, lemma, sentence, lang, saved_getter, tab, at_ms, video)      # not modal: the video keeps playing
         self._teachers = [t for t in getattr(self, "_teachers", []) if t.isVisible()] + [d]
         d.destroyed.connect(lambda *_: setattr(self, "_teachers", [t for t in self._teachers if t is not d]))
         d.show()
         d.raise_()
 
-    def notebook(self, review_first: bool = False):
+    def notebook(self, review_first: bool = False, lemma: str | None = None):
         from .notebook import NotebookDialog
-        d = NotebookDialog(self, review_first)
+        d = NotebookDialog(self, review_first, lemma)
         self._notebooks = [x for x in getattr(self, "_notebooks", []) if x.isVisible()] + [d]
         d.show()
         d.raise_()
@@ -2720,8 +2734,25 @@ class Main(QMainWindow):
         m.addAction("Play this line", lambda: self._transcript_click(it))
         m.addAction("Loop this line", lambda: self._transcript_loop(it))
         m.addSeparator()
+        m.addAction("Paraphrase this line (A1 → C1)  (P)", lambda: self.paraphrase_line(k))
         m.addAction("Correct this line…  (E)", lambda: self.edit_cue(k))
         m.exec(self.transcript.viewport().mapToGlobal(pos))
+
+    def paraphrase_line(self, i: int | None = None):
+        """The teacher's A1 → C1 on the whole sentence that is playing (or line i): the same meaning at five levels."""
+        if not self.cues:
+            self.msg("Open a video with subtitles first")
+            return
+        if i is None:
+            i = max(0, subtitles.index_before(self.cues, self.cpos()))
+        i = min(i, len(self.cues) - 1)
+        text = self.unit_text(i)
+        if len(text.split()) < 2:
+            self.msg("This line is too short to paraphrase")
+            return
+        self.player.pause()
+        a, _ = self.units()[i]
+        self.teacher_for("", "", text, self.cue_lang, None, 6, at_ms=self.cues[a].start_ms + self.sub_offset)
 
     # ================================================================== translate the whole subtitle
     def _tr_file(self, tgt: str) -> Path:

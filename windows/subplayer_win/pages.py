@@ -40,6 +40,25 @@ def highlight(sentence: str, word: str) -> str:
     return f"{s[:i]}<span style='color:{theme.GOLD};font-weight:700'>{s[i:j]}</span>{s[j:]}"
 
 
+def passage_html(text: str) -> str:
+    """The text an exam question is about, in a box above the question (Review and Practice)."""
+    if not (text or "").strip():
+        return ""
+    paras = [p.strip() for p in text.replace("\r", "").split("\n") if p.strip()]
+    body = "".join(f"<p style='margin:0 0 6px 0'>{html.escape(p)}</p>" for p in paras)
+    return (f"<table width='100%' cellspacing=0 cellpadding=10 style='margin-bottom:8px'><tr><td style='background:#16133A;"
+            f"border-left:3px solid {theme.CYAN};font-size:11pt;line-height:145%'>"
+            f"<p style='color:{theme.CYAN};font-size:8.5pt;font-weight:700;letter-spacing:1px;margin:0 0 6px 0'>📖 TEXT</p>"
+            f"{body}</td></tr></table>")
+
+
+def _contains_word(sentence: str, w) -> bool:
+    """The word itself (or its base form / a form starting like it) is in the sentence."""
+    t = sentence.lower()
+    base = (w.lemma or w.text).lower()
+    return w.text.lower() in t or base in t or (len(base) >= 5 and base[:max(4, len(base) - 3)] in t)
+
+
 def sentences_of(main, w):
     """The video line first, then added example sentences (sentence, translation, persian)."""
     out = []
@@ -309,6 +328,9 @@ class WordsPage(QWidget):
         self.v_sent = QTextBrowser(openLinks=False)
         self.v_sent.anchorClicked.connect(self._link)
         self.p_sent.body.addWidget(self.v_sent, 1)
+        self.p_sent.add_button(ibtn("paraphrase", "Paraphrase the video line: the same meaning at A1, A2, B1, B2 and C1 (the teacher's "
+                                    "A1 → C1). The ≈ link after each sentence paraphrases that one.", lambda: self.paraphrase(),
+                                    kind="chip", text=" Paraphrase", size=13))
         self.p_sent.add_button(ibtn("plus", "Add sentences (paste an AI answer)", self.add_sentences, kind="chip", size=13))
         self.p_coll = Pane("Collocations", self.toggle_pane)
         self.v_coll = QTextBrowser(openLinks=False)
@@ -360,6 +382,25 @@ class WordsPage(QWidget):
             cat = "noun"
         self._pos[w.id] = cat
         return cat
+
+    def open_lemma(self, lemma: str, lang: str = "") -> bool:
+        """Shows this word (or phrase) in My Words — all filters cleared. False when it isn't saved."""
+        k = (lemma or "").strip().lower()
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.video_box.blockSignals(True)
+        self.video_box.setCurrentIndex(0)
+        self.video_box.blockSignals(False)
+        self.day = None
+        self.day_lbl.hide()
+        self.set_cat("all", refresh=False)
+        self.refresh()
+        for i, w in enumerate(self.words):
+            if k in (w.text.lower(), (w.lemma or "").lower()) and (not lang or w.lang == lang):
+                self.list.setCurrentRow(i)
+                return True
+        return False
 
     def set_cat(self, k, refresh=True):
         self.cat = k
@@ -679,15 +720,26 @@ class WordsPage(QWidget):
         self.fill_sentences(w)
         self.fill_collocations(w)
 
+    def _cols_of(self, w) -> list[dict]:
+        cols = self.main.store.collocations(w.lang, w.lemma or w.text)
+        if not cols and (w.lemma or w.text).lower() != w.text.lower():
+            cols = self.main.store.collocations(w.lang, w.text)
+        return cols
+
     def fill_sentences(self, w):
         h = ["<div style='font-size:10.5pt;line-height:140%'>"]
         exs = self.main.store.examples(w.id)
+        syns = [c["phrase"] for c in self._cols_of(w) if c.get("kind") == "syn" and c["phrase"]]
+        para = f"<a href='para:{{k}}' style='color:{theme.VIOLET};text-decoration:none'>≈&nbsp;A1‑C1</a>"
         if w.sentence:
             h.append(f"<p><a href='play:' style='color:{theme.MAGENTA};text-decoration:none'>▶ video</a>&nbsp; "
-                     f"{highlight(w.sentence, w.text)}</p>")
+                     f"{highlight(w.sentence, w.text)} {para.format(k='v')}</p>")
         for e in exs:
-            h.append(f"<p style='margin-bottom:0'>{highlight(e.de, w.text)} "
-                     f"<a href='say:{e.id}' style='color:{theme.CYAN};text-decoration:none'>🔊</a> "
+            syn = "" if _contains_word(e.de, w) else next((x for x in syns if x.lower() in e.de.lower()), "")
+            body = highlight(e.de, syn) if syn else highlight(e.de, w.text)
+            tag = (f"<span style='color:{theme.MINT};font-size:9pt'>≈ {html.escape(syn)}</span>&nbsp; " if syn else "")
+            h.append(f"<p style='margin-bottom:0'>{tag}{body} "
+                     f"<a href='say:{e.id}' style='color:{theme.CYAN};text-decoration:none'>🔊</a> {para.format(k=e.id)} "
                      f"<a href='del:{e.id}' style='color:{theme.DIM};text-decoration:none'>✕</a></p>")
             if e.en:
                 h.append(f"<p style='color:{theme.DIM};margin:0'>{html.escape(e.en)}</p>")
@@ -701,28 +753,44 @@ class WordsPage(QWidget):
         self.p_sent.count.setText(f"· {len(exs) + (1 if w.sentence else 0)}")
 
     def fill_collocations(self, w):
-        cols = self.main.store.collocations(w.lang, w.lemma or w.text)
-        if not cols and (w.lemma or w.text).lower() != w.text.lower():
-            cols = self.main.store.collocations(w.lang, w.text)
+        allc = self._cols_of(w)
+        cols = [c for c in allc if c.get("kind") != "syn"]
+        syns = [c for c in allc if c.get("kind") == "syn"]
         qs = self.main.store.questions(lang=w.lang, lemma=w.lemma or w.text)
         e_ = html.escape
-        h = ["<div style='font-size:10.5pt;line-height:140%'><table cellspacing=0 cellpadding=3 width='100%'>"]
-        for c in cols:
-            h.append(f"<tr><td style='color:{theme.GOLD};font-weight:600;padding-right:10px'>{e_(c['phrase'])}</td>"
-                     f"<td>{e_(c['meaning'])} <a href='delc:{c['id']}' style='color:{theme.DIM};text-decoration:none'>✕</a></td></tr>")
-            if c["example"]:
-                h.append(f"<tr><td></td><td style='color:{theme.DIM};font-style:italic'>{e_(c['example'])} "
-                         f"<a href='sayt:{_q(c['example'])}' style='color:{theme.CYAN};text-decoration:none'>🔊</a></td></tr>")
-        h.append("</table>")
-        if not cols:
-            h.append(f"<p style='color:{theme.DIM}'>No collocations yet. <a href='teach:' style='color:{theme.CYAN}'>Ask the "
+
+        def rows(items, color, mark=""):
+            out = ["<table cellspacing=0 cellpadding=3 width='100%'>"]
+            for c in items:
+                out.append(f"<tr><td style='color:{color};font-weight:600;padding-right:10px'>{mark}{e_(c['phrase'])}</td>"
+                           f"<td>{e_(c['meaning'])} <a href='delc:{c['id']}' style='color:{theme.DIM};text-decoration:none'>✕</a></td></tr>")
+                if c["example"]:
+                    out.append(f"<tr><td></td><td style='color:{theme.DIM};font-style:italic'>{e_(c['example'])} "
+                               f"<a href='sayt:{_q(c['example'])}' style='color:{theme.CYAN};text-decoration:none'>🔊</a></td></tr>")
+            out.append("</table>")
+            return out
+
+        h = ["<div style='font-size:10.5pt;line-height:140%'>"]
+        h += rows(cols, theme.GOLD)
+        if syns:
+            h.append(f"<p style='color:{theme.MINT};font-weight:700;letter-spacing:1px;margin:12px 0 2px 0'>SYNONYMS</p>")
+            h += rows(syns, theme.MINT, "≈ ")
+        if not allc:
+            h.append(f"<p style='color:{theme.DIM}'>No collocations or synonyms yet. <a href='teach:' style='color:{theme.CYAN}'>Ask the "
                      "teacher</a> (Ollama, ChatGPT, Gemini, DeepSeek or Grok), or <a href='edit:' style='color:{theme.CYAN}'>write "
                      "them yourself</a>.</p>")
+        elif not syns:
+            h.append(f"<p style='color:{theme.DIM};margin-top:10px'>No synonyms yet — <a href='teach:' style='color:{theme.CYAN}'>ask "
+                     "the teacher</a> again (New answer): it now gives synonyms with example sentences.</p>")
         if qs:
             h.append(f"<p style='color:{theme.DIM};margin-top:10px'>📝 {len(qs)} exam question(s) on this word are in Review.</p>")
+        nn = self.main.store.note_count({w.lemma or w.text, w.text})
+        if nn:
+            h.append(f"<p style='margin-top:6px'><a href='notes:' style='color:{theme.CYAN};text-decoration:none'>📓 {nn} answer(s) "
+                     "of the teacher on this word in the Notebook</a></p>")
         h.append("</div>")
         self.v_coll.setHtml("".join(h))
-        self.p_coll.count.setText(f"· {len(cols)}" if cols else "")
+        self.p_coll.count.setText(f"· {len(allc)}" if allc else "")
 
     def _link(self, url):
         kind, _, val = url.toString().partition(":")
@@ -740,7 +808,15 @@ class WordsPage(QWidget):
             return self.main.speak(urllib.parse.unquote(val), lang=w.lang)
         if kind == "delc":
             self.main.store.delete_collocation(int(val))
-            return self.fill_collocations(w)
+            self.fill_collocations(w)
+            return self.fill_sentences(w)
+        if kind == "notes":
+            return self.main.notebook(lemma=w.lemma or w.text)
+        if kind == "para":
+            if val == "v":
+                return self.paraphrase(w.sentence)
+            ex = next((e for e in self.main.store.examples(w.id) if str(e.id) == val), None)
+            return self.paraphrase(ex.de) if ex else None
         ex = next((e for e in self.main.store.examples(w.id) if str(e.id) == val), None)
         if ex and kind == "say":
             self.main.speak(ex.de, lang=w.lang)
@@ -813,7 +889,22 @@ class WordsPage(QWidget):
     def teacher(self):
         w = self.current()
         if w:
-            self.main.teacher_for(w.text, w.lemma or w.text, w.sentence, w.lang, lambda: w, 0)
+            self.main.teacher_for(w.text, w.lemma or w.text, w.sentence, w.lang, lambda: w, 0, at_ms=w.start_ms, video=w.video_name)
+
+    def paraphrase(self, sentence: str | None = None):
+        """The teacher's A1 → C1 tab on the word's video line (or one of its sentences): the same meaning at five levels."""
+        w = self.current()
+        if not w:
+            return
+        s = (sentence if sentence is not None else w.sentence) or ""
+        if not s.strip():
+            exs = self.main.store.examples(w.id)
+            s = exs[0].de if exs else ""
+        if not s.strip():
+            self.main.msg("This word has no sentence yet — add one (＋ in Sentences) to paraphrase it")
+            return
+        self.main.teacher_for(w.text, w.lemma or w.text, s, w.lang, lambda: w, 6,
+                              at_ms=w.start_ms if s == w.sentence else -1, video=w.video_name)
 
     def play(self):
         w = self.current()
@@ -958,8 +1049,13 @@ class ReviewPage(QWidget):
         self.render()
 
     def show_question(self):
+        from . import questions
         q = self.cur
         self.sent = None
+        try:
+            self.passage = questions.passage_of(q)          # its reading text (or the lesson's), shown above the question
+        except Exception:
+            self.passage = ""
         exam = "IELTS" if q.lang == "en" else "TestDaF"
         self.head.setText(f"{self.i + 1} of {len(self.queue)} · {exam} question · reviewed {q.reviews}× · box {q.box}/7")
         for b, vis in ((self.b_play, False), (self.b_speak, True), (self.b_reveal, not q.options), (self.b_again, False), (self.b_got, False)):
@@ -992,6 +1088,7 @@ class ReviewPage(QWidget):
         if isinstance(w, Question):
             src = (f" · from “{html.escape(w.video_name[:50])}”" if w.video_name else "") + (f" · word „{html.escape(w.lemma)}“" if w.lemma else "")
             h.append(f"<p style='text-align:center;color:{theme.DIM};font-size:9pt'>{src.lstrip(' ·')}</p>")
+            h.append(passage_html(getattr(self, "passage", "")))
             h.append(f"<p style='text-align:center;font-size:15pt'>{html.escape(w.question)}</p>")
             if self.revealed:
                 ok = self.picked is None or self.is_answer(self.picked, w.answer)
@@ -1089,25 +1186,99 @@ class ReviewPage(QWidget):
 
 
 # ==================================================================== Practice
+TYPES = (("gap", "Fill the gap", "A word is missing from a sentence — choose or type it"),
+         ("dictation", "Dictation", "Hear the line of the video and type it"),
+         ("article", "der · die · das", "The article of German nouns"),
+         ("exam", "Exam questions", "Your TestDaF / IELTS questions — from AI lessons (To Review) and the teacher — with their texts"))
+TYPE_NAME = {k: n for k, n, _ in TYPES}
+
+
+def _cues_for(main, name: str):
+    """(cues, lang, video path) of a video by its file name: the one in the player, SubPlayer's own subtitles, or an .srt
+    next to the video. ([], "", "") when it has no subtitles on this PC."""
+    from . import subtitles, syncer
+    if name and getattr(main, "video_name", "") == name and getattr(main, "cues", None):
+        return main.cues, main.cue_lang, main.video
+    path = main.find_video(SavedWord(text="", lemma="", sentence="", video_name=name)) if name else None
+    for lang in ("de", "en"):
+        f = syncer.subs_dir() / f"{subtitles.video_key(name)}.{lang}.srt"
+        if f.exists():
+            cues = subtitles.parse(f.read_text(encoding="utf-8", errors="replace"))
+            if cues:
+                return cues, lang, path or ""
+    if path:
+        base = Path(path)
+        for cand in (base.with_suffix(".de.srt"), base.with_suffix(".en.srt"), base.with_suffix(".srt")):
+            if cand.exists():
+                cues = subtitles.parse(cand.read_text(encoding="utf-8", errors="replace"))
+                if cues:
+                    lang = "en" if cand.name.endswith(".en.srt") else ("de" if cand.name.endswith(".de.srt") else subtitles.guess_lang(cues[:80]))
+                    return cues, lang, path
+    return [], "", ""
+
+
 class PracticePage(QWidget):
     N = 10
 
     def __init__(self, main):
         super().__init__(objectName="page")
+        from PySide6.QtWidgets import QCheckBox, QComboBox
         self.main = main
         v = QVBoxLayout(self)
         top = QHBoxLayout()
         top.addWidget(GradientLabel("Practice", 22, QFont.Black))
-        top.addStretch(1)
+        top.addSpacing(10)
+        top.addWidget(QLabel("Question types", objectName="small"))
         self.modes = {}
-        for key, label in (("gap", "Fill the gap"), ("dictation", "Dictation"), ("article", "der · die · das")):
-            b = QPushButton(label, checkable=True)
+        for key, label, tip in TYPES:
+            b = QPushButton(label, checkable=True, toolTip=tip + " — choose one or more, then ▶ Start")
             b.setProperty("kind", "chip")
-            b.setMinimumWidth(130)
-            b.clicked.connect(lambda _=False, k=key: self.start(k))
+            b.setMinimumWidth(120)
+            b.clicked.connect(lambda _=False, k=key: self._type_clicked(k))
             self.modes[key] = b
             top.addWidget(b)
+        top.addStretch(1)
         v.addLayout(top)
+
+        bar = QHBoxLayout()                              # what to practise: which video, which words, the whole text
+        bar.setSpacing(8)
+        bar.addWidget(QLabel("Video", objectName="small"))
+        self.video_box = QComboBox()
+        self.video_box.setToolTip("Practise everything you saved — or only one video: its words, its lessons' questions, its whole text")
+        self.video_box.setMinimumContentsLength(30)
+        self.video_box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.video_box.currentIndexChanged.connect(self._video_changed)
+        bar.addWidget(self.video_box, 2)
+        self.words_b = QPushButton("All words ▾")
+        self.words_b.setToolTip("Choose the words to practise (all of them, or only some)")
+        self.words_b.clicked.connect(self.pick_words)
+        bar.addWidget(self.words_b)
+        self.whole = QCheckBox("Whole video text")
+        self.whole.setToolTip("Gaps and dictation from every line of the video — not only from the words you saved "
+                              "(needs the video's subtitles on this PC)")
+        self.whole.toggled.connect(self._whole_toggled)
+        bar.addWidget(self.whole)
+        self.lv_box = QComboBox()
+        self.lv_box.setToolTip("Whole video text: gaps at words of this level or harder")
+        from .levels import NAMES
+        for n in range(1, 7):
+            self.lv_box.addItem(f"gaps {NAMES[n]}+", n)
+        self.lv_box.setCurrentIndex(2)
+        bar.addWidget(self.lv_box)
+        bar.addWidget(QLabel("Questions", objectName="small"))
+        self.n_box = QComboBox()
+        for n in (10, 20, 30, 50):
+            self.n_box.addItem(str(n), n)
+        self.n_box.addItem("All", 10_000)
+        self.n_box.setCurrentIndex(max(0, self.n_box.findData(int(main.settings.get("practice_n", 10)))))
+        bar.addWidget(self.n_box)
+        self.start_b = QPushButton("▶ Start")
+        self.start_b.setProperty("accent", True)
+        self.start_b.setToolTip("New questions with these choices")
+        self.start_b.clicked.connect(lambda: self.start())
+        bar.addWidget(self.start_b)
+        v.addLayout(bar)
+
         self.head = QLabel("", objectName="hint")
         v.addWidget(self.head)
         self.box = card()
@@ -1131,7 +1302,7 @@ class PracticePage(QWidget):
         for b in (self.b_play, self.b_hint, self.b_next):
             row.addWidget(b)
         bv.addLayout(row)
-        self.view.setMaximumHeight(360)
+        self.view.setMaximumHeight(420)
         v.addStretch(1)
         wrap = QHBoxLayout()
         wrap.addStretch(1)
@@ -1139,46 +1310,247 @@ class PracticePage(QWidget):
         wrap.addStretch(1)
         v.addLayout(wrap)
         v.addStretch(2)
-        self.mode, self.qs, self.k, self.score, self.answered, self.show_hint = "gap", [], 0, 0, False, False
+        st = main.settings.get("practice_types") or ["gap"]
+        self.types = [k for k, _, _ in TYPES if k in st] or ["gap"]
+        self.chosen: set[int] | None = None              # word ids, None = all words of the selection
+        self.qs, self.k, self.score, self.answered, self.show_hint, self.source = [], 0, 0, False, False, ""
+        self.mode = self.types[0]
+        self._filling = False
+        self._show_types()
         self.rnd = random.Random()
 
-    def start(self, mode=None):
-        self.source = ""
-        self.mode = mode or self.mode
+    # ------------------------------------------------------------------ choices
+    def _show_types(self):
         for k, b in self.modes.items():
-            b.setChecked(k == self.mode)
-        words = sorted(self.main.store.all(), key=lambda w: (w.box, w.due))
+            b.setChecked(k in self.types)
+
+    def _type_clicked(self, k):
+        if k in self.types and len(self.types) > 1:
+            self.types.remove(k)
+        elif k not in self.types:
+            self.types.append(k)
+        self.types = [x for x, _, _ in TYPES if x in self.types]
+        self._show_types()
+        self.main.settings["practice_types"] = self.types
+        self.main.save_settings()
+        self.start()
+
+    def _video_names(self) -> list[tuple[str, str]]:
+        """[(video name, label)] — videos with saved words, exam questions or AI lessons, the newest first."""
+        from . import lessons
+        when, nw, nq = {}, {}, {}
+        for w in self.main.store.all():
+            if w.video_name:
+                when[w.video_name] = max(when.get(w.video_name, 0), w.created)
+                nw[w.video_name] = nw.get(w.video_name, 0) + 1
+        for q in self.main.store.questions():
+            if q.video_name:
+                when[q.video_name] = max(when.get(q.video_name, 0), q.created)
+                nq[q.video_name] = nq.get(q.video_name, 0) + 1
+        try:
+            for name, _ in lessons.all_lessons():
+                when.setdefault(name, 1)
+        except Exception:
+            pass
+        cur = getattr(self.main, "video_name", "")
+        if cur:
+            when[cur] = max(when.get(cur, 0), now_ms())
+        out = []
+        for n in sorted(when, key=lambda x: -when[x]):
+            bits = [f"{nw[n]} words" if nw.get(n) else "", f"{nq[n]} questions" if nq.get(n) else ""]
+            short = Path(n).stem
+            out.append((n, (short[:48] + ("…" if len(short) > 48 else "")) + (" · " + " · ".join(b for b in bits if b) if any(bits) else "")))
+        return out
+
+    def _fill_videos(self, want: str | None = None):
+        cur = want if want is not None else (self.video_box.currentData() if self.video_box.count() else "")
+        self._filling = True
+        self.video_box.clear()
+        self.video_box.addItem("All my words and questions", "")
+        for n, label in self._video_names():
+            self.video_box.addItem(label, n)
+            self.video_box.setItemData(self.video_box.count() - 1, n, Qt.ItemDataRole.ToolTipRole)
+        if cur and self.video_box.findData(cur) < 0:
+            self.video_box.addItem(Path(cur).stem[:48], cur)
+        self.video_box.setCurrentIndex(max(0, self.video_box.findData(cur or "")))
+        self._filling = False
+        self._update_bar()
+
+    def video(self) -> str:
+        return self.video_box.currentData() or ""
+
+    def _video_changed(self, *_):
+        if self._filling:
+            return
+        self.chosen = None
+        if not self.video():
+            self._filling = True
+            self.whole.setChecked(False)
+            self._filling = False
+        self._update_bar()
+        self.start()
+
+    def _whole_toggled(self, on):
+        self._update_bar()
+        if not self._filling:
+            self.start()
+
+    def _update_bar(self):
+        vid = self.video()
+        self.whole.setEnabled(bool(vid))
+        self.lv_box.setVisible(self.whole.isChecked() and bool(vid))
+        words = self._words(all_of_video=True)
+        n = len(words) if self.chosen is None else len([w for w in words if w.id in self.chosen])
+        self.words_b.setText((f"All {len(words)} words ▾" if self.chosen is None else f"{n} of {len(words)} words ▾")
+                             if words else "No saved words ▾")
+        self.words_b.setEnabled(bool(words))
+
+    def _words(self, all_of_video: bool = False) -> list[SavedWord]:
+        vid = self.video()
+        ws = [w for w in self.main.store.all() if not vid or w.video_name == vid]
+        if not all_of_video and self.chosen is not None:
+            ws = [w for w in ws if w.id in self.chosen]
+        return sorted(ws, key=lambda w: (w.box, w.due))
+
+    def pick_words(self):
+        from PySide6.QtWidgets import QDialog
+        words = sorted(self._words(all_of_video=True), key=lambda w: (w.text.lower()))
+        if not words:
+            return
+        d = QDialog(self)
+        d.setWindowTitle("Words to practise")
+        d.resize(460, 560)
+        lv = QVBoxLayout(d)
+        lv.addWidget(QLabel(("From “" + Path(self.video()).stem[:60] + "”") if self.video() else "All your saved words", objectName="hint"))
+        find = QLineEdit(placeholderText="Find…")
+        lv.addWidget(find)
+        lst = QListWidget()
+        for w in words:
+            it = QListWidgetItem(f"{(w.article + ' ') if w.article else ''}{w.text}   —   {w.english[:40]}")
+            it.setData(Qt.ItemDataRole.UserRole, w.id)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if self.chosen is None or w.id in self.chosen else Qt.CheckState.Unchecked)
+            lst.addItem(it)
+        lv.addWidget(lst, 1)
+        find.textChanged.connect(lambda t: [lst.item(i).setHidden(t.lower() not in lst.item(i).text().lower()) for i in range(lst.count())])
+        row = QHBoxLayout()
+
+        def set_all(on):
+            for i in range(lst.count()):
+                if not lst.item(i).isHidden():
+                    lst.item(i).setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+        for label, on in (("All", True), ("None", False)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, x=on: set_all(x))
+            row.addWidget(b)
+        due = QPushButton("Only due ones")
+        due.setToolTip("Tick only the words that are due for review now")
+        due.clicked.connect(lambda: [lst.item(i).setCheckState(Qt.CheckState.Checked if words[i].due <= now_ms() else Qt.CheckState.Unchecked)
+                                     for i in range(lst.count())])
+        row.addWidget(due)
+        row.addStretch(1)
+        ok = QPushButton("Practise these")
+        ok.setProperty("accent", True)
+        ok.clicked.connect(d.accept)
+        row.addWidget(ok)
+        lv.addLayout(row)
+        if not d.exec():
+            return
+        ids = {lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())
+               if lst.item(i).checkState() == Qt.CheckState.Checked}
+        self.chosen = None if len(ids) == len(words) else ids
+        self._update_bar()
+        self.start()
+
+    # ------------------------------------------------------------------ questions
+    def start(self, mode=None):
+        """New questions with the choices of the bar. [mode] (an old caller) practises that one type."""
+        if mode:
+            self.types = [mode]
+            self._show_types()
+        if not self.video_box.count():
+            self._fill_videos()
+        n = int(self.n_box.currentData() or 10)
+        self.main.settings["practice_n"] = n
+        self.N = n
+        vid = self.video()
+        per: dict[str, list] = {}
+        cues, lang, path = ([], "", "")
+        if self.whole.isChecked() and vid and any(t in self.types for t in ("gap", "dictation")):
+            cues, lang, path = _cues_for(self.main, vid)
+        for t in self.types:
+            if t in ("gap", "dictation") and cues:
+                per[t] = self._from_text(cues, path, vid, lang, t, int(self.lv_box.currentData() or 3))
+            else:
+                per[t] = {"gap": self._gaps, "dictation": self._dictation, "article": self._articles, "exam": self._exam}[t]()
         self.qs = []
-        if self.mode == "gap":
-            pool = [w.text for w in words]
-            for w in words:
-                opts = sentences_of(self.main, w)
-                self.rnd.shuffle(opts)
-                for s, en, fa in opts:
-                    c = practice.cloze(w, s, en, fa)
-                    if c:
-                        self.qs.append((w, c, practice.choices(c.answer, pool, self.rnd)))
-                        break
-                if len(self.qs) >= self.N:
-                    break
-        elif self.mode == "dictation":
-            self.qs = [(w, None, []) for w in words if w.start_ms >= 0 and w.sentence and w.video_name][:self.N]
-        else:
-            self.qs = [(w, None, ["der", "die", "das"]) for w in words if w.lang == "de" and w.article in ("der", "die", "das")][:self.N]
+        lists = [list(per[t]) for t in self.types]
+        while any(lists) and len(self.qs) < n:                      # mixed: one of each type in turn
+            for lst in lists:
+                if lst and len(self.qs) < n:
+                    self.qs.append(lst.pop(0))
         self.k = self.score = 0
+        bits = [f"“{Path(vid).stem[:40]}”" if vid else "all your words"]
+        if self.chosen is not None:
+            bits.append(f"{len(self.chosen)} chosen word(s)")
+        if self.whole.isChecked() and vid:
+            bits.append("whole text" if cues else "whole text: no subtitles of this video found on this PC")
+        self.source = " · ".join(bits)
         self.show_q()
 
     def start_text(self, cues, video: str, name: str, lang: str, mode: str, min_level: int = 3):
+        """From Study this video: questions from every line of that video (not only saved words)."""
+        self._fill_videos(name)
+        self._filling = True
+        self.whole.setChecked(True)
+        self.lv_box.setCurrentIndex(max(0, self.lv_box.findData(min_level)))
+        self._filling = False
+        self.chosen = None
+        self._update_bar()
+        self.types = [mode]
+        self._show_types()
+        self.start()
+
+    def _gaps(self) -> list:
+        words = self._words()
+        pool = [w.text for w in self.main.store.all()]
+        out = []
+        for w in words:
+            opts = sentences_of(self.main, w)
+            self.rnd.shuffle(opts)
+            for s_, en, fa in opts:
+                c = practice.cloze(w, s_, en, fa)
+                if c:
+                    out.append(("gap", w, c, practice.choices(c.answer, pool, self.rnd)))
+                    break
+            if len(out) >= self.N:
+                break
+        return out
+
+    def _dictation(self) -> list:
+        return [("dictation", w, None, []) for w in self._words() if w.start_ms >= 0 and w.sentence and w.video_name][:self.N]
+
+    def _articles(self) -> list:
+        return [("article", w, None, ["der", "die", "das"]) for w in self._words()
+                if w.lang == "de" and w.article in ("der", "die", "das")][:self.N]
+
+    def _exam(self) -> list:
+        vid = self.video()
+        qs = self.main.store.questions(video_name=vid) if vid else self.main.store.questions()
+        if self.chosen is not None:                                   # only the chosen words' questions
+            lem = {(w.lemma or w.text).lower() for w in self._words()} | {w.text.lower() for w in self._words()}
+            qs = [q for q in qs if q.lemma and q.lemma.lower() in lem]
+        qs.sort(key=lambda q: (q.reviews, q.box, q.due))
+        return [("exam", q, None, list(q.options)) for q in qs[:self.N]]
+
+    def _from_text(self, cues, video: str, name: str, lang: str, mode: str, min_level: int) -> list:
         """Questions from every line of a video (not only saved words): gaps at words of min_level or harder, dictation of
         its lines."""
         from . import library
-        self.mode = mode
-        for k, b in self.modes.items():
-            b.setChecked(k == mode)
         d = self.main.dictionary(lang)
         lines = [c for c in cues if len(c.text.split()) >= 4]
         self.rnd.shuffle(lines)
-        self.qs = []
+        out = []
         if mode == "gap":
             picks = []
             for c in lines:
@@ -1200,14 +1572,12 @@ class PracticePage(QWidget):
             pool = [w.text for w, _, _ in picks] + [t for t, _, lv in library.vocabulary(cues, lang, self.main.levels, d)[:300]
                                                     if lv >= min_level - 1]
             for w, cz, lv in picks:
-                self.qs.append((w, cz, practice.choices(cz.answer, pool, self.rnd)))
+                out.append(("gap", w, cz, practice.choices(cz.answer, pool, self.rnd)))
         else:
             for c in lines[:self.N]:
-                self.qs.append((SavedWord(text=c.text.split()[0], lemma="", sentence=c.text, video_uri=video, video_name=name,
-                                          start_ms=c.start_ms, end_ms=c.end_ms, lang=lang), None, []))
-        self.k = self.score = 0
-        self.source = f"from “{name[:40]}”"
-        self.show_q()
+                out.append(("dictation", SavedWord(text=c.text.split()[0], lemma="", sentence=c.text, video_uri=video, video_name=name,
+                                                   start_ms=c.start_ms, end_ms=c.end_ms, lang=lang), None, []))
+        return out
 
     def _clear_choices(self):
         while self.choice_row.count():
@@ -1224,36 +1594,49 @@ class PracticePage(QWidget):
         self.input.clear()
         if self.k >= len(self.qs):
             empty = not self.qs
-            msg = ("This video has no lines with words at that level — choose a lower level on the Study page."
-                   if getattr(self, "source", "") else None) or {"gap": "Save words (and add sentences) to practise them here.",
-                   "dictation": "Save words from a video to practise dictation.",
-                   "article": "Save some German nouns to practise der · die · das."}[self.mode] if empty else \
-                f"{self.score} of {len(self.qs)} right · 🔥 {self.main.progress.streak} day streak"
+            if empty:
+                need = {"gap": "saved words with sentences", "dictation": "saved words with their video moment",
+                        "article": "German nouns (der · die · das)",
+                        "exam": "exam questions (AI lesson ▸ To Review, or Teacher ▸ TestDaF / IELTS questions)"}
+                msg = (f"Nothing for {' · '.join(TYPE_NAME[t] for t in self.types)} in {self.source or 'your words'}. "
+                       f"This needs {' or '.join(need[t] for t in self.types)}"
+                       + (" — or tick “Whole video text”." if self.video() and not self.whole.isChecked() else "."))
+            else:
+                msg = f"{self.score} of {len(self.qs)} right · 🔥 {self.main.progress.streak} day streak"
             self.view.setHtml(f"<h1 style='text-align:center;color:{theme.CYAN}'>{'Nothing to practise yet' if empty else 'Finished!'}</h1>"
-                              f"<p style='text-align:center;color:{theme.DIM}'>{msg}</p>")
-            self.head.setText("")
+                              f"<p style='text-align:center;color:{theme.DIM}'>{html.escape(msg)}</p>"
+                              + ("" if empty else f"<p style='text-align:center;color:{theme.DIM}'>▶ Start for new questions</p>"))
+            self.head.setText(self.source)
             for wdg in (self.input, self.b_play, self.b_hint, self.b_next):
                 wdg.setVisible(False)
             return
-        w, c, ch = self.qs[self.k]
-        self.head.setText(f"Question {self.k + 1} of {len(self.qs)} · score {self.score}" +
-                          (f" · {self.source}" if getattr(self, "source", "") else ""))
+        mode, w, c, ch = self.qs[self.k]
+        self.mode = mode
+        self.head.setText(f"Question {self.k + 1} of {len(self.qs)} · {TYPE_NAME[mode]} · score {self.score}"
+                          + (f" · {self.source}" if self.source else ""))
         self.b_next.setVisible(False)
-        self.b_play.setVisible(self.mode in ("dictation",) or self.mode == "gap")
-        self.b_hint.setVisible(self.mode == "gap")
-        self.input.setVisible(not ch or self.mode == "dictation")
+        self.b_play.setVisible(mode in ("dictation", "gap") or (mode == "exam" and bool(w.question)))
+        self.b_hint.setVisible(mode == "gap")
+        self.input.setVisible(not ch or mode == "dictation")
+        self.input.setPlaceholderText("Your answer — then Enter (it is compared with the model answer)" if mode == "exam"
+                                      else "Type your answer and press Enter")
         for opt in ch:
             b = QPushButton(opt)
+            if mode == "exam":
+                b.setStyleSheet("text-align:left;padding:6px 12px")
             b.clicked.connect(lambda _=False, o=opt: self.check(o))
             self.choice_row.addWidget(b)
+        from PySide6.QtWidgets import QBoxLayout
+        self.choice_row.setDirection(QBoxLayout.Direction.TopToBottom if mode == "exam" and (len(ch) > 3 or max(map(len, ch), default=0) > 40)
+                                     else QBoxLayout.Direction.LeftToRight)
         self.render()
-        if self.mode == "dictation":
+        if mode == "dictation":
             self.listen()
         self.input.setFocus()
 
     def render(self, feedback: str = ""):
-        w, c, ch = self.qs[self.k]
-        if self.mode == "gap":
+        mode, w, c, ch = self.qs[self.k]
+        if mode == "gap":
             blank = c.answer if self.answered else "_" * max(4, len(c.answer))
             col = theme.GOLD if self.answered else theme.CYAN
             h = (f"<p style='text-align:center;font-size:18pt'>{html.escape(c.before)}<span style='color:{col};font-weight:700'>"
@@ -1265,8 +1648,22 @@ class PracticePage(QWidget):
                       f"<p dir='rtl' style='font-family:Vazirmatn;text-align:center;color:{theme.DIM}'>{html.escape(c.fa)}</p>")
             elif w.english:
                 h += f"<p style='text-align:center;color:{theme.DIM}'>({html.escape(w.english[:80])})</p>"
-        elif self.mode == "dictation":
+        elif mode == "dictation":
             h = f"<p style='text-align:center;font-size:15pt;color:{theme.DIM}'>Listen and type the sentence.</p>"
+        elif mode == "exam":
+            from . import questions
+            try:
+                passage = questions.passage_of(w)
+            except Exception:
+                passage = ""
+            exam = "IELTS" if w.lang == "en" else "TestDaF"
+            src = " · ".join(x for x in (exam, f"„{w.lemma}“" if w.lemma else "", Path(w.video_name).stem[:40] if w.video_name else "") if x)
+            h = (f"<p style='text-align:center;color:{theme.DIM};font-size:9pt'>{html.escape(src)}</p>" + passage_html(passage)
+                 + f"<p style='text-align:center;font-size:15pt'>{html.escape(w.question)}</p>")
+            if self.answered:
+                h += f"<p style='text-align:center;font-size:14pt;color:{theme.GOLD}'><b>{html.escape(w.answer)}</b></p>"
+                if w.explanation:
+                    h += f"<p style='text-align:center;color:{theme.DIM}'>{html.escape(w.explanation)}</p>"
         else:
             art = f"<span style='color:{theme.ARTICLE[w.article]}'>{w.article}</span>" if self.answered else "___"
             h = f"<p style='text-align:center;font-size:30pt;font-weight:800'>{art} {html.escape(w.lemma)}</p>"
@@ -1277,16 +1674,26 @@ class PracticePage(QWidget):
     def check(self, given):
         if self.answered:
             return
-        w, c, ch = self.qs[self.k]
-        right = (c.answer if self.mode == "gap" else w.article)
+        mode, w, c, ch = self.qs[self.k]
+        if mode == "exam":
+            ok = ReviewPage.is_answer(given, w.answer) if ch else (
+                practice.same(given, w.answer) or (len(practice.normalize(given)) > 3 and
+                                                   practice.normalize(given) in practice.normalize(w.answer)))
+            for i in range(self.choice_row.count()):
+                b = self.choice_row.itemAt(i).widget()
+                if b and (ReviewPage.is_answer(b.text(), w.answer) or b.text() == given):
+                    right = ReviewPage.is_answer(b.text(), w.answer)
+                    b.setStyleSheet(f"text-align:left;padding:6px 12px;color:#FFFFFF;background:{'#2E8B57' if right else '#8B2E4F'}")
+            return self._finish(ok, "the answer is below" if ch else "compare with the answer below")
+        right = (c.answer if mode == "gap" else w.article)
         self._finish(practice.same(given, right), f"The answer: {right}")
 
     def check_typed(self):
         if self.answered or self.k >= len(self.qs):
             return self.next() if self.answered else None
-        w, c, ch = self.qs[self.k]
+        mode, w, c, ch = self.qs[self.k]
         t = self.input.text()
-        if self.mode == "dictation":
+        if mode == "dictation":
             marks, score = practice.dictation(w.sentence, t)
             words = " ".join(f"<span style='color:{theme.GOLD if ok else theme.MAGENTA}'>{html.escape(x)}</span>" for x, ok in marks)
             self.answered = True
@@ -1297,7 +1704,7 @@ class PracticePage(QWidget):
 
     def _finish(self, ok, right_text, extra=""):
         self.answered = True
-        w = self.qs[self.k][0]
+        mode, w = self.qs[self.k][0], self.qs[self.k][1]
         self.score += 1 if ok else 0
         self.main.progress.record()
         self.main.after_change()
@@ -1310,7 +1717,7 @@ class PracticePage(QWidget):
                 b.setEnabled(False)
         self.b_next.setVisible(True)
         self.b_next.setFocus()
-        if self.mode == "article":
+        if mode == "article":
             self.main.speak(f"{w.article} {w.lemma}", lang="de")
 
     def hint(self):
@@ -1318,10 +1725,12 @@ class PracticePage(QWidget):
         self.render()
 
     def listen(self):
-        w, c, ch = self.qs[self.k]
-        if self.mode == "dictation":
+        mode, w, c, ch = self.qs[self.k]
+        if mode == "dictation":
             if not self.main.play_clip(w, quiet=True):
                 self.main.speak(w.sentence, lang=w.lang)
+        elif mode == "exam":
+            self.main.speak(w.question, lang=w.lang)
         elif c:
             self.main.speak(c.sentence, lang=w.lang)
 
@@ -1330,3 +1739,7 @@ class PracticePage(QWidget):
         self.main.clear_ab()
         self.k += 1
         self.show_q()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._fill_videos()                                # new words, questions or lessons since last time

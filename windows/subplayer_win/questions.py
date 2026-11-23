@@ -11,7 +11,8 @@ They come from two places:
         E: „Aktuell gibt es wieder etliche Angriffe …“
 
     which is read when the lesson is pasted or saved. Q = question, O = options (separated by |; none for an open
-    question), A = the answer, E = why (the proof).
+    question), A = the answer, E = why (the proof), T = the text the question is about (a reading paragraph; optional) —
+    it is shown above the question in Review. Cards without T: from a lesson get the lesson's reading text instead.
 """
 from __future__ import annotations
 
@@ -21,25 +22,30 @@ from . import ollama
 from .store import Question
 
 MARK = "---REVIEW---"
-_LINE = re.compile(r"^\s*(?:\d+[.)]\s*)?(?:\*\*)?(Q|O|A|E|F|L|Frage|Optionen|Antwort|Lösung|Begründung|Question|Options|Answer|Why)"
+_LINE = re.compile(r"^\s*(?:\d+[.)]\s*)?(?:\*\*)?(Q|O|A|E|F|L|T|Frage|Optionen|Antwort|Lösung|Begründung|Question|Options|Answer|Why|Text|Lesetext|Passage)"
                    r"(?:\*\*)?\s*[:：]\s*(.*)$", re.I)
 _KEY = {"q": "q", "f": "q", "frage": "q", "question": "q", "o": "o", "optionen": "o", "options": "o", "a": "a", "l": "a",
-        "antwort": "a", "lösung": "a", "answer": "a", "e": "e", "begründung": "e", "why": "e"}
+        "antwort": "a", "lösung": "a", "answer": "a", "e": "e", "begründung": "e", "why": "e", "t": "t", "text": "t",
+        "lesetext": "t", "passage": "t"}
 
 
 def instructions(lang: str, n: int = 15) -> str:
     """The extra task for the lesson question: review cards in a fixed format at the very end."""
     if lang == "en":
         return (f"REVIEW CARDS — at the very end, after a line “{MARK}”, {n} of the questions above (listening, reading, "
-                "vocabulary) once more as cards, EXACTLY in this format, four lines per card and nothing else:\n"
+                "vocabulary) once more as cards, EXACTLY in this format, four lines per card (five for a reading question) and "
+                "nothing else:\n"
                 "   Q: the question or statement\n   O: the options separated by | (TRUE | FALSE | NOT GIVEN, A) … | B) … | "
                 "C) …) — leave empty for an open question\n   A: the correct answer\n   E: one sentence why (the proof from the "
-                "text)")
+                "text)\n   T: ONLY for a reading question: the paragraph of the reading passage it is about, word for word, on one "
+                "line (with its letter, e.g. “B: …”) — so the card can be answered without the lesson")
     return (f"KARTEIKARTEN — ganz am Ende, nach einer Zeile „{MARK}“, {n} der Aufgaben oben (Hören, Lesen, Wortschatz) noch "
-            "einmal als Karten, GENAU in diesem Format, vier Zeilen pro Karte und sonst nichts:\n"
+            "einmal als Karten, GENAU in diesem Format, vier Zeilen pro Karte (fünf bei einer Leseaufgabe) und sonst nichts:\n"
             "   Q: die Frage oder Aussage\n   O: die Antwortmöglichkeiten, getrennt durch | (richtig | falsch, Ja | Nein | "
             "Text sagt dazu nichts, A) … | B) … | C) …) — leer bei einer offenen Frage\n   A: die richtige Lösung\n"
-            "   E: ein Satz, warum (der Beleg aus dem Text)")
+            "   E: ein Satz, warum (der Beleg aus dem Text)\n"
+            "   T: NUR bei einer Leseaufgabe: der Absatz des Lesetextes, um den es geht, wörtlich, in einer Zeile (mit seinem "
+            "Buchstaben, z. B. „B: …“) — damit man die Karte ohne die Lektion beantworten kann")
 
 
 def _kind(opts: list[str]) -> str:
@@ -77,7 +83,7 @@ def parse(text: str, lang: str = "de", video_name: str = "", source: str = "") -
             opts = _options(cur.get("o", ""))
             out.append(Question(question=cur["q"].strip(), answer=cur["a"].strip(), options=opts,
                                 explanation=cur.get("e", "").strip(), kind=_kind(opts), lang=lang, video_name=video_name,
-                                source=source))
+                                source=source, passage=cur.get("t", "").strip()))
     for line in body.splitlines():
         m = _LINE.match(line.strip().lstrip("-•* "))
         if not m:
@@ -107,8 +113,9 @@ def teacher_prompt(word: str, lemma: str, sentence: str, lang: str, level: str, 
              "die richtige Kollokation, Präposition oder Form")
     return (f"Write {n} {exam}-style practice questions in {target} at level {level} that test the word „{lemma or word}“"
             + (f" (as in this line: „{sentence}“)" if sentence else "") + ".\n"
-            f"Mix these kinds: {kinds}. Put any short text the question needs into the question itself.\n"
-            "Answer ONLY with a JSON object: {\"questions\": [ {\"question\": \"...\", \"options\": [\"...\", \"...\"] "
+            f"Mix these kinds: {kinds}. A question that needs a short text gets it in \"text\" (not in the question).\n"
+            "Answer ONLY with a JSON object: {\"questions\": [ {\"text\": \"the short text the question is about, or empty\", "
+            "\"question\": \"...\", \"options\": [\"...\", \"...\"] "
             "(empty list for an open question), \"answer\": \"the correct option or answer, exactly as written in options\", "
             f"\"explanation\": \"why, in {ex}, one or two sentences\"}} ]}}")
 
@@ -121,8 +128,52 @@ def from_json(d: dict, lang: str, lemma: str, video_name: str = "") -> list[Ques
         opts = [str(o).strip() for o in ollama.as_list(x.get("options")) if str(o).strip()]
         out.append(Question(question=str(x["question"]).strip(), answer=str(x["answer"]).strip(), options=opts,
                             explanation=str(x.get("explanation", "")).strip(), kind=_kind(opts), lang=lang, lemma=lemma,
-                            video_name=video_name, source="teacher"))
+                            video_name=video_name, source="teacher",
+                            passage=str(x.get("text") or x.get("passage") or "").strip()))
     return out
+
+
+_READ_HEAD = re.compile(r"^\W*(?:\d+\W*)?(LESEN|LESEVERSTEHEN|READING)\b", re.I)
+_NEXT_HEAD = re.compile(r"^\W*(?:\d+\W*)?(HÖREN|HÖRVERSTEHEN|SCHREIBEN|SPRECHEN|LISTENING|WRITING|SPEAKING|LÖSUNGEN|ANSWERS|"
+                        r"WORTSCHATZ|VOCABULARY|KARTEIKARTEN|REVIEW CARDS)\b|^\s*---", re.I)
+_TASKS = re.compile(r"^\W*(Aufgaben?|Fragen|Questions?|Teil \d|Part \d|Ordnen Sie|Match|Choose|Wählen Sie|Do the following|"
+                    r"Questions \d|\d+\s*[–-]\s*\d+)\b", re.I)
+
+
+def reading_text(lesson: str) -> str:
+    """The reading passage of a TestDaF / IELTS lesson (the text under LESEN / READING, without its tasks) — shown with
+    the reading cards that came without their own T: line. Empty when the lesson has none."""
+    from . import practice
+    lines = practice.clean_ai(lesson or "").splitlines()
+    start = next((i for i, ln in enumerate(lines) if _READ_HEAD.match(ln.strip())), -1)
+    if start < 0:
+        return ""
+    out, words = [], 0
+    for ln in lines[start + 1:]:
+        t = ln.strip()
+        if _NEXT_HEAD.match(t):
+            break
+        if words >= 60 and _TASKS.match(t):
+            break                                                     # the passage is over, its questions begin
+        out.append(ln.rstrip())
+        words += len(t.split())
+    text = "\n".join(out).strip()
+    return text if len(text.split()) >= 40 else ""
+
+
+def passage_of(q: Question) -> str:
+    """The question's own text, or for a reading card of a lesson the lesson's reading passage."""
+    if q.passage:
+        return q.passage
+    if not q.source.startswith("lesson:") or not q.video_name:
+        return ""
+    low = (q.question + " " + q.explanation).lower()
+    reading = q.kind == "yn" or any(k in low for k in ("absatz", "abschnitt", "lesetext", "im text", "der text", "laut text",
+                                                         "paragraph", "passage", "the text", "the writer", "the author"))
+    if not reading:
+        return ""
+    from . import lessons
+    return reading_text(lessons.text(q.video_name, q.source.split(":", 1)[1]))
 
 
 def lesson_to_cards_prompt(lesson: str, lang: str) -> str:
