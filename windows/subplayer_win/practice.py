@@ -35,10 +35,10 @@ def clean_ai(text: str) -> str:
 def looks_like_ai_answer(text: str) -> bool:
     """A whole pasted AI answer (JSON, a table, KOLL / Q: lines) rather than lines typed by hand."""
     t = clean_ai(text)
-    return ('{' in t and '":' in t) or bool(re.search(r"^\s*(?:[-*•]\s*)?(KOLL|COLL|Q)\s*:", t, re.M | re.I)) or t.count("|") >= 4
+    return ('{' in t and '":' in t) or bool(re.search(r"^\s*(?:[-*•]\s*)?(KOLL|COLL|SYN|Q)\s*:", t, re.M | re.I)) or t.count("|") >= 4
 
 
-COLL = re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*)?(KOLL|COLL|Kollokation|Collocation)(?:\*\*)?\s*[:：]\s*(.*)$", re.I)
+COLL = re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*)?(KOLL|COLL|Kollokation|Collocation|SYN|Synonym|Synonyme)(?:\*\*)?\s*[:：]\s*(.*)$", re.I)
 HEADER_WORDS = {"german", "deutsch", "english", "englisch", "persian", "persisch", "farsi", "فارسی", "collocation", "collocations",
                 "kollokation", "kollokationen", "meaning", "bedeutung", "example", "examples", "beispiel", "beispielsatz",
                 "translation", "übersetzung", "phrase", "ausdruck", "word", "wort", "sentence", "satz", "#", "nr", "no"}
@@ -57,7 +57,8 @@ def is_phrase(t: str) -> bool:
 
 
 def split_collocations(raw: str) -> tuple[list[dict], str]:
-    """Collocations in a pasted AI answer — "KOLL: phrase | meaning | example" lines, and table rows whose first cell is a
+    """Collocations in a pasted AI answer — "KOLL: phrase | meaning | example" lines ("SYN: …" lines are synonyms, kind
+    "syn"), and table rows whose first cell is a
     short phrase (ChatGPT often answers with a table) — and the rest of the text (the sentences) without them. Table headers
     and separator rows are dropped."""
     cols, rest = [], []
@@ -66,7 +67,10 @@ def split_collocations(raw: str) -> tuple[list[dict], str]:
         if m:
             parts = [_clean(p) for p in m.group(2).split("|")]
             if parts and parts[0]:
-                cols.append({"phrase": parts[0], "meaning": parts[1] if len(parts) > 1 else "", "example": parts[2] if len(parts) > 2 else ""})
+                c = {"phrase": parts[0], "meaning": parts[1] if len(parts) > 1 else "", "example": parts[2] if len(parts) > 2 else ""}
+                if m.group(1).lower().startswith("syn"):
+                    c["kind"] = "syn"                             # "SYN: synonym | meaning / difference | example"
+                cols.append(c)
             continue
         st = BULLET.sub("", line.strip())
         if "|" in st:

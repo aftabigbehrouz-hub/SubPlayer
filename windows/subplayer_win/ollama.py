@@ -1,7 +1,8 @@
 """Local AI teacher with Ollama (https://ollama.com) — free, private, works offline once a model is downloaded.
 
 SubPlayer talks to the Ollama program on this PC (http://127.0.0.1:11434) and uses it as a language teacher:
-  • word coach: meaning in this sentence, forms, 8 collocations, 5 example sentences at your level, prepositions, synonyms,
+  • word coach: meaning in this sentence, forms, 8 collocations, 5 example sentences at your level, prepositions, synonyms
+    (each with an example sentence),
     a memory tip — the sentences can be added to the word for review;
   • sentence explained: translation, word order, cases, tenses, separable verbs, idioms, and 3 sentences on the same pattern;
   • check my sentence: write your own sentence with the word, the teacher corrects and explains;
@@ -260,7 +261,10 @@ def word_prompt(word: str, lemma: str, sentence: str, lang: str, level: str, exp
             f'  "examples": 5 new {target} example sentences at level {level}, in different everyday situations, using the '
             f'collocations, each as {{"sentence": "...", "translation": "... in {ex}"}},\n'
             '  "grammar": the preposition or case the word goes with, or another grammar point it brings (one line, may be empty),\n'
-            '  "synonyms": up to 4 synonyms or near-synonyms, with the difference in a few words,\n'
+            f'  "synonyms": 4 to 6 synonyms or near-synonyms of the base form (the same part of speech, words a native speaker '
+            f'would really use instead), each as {{"word": "...", "meaning": "... in {ex}", "difference": "how it differs from '
+            f'„{lemma or word}“ — register, strength, use — in {ex}, a few words", "example": "a natural {target} sentence that '
+            f'uses this synonym", "translation": "the sentence in {ex}"}},\n'
             '  "opposite": an antonym if there is a natural one, else empty,\n'
             f'  "tip": one memory tip or the typical mistake learners make with this word, in {ex}.')
 

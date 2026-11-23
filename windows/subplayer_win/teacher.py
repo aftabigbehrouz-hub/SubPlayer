@@ -65,8 +65,11 @@ class TeacherDialog(QDialog):
             "✍ Writing", "A1 → C1")
     WORD_TABS = (0, 2, 4)                     # need a word; hidden when the teacher is opened for writing only
 
-    def __init__(self, main, word: str, lemma: str, sentence: str, lang: str, saved=None, tab: int = 0):
+    def __init__(self, main, word: str, lemma: str, sentence: str, lang: str, saved=None, tab: int = 0, at_ms: int = -1,
+                 video: str | None = None):
         super().__init__(main)
+        self.at_ms = at_ms if at_ms is not None else -1            # where the line is in its video (kept with the Notebook answer)
+        self.video_name = video                                    # None: the video open in the player
         # an ordinary window: it can be minimised or put beside the video, and the video keeps playing
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowMinimizeButtonHint |
                             Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
@@ -76,12 +79,12 @@ class TeacherDialog(QDialog):
         self.main, self.word, self.lemma, self.sentence, self.lang = main, word, lemma or word, sentence, lang
         self.saved = saved                                # SavedWord getter (to add sentences)
         self.result: dict = {}
-        self.setWindowTitle(f"Teacher — „{self.lemma}“" if self.lemma else "Teacher — writing")
+        self.setWindowTitle(f"Teacher — „{self.lemma}“" if self.lemma else ("Teacher — the line" if sentence else "Teacher — writing"))
         self.resize(820, 700)
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 16, 22, 16)
         head = QHBoxLayout()
-        t = QLabel(f"<span style='font-size:19pt;font-weight:700;color:{theme.CYAN}'>{html.escape(self.lemma or 'Teacher')}</span>"
+        t = QLabel(f"<span style='font-size:19pt;font-weight:700;color:{theme.CYAN}'>{html.escape(self.lemma or ('Paraphrase' if tab == 6 else 'Teacher'))}</span>"
                    f"<span style='color:{theme.DIM}'> &nbsp;· your teacher — Ollama on this PC or an online assistant</span>")
         head.addWidget(t, 1)
         head.addWidget(QLabel("Level", objectName="small"))
@@ -397,7 +400,8 @@ class TeacherDialog(QDialog):
                 if not self.view6.toPlainText():
                     self.view6.setHtml(self._ask_hint())
             elif i == 6 and not self.view7.toPlainText():
-                self.view7.setHtml(self._ask_hint())
+                hit = self.cache.get(self._lkey())
+                self.show_levels(hit, "") if hit else self.view7.setHtml(self._ask_hint())
             return
         if i == 0 and not self.result:
             self.coach()
@@ -412,7 +416,12 @@ class TeacherDialog(QDialog):
         elif i == 5:
             self.w_text.setFocus()
         elif i == 6 and not self.view7.toPlainText() and self.l_sent.text().strip():
-            self.levels()
+            hit = self.cache.get(self._lkey())
+            if hit:
+                self.show_levels(hit, "")
+                self.state.setText("From your earlier paraphrase · press “Say it at A1 … C1” to ask again")
+            else:
+                self.levels()
 
     def _start(self, view, mode: str, fn, waiting: str, q: str = "", sys_: str = ""):
         if self.source() != "ollama":                      # an online assistant: the question goes there, the answer is pasted
@@ -483,7 +492,10 @@ class TeacherDialog(QDialog):
         elif self._mode == "writing":
             self.show_writing(ollama.parse_json(res), res)
         elif self._mode == "levels":
-            self.show_levels(ollama.parse_json(res), res)
+            d = ollama.parse_json(res)
+            if d.get("versions"):
+                self.cache.put(self._lkey(), d)               # the same line opens with its paraphrases next time
+            self.show_levels(d, res)
         elif self._mode == "text" and (res or "").strip():
             from . import practice
             show_markdown(self._target_view, practice.clean_ai(res))      # **bold**, ## headings, lists — shown as such
@@ -540,17 +552,27 @@ class TeacherDialog(QDialog):
                 s, tr = (x.get("sentence", ""), x.get("translation", "")) if isinstance(x, dict) else (str(x), "")
                 h.append(f"<p style='margin:4px 0'><a href='say:{e(s)}' style='text-decoration:none'>🔊</a> "
                          f"<span style='font-size:12pt'>{e(s)}</span><br><span style='color:{theme.DIM}'>{expl(tr)}</span></p>")
-        syn = ollama.as_list(d.get("synonyms"))
-        if syn:
-            h.append(f"<p style='margin-top:12px'><span style='color:{theme.DIM}'>Similar: </span>"
-                     + " · ".join(e(str(x if not isinstance(x, dict) else ' — '.join(str(v) for v in x.values()))) for x in syn) + "</p>")
+        syns = synonyms_of(d)
+        if syns:
+            h.append(f"<p style='color:{theme.CYAN};font-weight:700;letter-spacing:1px;margin-top:14px'>SYNONYMS</p>"
+                     "<table cellspacing=0 cellpadding=3>")
+            for x in syns:
+                diff = " — ".join(t for t in (x["meaning"], x["difference"]) if t)
+                h.append(f"<tr><td style='color:{theme.MINT};font-weight:600;padding-right:14px'>≈ {e(x['phrase'])}</td>"
+                         f"<td>{expl(diff)}</td></tr>")
+                if x["example"]:
+                    h.append(f"<tr><td></td><td><a href='say:{e(x['example'])}' style='text-decoration:none'>🔊</a> "
+                             f"<span style='font-style:italic'>{e(x['example'])}</span>"
+                             + (f"<br><span style='color:{theme.DIM}'>{expl(x['translation'])}</span>" if x["translation"] else "")
+                             + "</td></tr>")
+            h.append("</table>")
         if d.get("opposite"):
             h.append(f"<p><span style='color:{theme.DIM}'>Opposite: </span>{e(str(d['opposite']))}</p>")
         if d.get("tip"):
             h.append(f"<p style='margin-top:12px;padding:8px;border-left:3px solid {theme.GOLD}'>💡 {expl(str(d['tip']))}</p>")
         h.append("</div>")
         self.view.setHtml("".join(h))
-        self.add_b.setEnabled(bool(exs or cols) and self.saved is not None)
+        self.add_b.setEnabled(bool(exs or cols or syns) and self.saved is not None)
 
     def add_examples(self):
         w = self.saved() if self.saved else None
@@ -562,11 +584,15 @@ class TeacherDialog(QDialog):
             if isinstance(x, dict) and x.get("sentence"):
                 tr = str(x.get("translation", ""))
                 items.append(Example(de=str(x["sentence"]).strip(), en="" if fa else tr, fa=tr if fa else ""))
+        items += synonym_examples(self.result, fa)                   # the synonyms' sentences go to Sentences too
         n = self.main.store.add_examples(w.id, items)
-        k = self.main.store.add_collocations(w.lang, w.lemma or w.text, collocations_of(self.result))
+        cols = collocations_of(self.result)
+        k = self.main.store.add_collocations(w.lang, w.lemma or w.text, cols)
+        ns = sum(1 for c in cols if c.get("kind") == "syn")
         self.main.after_change()
-        self.state.setText(f"Added to „{w.text}“: {n} sentence(s) for review and practice, {k} collocation(s) — see My Words"
-                           if n or k else "These sentences and collocations are already saved")
+        self.state.setText(f"Added to „{w.text}“: {n} sentence(s) for review and practice, {k} collocation(s) and synonym(s)"
+                           + (f" — {ns} synonym(s) among them" if ns else "") + " — see My Words"
+                           if n or k else "These sentences, collocations and synonyms are already saved")
         self.add_b.setEnabled(False)
 
     # ------------------------------------------------------------------ 4 exam questions on the word
@@ -596,6 +622,9 @@ class TeacherDialog(QDialog):
             return
         h = [f"<div style='font-size:11pt;line-height:150%'>"]
         for n, x in enumerate(self.qs, 1):
+            if x.passage:
+                h.append(f"<p style='margin:12px 0 0 0;padding:6px;color:{theme.DIM};border-left:3px solid {theme.CYAN}'>"
+                         f"📖 {e(x.passage)}</p>")
             h.append(f"<p style='margin:12px 0 4px 0'><b style='color:{theme.CYAN}'>{n}.</b> {e(x.question)}</p>")
             for o in x.options:
                 h.append(f"<p style='margin:0 0 0 22px'>○ {e(o)}</p>")
@@ -704,10 +733,13 @@ class TeacherDialog(QDialog):
             title = title[:160].rsplit(" ", 1)[0] + " …"
         from pathlib import Path
         from .store import Note
+        same_line = " ".join((self.sentence or "").split()).lower() == title.lower()
+        at = self.at_ms if (kind in ("line", "ask") or same_line) else -1
+        video = self.video_name if self.video_name is not None else (Path(self.main.video).name if getattr(self.main, "video", "") else "")
         try:
             self.main.store.add_note(Note(title=title, body=self._target_view.toHtml(), kind=kind, lang=self.lang,
-                                          lemma=self.lemma, source=self.source(),
-                                          video_name=Path(self.main.video).name if getattr(self.main, "video", "") else ""))
+                                          lemma=self.lemma, source=self.source(), video_name=video if (at >= 0 or kind != "writing") else "",
+                                          at_ms=at))
             self.state.setText(self.state.text() + " · kept in your Notebook ✓")
         except Exception:
             pass
@@ -818,7 +850,10 @@ class TeacherDialog(QDialog):
         except Exception:
             pass
 
-    # ------------------------------------------------------------------ 6 the sentence at A1 … C1
+    # ------------------------------------------------------------------ 6 the sentence at A1 … C1 (paraphrases)
+    def _lkey(self) -> str:
+        return f"levels|{self.lang}|{' '.join(self.l_sent.text().lower().split())}|{self.ex.currentData()}"
+
     def levels(self):
         t = self.l_sent.text().strip()
         if len(t.split()) < 2:
@@ -900,14 +935,55 @@ def exam_from_text(text: str, lang: str) -> dict:
 
 
 def collocations_of(d: dict) -> list[dict]:
-    """The collocations of a word-coach answer as [{phrase, meaning, example}]."""
+    """The collocations of a word-coach answer as [{phrase, meaning, example}], then its synonyms (kind "syn")."""
     out = []
     for c in ollama.as_list((d or {}).get("collocations")):
         if isinstance(c, dict) and c.get("phrase"):
-            out.append({"phrase": str(c["phrase"]), "meaning": str(c.get("meaning", "")), "example": str(c.get("example", ""))})
+            out.append({"phrase": str(c["phrase"]), "meaning": str(c.get("meaning", "")), "example": str(c.get("example", "")),
+                        "kind": "syn" if c.get("kind") == "syn" else ""})
         elif isinstance(c, str) and c.strip():
             ph, _, mean = c.partition(" — ") if " — " in c else c.partition(" - ")
             out.append({"phrase": ph.strip(), "meaning": mean.strip(), "example": ""})
+    have = {c["phrase"].lower() for c in out}
+    for x in synonyms_of(d):
+        if x["phrase"].lower() not in have:
+            mean = " — ".join(t for t in (x["meaning"], x["difference"]) if t)
+            out.append({"phrase": x["phrase"], "meaning": mean, "example": x["example"], "kind": "syn"})
+    return out
+
+
+def synonyms_of(d: dict) -> list[dict]:
+    """The synonyms of a word-coach answer as [{phrase, meaning, difference, example, translation}] — the JSON objects the
+    teacher asks for now, and the plain "word — difference" strings of older answers."""
+    out, seen = [], set()
+    for x in ollama.as_list((d or {}).get("synonyms")):
+        if isinstance(x, dict):
+            ph = str(x.get("word") or x.get("synonym") or x.get("phrase") or "").strip()
+            r = {"phrase": ph, "meaning": str(x.get("meaning", "")).strip(), "difference": str(x.get("difference", "")).strip(),
+                 "example": str(x.get("example") or x.get("sentence") or "").strip(), "translation": str(x.get("translation", "")).strip()}
+        elif isinstance(x, str) and x.strip():
+            t = x.strip()
+            ph, _, diff = t.partition(" — ") if " — " in t else (t.partition(" - ") if " - " in t else t.partition(":"))
+            r = {"phrase": ph.strip(" ≈*"), "meaning": "", "difference": diff.strip().strip("()"), "example": "", "translation": ""}
+        else:
+            continue
+        if r["phrase"] and r["phrase"].lower() not in seen:
+            seen.add(r["phrase"].lower())
+            out.append(r)
+    return out
+
+
+def synonym_examples(d: dict, fa: bool = False) -> list[Example]:
+    """The example sentences of the synonyms (and of "SYN:" lines) — they go into the word's Sentences panel."""
+    out = []
+    for x in synonyms_of(d):
+        if x["example"] and len(x["example"].split()) >= 3:
+            tr = x["translation"]
+            out.append(Example(de=x["example"], en="" if fa else tr, fa=tr if fa else ""))
+    for c in ollama.as_list((d or {}).get("collocations")):
+        if isinstance(c, dict) and c.get("kind") == "syn" and len(str(c.get("example", "")).split()) >= 3:
+            if not any(e.de == str(c["example"]).strip() for e in out):
+                out.append(Example(de=str(c["example"]).strip()))
     return out
 
 

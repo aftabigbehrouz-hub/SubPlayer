@@ -1,4 +1,4 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.9.1
+# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.9.2
 
 **New in Android 2.10** (versionCode 15 — the Windows 2.6.1 / 2.6.2 changes on the phone)
 - **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
@@ -26,6 +26,13 @@
 - **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
   ✕ pauses), and over other apps after Home (picture-in-picture).
 - Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
+**New in Windows 2.9.2**
+- **Synonyms with the collocations**: Teacher ▸ Word & collocations now also asks for 4–6 synonyms, each with how it differs and an example sentence. *＋ Add sentences & collocations* puts them under **Synonyms** in the Collocations panel, and their example sentences in the Sentences panel (marked ≈ synonym). Pasted answers with `SYN: synonym | meaning / difference | example` lines work too (Learn more asks for them), and ✎ Edit takes `≈ synonym | meaning | example`.
+- **Paraphrase (A1 → C1) everywhere**: in the player the ⇄ button beside the subtitle (or **P**, or right-click a transcript line) paraphrases the sentence that is playing; the word card has *Paraphrase the sentence*; My Words has *Paraphrase* on the Sentences panel and a ≈ A1‑C1 link after every sentence. A line you paraphrased before opens with its answer at once.
+- **Practice your way**: choose the **video** (or all), **which words** (All / tick some / only due ones), **Whole video text** (gaps and dictation from every line), how many questions, and **one or more question types** — Fill the gap, Dictation, der · die · das and the new **Exam questions** (your TestDaF / IELTS cards from AI lessons and the teacher, with their texts). Types are mixed.
+- **Notebook knows its word**: every answer shows the word or phrase and the video it belongs to; filter by word; *★ word* opens it in My Words, *▶ Play* plays the line. An opened word in My Words links to its answers (📓 in the Collocations panel).
+- **Reading texts in Review**: TestDaF / IELTS reading questions show their text above the question (in Review and Practice). New lessons write it on a `T:` line of each reading card; for older lesson cards the lesson's reading text is shown. Your own questions (✎ Write a question) can have a text too.
 
 **New in Windows 2.9.1**
 - **My Words ▸ 🎬 Find in all my videos**: type any word or phrase (saved or not) and press Enter — every subtitle line of your videos that uses it, in all its forms (bringen: bringt, brachte, gebracht, bringt … mit), with the video and the moment; double-click or ▶ Play this moment. The window has its own search box, Deutsch / English, and **Folders…** to add a drive or a folder of series and films (searched deeper). Always searched: SubPlayer's subtitles, Videos, Downloads and the folders of your recent videos.
