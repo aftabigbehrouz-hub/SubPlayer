@@ -467,7 +467,7 @@ class Main(QMainWindow):
                         ("F", self.toggle_fullscreen), ("F11", self.toggle_fullscreen),
                         ("G", lambda: self.shift_subs(-100)), ("H", lambda: self.shift_subs(100)), ("V", lambda: self.hide_btn.click()),
                         ("Ctrl+T", lambda: self.trl_btn.click()), ("T", lambda: self.panel_tab(1 if self.panel_stack.currentIndex() == 0 else 0, show=True)),
-                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("K", lambda: self.lvl_btn.click()), ("E", lambda: self.edit_cue()), ("P", lambda: self.paraphrase_line()), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
+                        ("M", self.toggle_mute), ("R", self.cycle_repeat), ("K", lambda: self.lvl_btn.click()), ("E", lambda: self.edit_cue()), ("P", lambda: self.paraphrase_line()), ("Y", lambda: self.record_compare()), ("[", lambda: self.step_speed(-1)), ("]", lambda: self.step_speed(1)),
                         ("Ctrl+=", lambda: self.step_sub_size(1)), ("Ctrl++", lambda: self.step_sub_size(1)), ("Ctrl+-", lambda: self.step_sub_size(-1))):
             QShortcut(QKeySequence(key), page, activated=fn, context=Qt.WidgetWithChildrenShortcut)
         self.ticker = QTimer(self, interval=40, timeout=self._tick)
@@ -586,7 +586,10 @@ class Main(QMainWindow):
         self.para_btn = ibtn("paraphrase", "Paraphrase this line (P): the same meaning said at A1, A2, B1, B2 and C1 — the teacher's "
                                            "A1 → C1, with translations. The video pauses; a line you paraphrased before opens at once.",
                              lambda: self.paraphrase_line(), size=17, color=theme.CYAN)
-        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.lvl_btn, self.para_btn, self.edit_btn, self.trs_btn):
+        self.rec_btn = ibtn("mic", "Record yourself and compare (Y): the line plays from the video, you say it, then you hear the "
+                                   "original again and yourself right after it. Esc stops.", lambda: self.record_compare(), size=17,
+                            color=theme.MAGENTA)
+        for b in (self.size_btn, self.hide_btn, self.trl_btn, self.lvl_btn, self.rec_btn, self.para_btn, self.edit_btn, self.trs_btn):
             tools.addWidget(b)
         tools.addStretch(1)
         sl.addLayout(tools)
@@ -1374,7 +1377,9 @@ class Main(QMainWindow):
         self._ab_label()
 
     def _escape(self):
-        if self.isFullScreen():
+        if getattr(self, "comparer", None) is not None and self.comparer.busy:
+            self.comparer.cancel()
+        elif self.isFullScreen():
             self.toggle_fullscreen()
         else:
             self.clear_ab()
@@ -1404,6 +1409,8 @@ class Main(QMainWindow):
             self._playing = playing
             self.play_btn.setIcon(icons.icon("pause" if playing else "play", "#FFFFFF", 26))
             self._update_motion()
+        if getattr(self, "comparer", None) is not None and self.comparer.busy:
+            return                                         # record & compare drives the player now (loops, pauses wait)
         if self.shadow_resume and time.monotonic() >= self.shadow_resume:
             self.shadow_resume = 0
             if not self._loop_finished() and self.a >= 0:
@@ -1916,7 +1923,7 @@ class Main(QMainWindow):
         if eng == "windows":
             return self._speak_windows(text, slow, lang)
         from . import voice
-        if eng == "piper" and not voice.piper_ready(lang):
+        if eng == "piper" and not voice.piper_ready(lang, self.settings):
             self._speak_windows(text, slow, lang)
             self.offer_piper(lang)
             return
@@ -1936,8 +1943,8 @@ class Main(QMainWindow):
     def offer_piper(self, lang: str):
         """Piper and the voice for this language are downloaded once (about 136 MB), then read offline."""
         from . import voice
-        missing = voice.piper_missing(lang) if lang != "all" else \
-            voice.piper_missing("de") + [a for a in voice.piper_missing("en") if a.id != voice.PIPER.id]
+        missing = voice.piper_missing(lang, self.settings) if lang != "all" else \
+            voice.piper_missing("de", self.settings) + [a for a in voice.piper_missing("en", self.settings) if a.id != voice.PIPER.id]
         if not missing or self.busy:
             return
         mb = sum(a.size_mb for a in missing)
@@ -2734,9 +2741,31 @@ class Main(QMainWindow):
         m.addAction("Play this line", lambda: self._transcript_click(it))
         m.addAction("Loop this line", lambda: self._transcript_loop(it))
         m.addSeparator()
+        m.addAction("Record myself and compare  (Y)", lambda: self.record_compare(k))
         m.addAction("Paraphrase this line (A1 → C1)  (P)", lambda: self.paraphrase_line(k))
         m.addAction("Correct this line…  (E)", lambda: self.edit_cue(k))
         m.exec(self.transcript.viewport().mapToGlobal(pos))
+
+    def record_compare(self, i: int | None = None):
+        """Shadowing with your own voice: the line (or the A–B part) from the video, then you, then both to compare."""
+        if not self.video:
+            self.msg("Open a video first")
+            return
+        from .compare import RecordCompare
+        if getattr(self, "comparer", None) is None:
+            self.comparer = RecordCompare(self)
+        if i is None and self.a >= 0 and self.b > self.a:
+            a, b = self.a, self.b                           # the A–B part or the line that loops now
+        elif self.cues:
+            if i is None:
+                i = max(0, subtitles.index_before(self.cues, self.cpos()))
+            pa, pb = self.parts()[min(i, len(self.cues) - 1)]
+            a, b = self.cues[pa].start_ms + self.sub_offset, self.cues[pb].end_ms + self.sub_offset + 150
+        else:
+            self.msg("Record and compare needs subtitles, or a part set with A and B")
+            return
+        self.clear_ab()                                     # loop / shadowing pause while you record
+        self.comparer.start(a, b)
 
     def paraphrase_line(self, i: int | None = None):
         """The teacher's A1 → C1 on the whole sentence that is playing (or line i): the same meaning at five levels."""
@@ -2969,7 +2998,8 @@ def selftest(out: str) -> int:
     for mod in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "numpy", "PySide6.QtMultimedia", "PySide6.QtTextToSpeech",
                 "PySide6.QtSvg", "cryptography", "requests", "socks", "urllib3.contrib.socks", "subplayer_win.discover",
                 "subplayer_win.mediathek", "subplayer_win.netcfg", "subplayer_win.english", "subplayer_win.study",
-                "subplayer_win.library", "subplayer_win.levels", "subplayer_win.lessons", "edge_tts", "aiohttp", "subplayer_win.voice"):
+                "subplayer_win.library", "subplayer_win.levels", "subplayer_win.lessons", "edge_tts", "aiohttp", "subplayer_win.voice",
+                "subplayer_win.piper_catalog", "subplayer_win.piper_ui", "subplayer_win.compare"):
         try:
             __import__(mod)
             lines.append(f"OK   {mod}")
@@ -3016,6 +3046,39 @@ def selftest(out: str) -> int:
             lines.append(f"OK   Piper offline voice ({f.stat().st_size} bytes of wav)")
         except Exception as e:
             lines.append(f"INFO Piper offline voice: {e.__class__.__name__}: {e}")
+        strict = os.environ.get("SUBPLAYER_SELFTEST_PIPER") == "strict"   # a test build: the catalogue must work
+        try:  # the Piper catalogue from the packaged app: read the list, download the smallest German voice, read with it
+            from . import piper_catalog as pc, voice
+            voices, _, from_copy = pc.fetch_catalogue(offline_ok=False)
+            fams = {v.family for v in voices}
+            lines.append(f"OK   Piper catalogue: {len(voices)} voices in {len(fams)} languages")
+            small = min((v for v in voices if v.family == "de" and v.key != "de_DE-thorsten-high"), key=lambda v: v.size_bytes)
+            got = []
+            pc.install(small, lambda d, t: got.append(d))
+            if not pc.is_installed(small):
+                raise IOError("installed voice not found")
+            st = {"voice_piper_de": small.key}
+            text = "Die Versicherung beziffert den Schaden auf achttausend Euro."
+            a = voice.piper_file(text, "de", settings=st)
+            b = voice.piper_file(text, "de", settings={})
+            if a == b or voice.piper_model(st, "de")[1] != small.model_path:
+                raise ValueError("the chosen voice and the bundled voice share a cache file")
+            lines.append(f"OK   Piper catalogue voice {small.key} downloaded ({small.size_bytes // 1_000_000} MB, checksum ok) "
+                         f"and read ({a.stat().st_size} bytes of wav; cache separate from the bundled voice)")
+            pc.remove(small.key)
+            if pc.model_path(small.key):
+                raise IOError("voice not removed")
+            lines.append("OK   Piper catalogue voice removed")
+        except Exception as e:
+            if strict:
+                ok = False
+            lines.append(f"{'FAIL' if strict else 'INFO'} Piper catalogue: {e.__class__.__name__}: {e}")
+    want = os.environ.get("SUBPLAYER_SELFTEST_DATA")          # a test build: the data folder it must use (portable mode)
+    lines.append(f"INFO data folder: {paths.data_dir()}")
+    if want:
+        same = Path(want).resolve() == paths.data_dir().resolve()
+        ok = ok and same
+        lines.append(("OK   " if same else "FAIL ") + f"data folder is {want}")
     try:
         cues = subtitles.parse_any('<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="10:00:01.000" end="10:00:02.000">'
                                    'Guten Tag</p></div></body></tt>')

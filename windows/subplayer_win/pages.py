@@ -619,7 +619,7 @@ class WordsPage(QWidget):
         v.addWidget(QLabel("Audio in the file, read by", objectName="small"))
         eng = QComboBox()
         eng.addItem("Microsoft natural voice (online)", "edge")
-        eng.addItem("Piper natural voice (offline)" + ("" if voice.piper_ready("de") else " — needs a download once"), "piper")
+        eng.addItem("Piper natural voice (offline)" + ("" if voice.piper_ready("de", self.main.settings) else " — needs a download once"), "piper")
         eng.addItem("No audio in the file (the browser's own voice reads)", "none")
         cur = self.main.settings.get("voice_engine", "edge")
         eng.setCurrentIndex(max(0, eng.findData("piper" if cur == "piper" else "edge")))
@@ -637,9 +637,9 @@ class WordsPage(QWidget):
         if not dlg.exec():
             return
         engine = eng.currentData()
-        if engine == "piper" and (voice.piper_missing("de") or voice.piper_missing("en")):
+        if engine == "piper" and (voice.piper_missing("de", self.main.settings) or voice.piper_missing("en", self.main.settings)):
             langs = {w.lang for w in self.words}
-            if any(voice.piper_missing(lg) for lg in langs):
+            if any(voice.piper_missing(lg, self.main.settings) for lg in langs):
                 self.main.offer_piper("all")
                 self.main.msg("After the offline voices are downloaded, export the word book again", 12000)
                 return

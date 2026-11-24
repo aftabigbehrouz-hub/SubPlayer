@@ -4,7 +4,10 @@ Natural voices for reading words and sentences aloud.
 - "edge":    Microsoft's natural (neural) voices — the ones Edge reads with. Free, no key, needs the internet. Through the
              `edge-tts` package; the proxy in Settings ▸ Network is used.
 - "piper":   Piper — free, offline neural voices. Piper and one German and one English voice are downloaded once
-             (from this app's data-v1 release, SHA-checked), then work without internet.
+             (from this app's data-v1 release, SHA-checked), then work without internet. Any other voice of the Piper
+             catalogue (all languages and qualities — Settings ▸ Voice ▸ Piper voices) can be downloaded and chosen per
+             language (settings "voice_piper_<language>" = the voice's key; empty = the voice downloaded with Piper).
+             Piper only reads words and sentences when asked — the video's own sound is never replaced.
 - "windows": the voices installed in Windows (as before).
 Each spoken text is kept as a small file (speech folder), so repeating it is instant and works offline.
 """
@@ -49,12 +52,41 @@ def edge_voice(settings: dict, lang: str) -> str:
     return v if v else EDGE_VOICES[lang][2 if lang == "de" else 0][0]
 
 
-def piper_ready(lang: str) -> bool:
-    return downloads.is_ready(PIPER) and downloads.is_ready(PIPER_VOICES["en" if lang == "en" else "de"])
+def _family(lang: str) -> str:
+    return (lang or "de").split("-")[0].split("_")[0].lower()
 
 
-def piper_missing(lang: str) -> list:
-    return [a for a in (PIPER, PIPER_VOICES["en" if lang == "en" else "de"]) if not downloads.is_ready(a)]
+def piper_model(settings: dict | None, lang: str) -> tuple[str, Path] | None:
+    """(cache id, model file) of the Piper voice that reads this language: the voice chosen in Settings, else the voice
+    downloaded with Piper (German / English), else any downloaded catalogue voice of the language. None: no voice."""
+    from . import piper_catalog
+    fam = _family(lang)
+    key = (settings or {}).get(f"voice_piper_{fam}", "")
+    if key:
+        m = piper_catalog.model_path(key)
+        if m:
+            return f"{key}@{m.stat().st_size}", m            # the voice and its file: a new download is a new voice
+    legacy = PIPER_VOICES.get(fam)
+    if legacy and downloads.is_ready(legacy):
+        return legacy.id, downloads.ready_path(legacy)       # as before 2.10 — its saved audio stays valid
+    for k, m in piper_catalog.installed_models().items():
+        if piper_catalog.voice_family(k) == fam:
+            return f"{k}@{m.stat().st_size}", m
+    return None
+
+
+def piper_ready(lang: str, settings: dict | None = None) -> bool:
+    return downloads.is_ready(PIPER) and piper_model(settings, lang) is not None
+
+
+def piper_missing(lang: str, settings: dict | None = None) -> list:
+    """What must be downloaded before Piper can read this language (the engine, and the bundled German / English voice
+    when no other voice of the language is there). Other languages: only the engine — their voices come from the catalogue."""
+    out = [] if downloads.is_ready(PIPER) else [PIPER]
+    fam = _family(lang)
+    if fam in PIPER_VOICES and piper_model(settings, lang) is None:
+        out.append(PIPER_VOICES[fam])
+    return out
 
 
 def _cache(engine: str, voice: str, text: str, slow: bool, ext: str) -> Path:
@@ -88,20 +120,29 @@ def edge_file(text: str, voice: str, slow: bool = False) -> Path:
     return f
 
 
-def piper_file(text: str, lang: str, slow: bool = False) -> Path:
-    a = PIPER_VOICES["en" if lang == "en" else "de"]
-    f = _cache("piper", a.id, text, slow, "wav")
+def piper_file(text: str, lang: str, slow: bool = False, settings: dict | None = None, model: tuple[str, Path] | None = None) -> Path:
+    """Text → wav with Piper (the language's voice, or [model] = (cache id, model file))."""
+    model = model or piper_model(settings, lang)
+    if model is None:
+        raise FileNotFoundError("piper voice")
+    vid, onnx = model
+    f = _cache("piper", vid, text, slow, "wav")
     if f.exists() and f.stat().st_size > 0:
         return f
     exe = downloads.ready_path(PIPER)
-    model = downloads.ready_path(a)
+    if not exe.exists():
+        raise FileNotFoundError("piper")
     tmp = f.with_suffix(".part.wav")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    r = subprocess.run([str(exe), "--model", str(model), "--output_file", str(tmp), "--length_scale", "1.3" if slow else "1.0",
+    r = subprocess.run([str(exe), "--model", str(onnx), "--output_file", str(tmp), "--length_scale", "1.3" if slow else "1.0",
                         "--sentence_silence", "0.25"], input=text.replace("\n", " ").encode("utf-8"), capture_output=True,
                        timeout=120, cwd=str(exe.parent), creationflags=flags)
     if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 100:
-        raise IOError("Piper could not read it: " + (r.stderr.decode("utf-8", "replace")[-300:] or f"exit {r.returncode}"))
+        tmp.unlink(missing_ok=True)
+        err = r.stderr.decode("utf-8", "replace")[-300:] or f"exit {r.returncode}"
+        if "phoneme" in err.lower() or "unsupported" in err.lower():
+            err += " — this voice may need a newer Piper than the one SubPlayer uses; choose another voice"
+        raise IOError("Piper could not read it: " + err)
     tmp.replace(f)
     return f
 
@@ -110,14 +151,14 @@ def audio_file(settings: dict, text: str, lang: str, slow: bool = False) -> Path
     """The spoken text as a file, with the chosen natural engine. Raises if it can't (the caller falls back to Windows)."""
     eng = settings.get("voice_engine", "edge")
     if eng == "piper":
-        if not piper_ready(lang):
+        if not piper_ready(lang, settings):
             raise FileNotFoundError("piper")
-        return piper_file(text, lang, slow)
+        return piper_file(text, lang, slow, settings)
     try:
         return edge_file(text, edge_voice(settings, lang), slow)
     except Exception:
-        if piper_ready(lang):              # Microsoft not reachable (network, filter, 403): the offline voice reads it
-            return piper_file(text, lang, slow)
+        if piper_ready(lang, settings):    # Microsoft not reachable (network, filter, 403): the offline voice reads it
+            return piper_file(text, lang, slow, settings)
         raise
 
 

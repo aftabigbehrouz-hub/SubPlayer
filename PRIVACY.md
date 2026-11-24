@@ -1,6 +1,6 @@
 # SubPlayer — Privacy Policy
 
-*Last updated: 14 November 2026 · applies to SubPlayer for Android (Google Play, Cafe Bazaar, Myket and direct download) and SubPlayer for Windows*
+*Last updated: 24 November 2026 · applies to SubPlayer for Android (Google Play, Cafe Bazaar, Myket and direct download) and SubPlayer for Windows*
 
 ## Who is responsible
 
@@ -19,6 +19,9 @@ Some optional features send data directly from your device to a service you choo
 - Subtitles made on your device (offline speech recognition), saved words and phrases, added example sentences,
   review and practice progress, settings.
 - Your API keys and GitHub token, if you enter them. They are stored only in the app's private storage.
+- Windows: your voice when you use **Record yourself and compare** (microphone). Only your last attempt is kept, in
+  SubPlayer's data folder (recordings), and it is overwritten by the next one. It is never uploaded.
+- Windows: the Piper voices you download, and everything they read aloud — Piper works entirely on your PC.
 
 Uninstalling the app (or "Clear storage" in Android settings) deletes all of this.
 
@@ -27,6 +30,8 @@ Uninstalling the app (or "Clear storage" in Android settings) deletes all of thi
 | Feature | What is sent | Sent to | Their privacy policy |
 |---|---|---|---|
 | **Downloads** of dictionaries and speech models | A normal file request (your IP address) | GitHub (Microsoft) | https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement |
+| **Piper voices** (Windows, Settings ▸ Voice ▸ Piper voices) | A normal file request for the voice list, a voice's sample, model card or files (your IP address) | Hugging Face (rhasspy/piper-voices) | https://huggingface.co/privacy |
+| **Microsoft natural voices** (Windows, when chosen in Settings ▸ Voice) | The word or sentence to be read aloud | Microsoft (the voice service Edge reads with) | https://privacy.microsoft.com/privacystatement |
 | **Online subtitles** (optional, you add your own key) | The video's **audio** | Groq or OpenAI, whichever you choose | https://groq.com/privacy-policy · https://openai.com/policies/privacy-policy |
 | **Translate sentence / phrase** | The sentence or phrase | Google Translate, or MyMemory if Google is unreachable | https://policies.google.com/privacy · https://mymemory.translated.net/doc/en/tos.php |
 | **Real recordings** in the dictionary | A file request | Wikimedia Commons | https://foundation.wikimedia.org/wiki/Policy:Privacy_policy |
@@ -68,4 +73,4 @@ If this policy changes, the new version is published at this address with a new 
 ویدئوها، زیرنویس‌ها، واژه‌های ذخیره‌شده و پیشرفت مرور فقط روی گوشی شما می‌مانند. فقط وقتی خودتان از قابلیت‌های
 اختیاری استفاده کنید، داده مستقیم از گوشی به سرویسی که انتخاب کرده‌اید می‌رود: زیرنویس آنلاین (صدای ویدئو به Groq یا OpenAI
 با کلید خودتان)، ترجمهٔ جمله (Google یا MyMemory)، همگام‌سازی (به Gist خصوصی در حساب GitHub خودتان) و دانلود
-واژه‌نامه و مدلها (از GitHub). پرداخت اشتراک در کافه‌بازار یا مایکت از طریق خود آن فروشگاه انجام می‌شود.
+واژه‌نامه و مدلها (از GitHub) و صداهای Piper (از Hugging Face). صدای ضبط‌شدهٔ شما در «ضبط و مقایسه» فقط روی رایانهٔ خودتان می‌ماند. پرداخت اشتراک در کافه‌بازار یا مایکت از طریق خود آن فروشگاه انجام می‌شود.

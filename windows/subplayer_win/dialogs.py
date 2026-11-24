@@ -451,15 +451,21 @@ class SettingsDialog(QDialog):
             vv.addLayout(r)
             self.v_combos[lg] = c
         r = QHBoxLayout()
-        miss = voice.piper_missing("de") + [a for a in voice.piper_missing("en") if a.id != "piper-win"]
-        self.v_piper = QLabel("Offline voices (Piper): " + ("✓ ready" if not miss else
-                              "not downloaded — " + ", ".join(f"{a.label} {a.size_mb} MB" for a in miss)), objectName="small")
+        self.v_piper = QLabel("", objectName="small")
         self.v_piper.setWordWrap(True)
         r.addWidget(self.v_piper, 1)
+        self._piper_label()
+        miss = voice.piper_missing("de", s) + [a for a in voice.piper_missing("en", s) if a.id != "piper-win"]
         if miss:
             b = QPushButton("Download offline voices")
+            b.setToolTip("Piper and the German (Thorsten) and English (Lessac) voices — about 250 MB, once")
             b.clicked.connect(lambda: (self.accept(), main.offer_piper("all")))
             r.addWidget(b)
+        pv = QPushButton("Piper voices …")
+        pv.setToolTip("All Piper voices — every language and quality: listen, download, remove, and choose the voice that "
+                      "reads each language")
+        pv.clicked.connect(self._piper_voices)
+        r.addWidget(pv)
         clr = QPushButton("Clear saved audio")
         clr.setToolTip("Spoken words are kept so they repeat instantly; this deletes them (they are made again when needed)")
         clr.clicked.connect(lambda: main.msg(f"{voice.clear_cache()} saved audio file(s) deleted"))
@@ -727,6 +733,28 @@ class SettingsDialog(QDialog):
         if col.isValid():
             self.set_theme(key, col.name().upper())
 
+    def _piper_label(self):
+        from . import piper_catalog, voice
+        s = self.main.settings
+        parts = []
+        for lg, name in (("de", "German"), ("en", "English")):
+            m = voice.piper_model(s, lg)
+            parts.append(f"{name}: " + ((Path(m[1]).stem.split("-")[1] if "-" in Path(m[1]).stem else Path(m[1]).stem) if m else "—"))
+        n = len(piper_catalog.installed_models())
+        ready = voice.downloads.is_ready(voice.PIPER)
+        self.v_piper.setText("Offline voices (Piper): " + ("" if ready else "engine not downloaded · ") + " · ".join(parts)
+                             + (f" · {n} voice(s) from the Piper catalogue downloaded" if n else ""))
+
+    def _piper_voices(self):
+        from .piper_ui import PiperVoicesDialog
+        PiperVoicesDialog(self.main, self).exec()
+        self._piper_label()
+        self.v_eng.blockSignals(True)
+        self.v_eng.setCurrentIndex(max(0, self.v_eng.findData(self.main.settings.get("voice_engine", "edge"))))
+        self.v_eng.blockSignals(False)
+        for c in self.v_combos.values():
+            c.setEnabled(self.main.settings.get("voice_engine", "edge") == "edge")
+
     def _voice_changed(self, *_):
         s = self.main.settings
         s["voice_engine"] = self.v_eng.currentData()
@@ -737,7 +765,7 @@ class SettingsDialog(QDialog):
             c.setEnabled(s["voice_engine"] == "edge")
         if s["voice_engine"] == "piper":
             from . import voice
-            if voice.piper_missing("de") or voice.piper_missing("en"):
+            if voice.piper_missing("de", s) or voice.piper_missing("en", s):
                 self.main.msg("Piper needs a download once — press “Download offline voices”", 9000)
 
     def set_motion(self, on):
