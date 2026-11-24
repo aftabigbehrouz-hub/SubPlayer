@@ -94,6 +94,14 @@ QCheckBox::indicator:checked {{ background: {VIOLET}; }}
 
 /* ---------- lists, text views ---------- */
 QTextBrowser {{ background: transparent; border: none; }}
+QTableWidget {{ background: rgba(255,255,255,0.025); alternate-background-color: rgba(255,255,255,0.045); color: {LIGHT};
+    border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; gridline-color: transparent; outline: none; }}
+QTableWidget::item {{ padding: 4px 8px; border: none; }}
+QTableWidget::item:selected {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(139,92,255,0.45), stop:1 rgba(62,240,255,0.12)); color: #FFFFFF; }}
+QHeaderView {{ background: transparent; border: none; }}
+QHeaderView::section {{ background: #141228; color: {DIM}; border: none; border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 8px; font-weight: 600; }}
+QTableCornerButton::section {{ background: transparent; border: none; }}
 QListWidget {{ background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 4px; outline: none; }}
 QListWidget::item {{ padding: 10px 10px; border-radius: 12px; margin: 2px; }}
 QListWidget::item:hover {{ background: rgba(255,255,255,0.05); }}

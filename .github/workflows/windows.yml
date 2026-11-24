@@ -6,12 +6,17 @@ on:
     # a release is made when the version number changes (windows/subplayer_win/__init__.py), or by hand
     paths: ['windows/subplayer_win/__init__.py']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the zip as the public "windows" release (off: a test build — the zip is kept as a workflow artifact only)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: windows-release
+  group: windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -44,11 +49,22 @@ jobs:
       - name: Self-test the packaged app
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
-          $env:SUBPLAYER_SELFTEST_PIPER = "1"
+          # a test build (not published) must also download and use a voice from the Piper catalogue
+          $env:SUBPLAYER_SELFTEST_PIPER = $(if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish }}" -ne "true") { "strict" } else { "1" })
           $env:SUBPLAYER_HOME = "$PWD\selftest-home"
           $p = Start-Process -FilePath dist\SubPlayer\SubPlayer.exe -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { throw "self-test failed" }
+      - name: Self-test portable mode
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $data = "$PWD\dist\SubPlayer\SubPlayer data"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:SUBPLAYER_SELFTEST_DATA = $data
+          $p = Start-Process -FilePath dist\SubPlayer\SubPlayer.exe -ArgumentList "--selftest", "$PWD\selftest-portable.txt" -Wait -PassThru
+          Get-Content selftest-portable.txt
+          Remove-Item -Recurse -Force $data
+          if ($p.ExitCode -ne 0) { throw "portable self-test failed" }
       - name: Zip
         run: |
           Copy-Item ..\README.md dist\SubPlayer\README.md
@@ -57,7 +73,19 @@ jobs:
           "$h  SubPlayer-Windows.zip" | Out-File -Encoding ascii SubPlayer-Windows.sha256
           Get-Content SubPlayer-Windows.sha256
           (Get-Item SubPlayer-Windows.zip).Length
+      - name: Keep the test build (not published)
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubPlayer-Windows-test
+          path: |
+            windows/SubPlayer-Windows.zip
+            windows/SubPlayer-Windows.sha256
+            windows/selftest.txt
+            windows/selftest-portable.txt
+          retention-days: 14
       - name: Publish release "windows"
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

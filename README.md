@@ -1,4 +1,4 @@
-# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.9.2
+# SubPlayer — learn German (and English) with your own videos · Android 2.10 + Windows 2.10
 
 **New in Android 2.10** (versionCode 15 — the Windows 2.6.1 / 2.6.2 changes on the phone)
 - **Teacher** (🎓 on a word in My Words, or in the word card of the player): the answer comes from ChatGPT, Gemini, DeepSeek, Grok, **GapGPT** (gapgpt.app/chat) or any assistant (Copy only). Five jobs, as on Windows: explain the word (8 collocations, 5 sentences — saved to the word on Paste), explain the sentence, check my sentence, ask a question, 6 TestDaF questions (into Review).
@@ -26,6 +26,21 @@
 - **The video keeps playing:** on My Words, Discover, Study and Practice in a small window (▶/⏸, −5 s, back to the player,
   ✕ pauses), and over other apps after Home (picture-in-picture).
 - Answers copied from ChatGPT & co. are cleaned before reading (`&#x20;`, a backslash at every line end, `\*` escapes, ``` fences); a JSON answer pasted into Add sentences is sorted into collocations and sentences. Broken collocation lines from such pastes are removed once.
+
+**New in Windows 2.10** — the video's own sound stays the model; Piper is an optional study voice
+- **Piper voices for every language** (Settings ▸ Voice ▸ *Piper voices …*): the whole current catalogue of the Piper project — all languages, all qualities (x-low, low, medium, high). Search, filter by language and quality, **▶ Listen** before downloading (the project's sample, or a sentence read by a voice you have), **⬇ Download** with progress and **✕ Cancel**, **🗑 Remove**, and **★ Use for <language>** to choose the voice that reads each language. Each voice shows its language, locale, speakers, size and licence (from its model card).
+- Piper reads only what you ask for — 🔊 on a word, a sentence, an example or a translation, the word card's Speak, the word book's audio — never the video's dialogue. The actors' voices are never replaced or imitated.
+- Spoken audio is kept per voice, so changing a voice never plays audio of another one. Voices you already had (Thorsten, Lessac) keep working and keep their saved audio.
+- **Record yourself and compare** (🎙 beside the subtitle, **Y**, or right-click a transcript line): the line plays from the video, you say it while SubPlayer records, then you hear the original again and yourself right after it. Works with the A–B part or the looping line too; Esc stops. Only your last attempt is kept, on your PC.
+
+**Piper voices — how to**
+1. Settings ▸ Voice ▸ **Piper voices …** (the list is read from the Piper project when the window opens; offline, the list saved last time is shown).
+2. Choose a language and quality, select a voice, **▶ Listen**. **⬇ Download** it (20–120 MB; the Piper engine, 22 MB, comes along the first time).
+3. **★ Use for German** (or its language). To read with Piper at all, choose *Natural — Piper (offline)* as the voice in Settings ▸ Voice (the window offers it).
+- **Offline:** downloaded voices, everything they read, record & compare. **Needs the internet:** the voice list, samples, model cards and downloads (from huggingface.co/rhasspy/piper-voices), and Microsoft's voices.
+- **Storage:** voices are in SubPlayer's data folder — `%APPDATA%\SubPlayer\assets\piper\catalog`, or `SubPlayer data\assets\piper\catalog` next to SubPlayer.exe in portable mode. x-low/low voices ≈ 20–60 MB, medium ≈ 60 MB, high ≈ 110 MB. Any PC that plays video runs them; a sentence takes well under a second on a normal CPU (no GPU needed).
+- **Licences:** the voices are made by the Piper project and its contributors (github.com/OHF-Voice/piper1-gpl; voices: huggingface.co/rhasspy/piper-voices). SubPlayer does not include or redistribute them — you download each one from the Piper project. Every voice keeps the licence of the dataset it was trained on (shown in the window and in its MODEL_CARD); some are for non-commercial use only — check before sharing audio you made with a voice.
+- A few of the newest voices may need a newer Piper engine than the one SubPlayer uses; SubPlayer says so when such a voice can't read — choose another voice of that language.
 
 **New in Windows 2.9.2**
 - **Synonyms with the collocations**: Teacher ▸ Word & collocations now also asks for 4–6 synonyms, each with how it differs and an example sentence. *＋ Add sentences & collocations* puts them under **Synonyms** in the Collocations panel, and their example sentences in the Sentences panel (marked ≈ synonym). Pasted answers with `SYN: synonym | meaning / difference | example` lines work too (Learn more asks for them), and ✎ Edit takes `≈ synonym | meaning | example`.
